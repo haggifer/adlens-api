@@ -1,0 +1,39 @@
+{
+    "name": "adlens-api",
+    "version": "0.1.0",
+    "private": true,
+    "description": "AdLens backend — Firebase Functions v2 (Express API + Gemini AI task workers)",
+    "type": "module",
+    "main": "dist/index.js",
+    "engines": {
+        "node": "20"
+    },
+    "scripts": {
+        "build": "tsc && tsc-alias",
+        "watch": "tsc-alias -w & tsc --watch",
+        "serve": "npm run build && firebase emulators:start --only functions,firestore,auth,storage",
+        "deploy": "firebase deploy --only functions",
+        "lint": "eslint .",
+        "format": "prettier --write ."
+    },
+    "dependencies": {
+        "@google/genai": "^1.0.0",
+        "cors": "^2.8.6",
+        "express": "^5.1.0",
+        "firebase-admin": "^13.0.0",
+        "firebase-functions": "^6.0.0",
+        "helmet": "^8.3.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.0.0",
+        "@types/cors": "^2.8.19",
+        "@types/express": "^5.0.0",
+        "@types/node": "^20.0.0",
+        "adlens-types": "git+https://github.com/haggifer/adlens-types.git",
+        "eslint": "^9.0.0",
+        "prettier": "^3.9.5",
+        "tsc-alias": "^1.8.10",
+        "typescript": "^5.7.0",
+        "typescript-eslint": "^8.0.0"
+    }
+}
