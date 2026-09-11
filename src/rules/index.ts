@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 
 import type { Advisory, AnalysisSettings, Finding, MetadataCheck } from 'adlens-shared'
 
-import { resolveRef, ruleSetSchema, type Rule, type RuleSet } from '@/rules/schema'
+import { resolveRef, ruleSetSchema, type Rule, type RuleSet } from './schema'
 
 const ASPECT_RATIO_TOLERANCE = 0.02
 
@@ -14,7 +14,7 @@ export const loadRuleSet = (): RuleSet => {
         return cached
     }
 
-    const path = fileURLToPath(new URL('./rules.json', import.meta.url))
+    const path = join(__dirname, 'rules.json')
     cached = ruleSetSchema.parse(JSON.parse(readFileSync(path, 'utf8')))
 
     return cached
