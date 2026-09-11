@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module'
 import { HealthController } from './health.controller'
 import { JobsModule } from './jobs/jobs.module'
 import { ProfileModule } from './profile/profile.module'
+import { RealtimeModule } from './realtime/realtime.module'
 
 @Module({
     imports: [
@@ -17,6 +18,7 @@ import { ProfileModule } from './profile/profile.module'
         AuthModule,
         JobsModule,
         ProfileModule,
+        RealtimeModule,
     ],
     controllers: [HealthController],
 })
