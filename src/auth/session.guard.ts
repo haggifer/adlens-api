@@ -7,21 +7,20 @@ export interface AuthenticatedRequest extends Request {
     userId: string
 }
 
-// uid comes from the verified token only, never from the request body.
+// Verifies the Better Auth session on every /v1 request; uid comes from the session, never the body.
 @Injectable()
 export class SessionGuard implements CanActivate {
     constructor(private readonly auth: AuthService) {}
 
-    canActivate(ctx: ExecutionContext): boolean {
+    async canActivate(ctx: ExecutionContext): Promise<boolean> {
         const req = ctx.switchToHttp().getRequest<AuthenticatedRequest>()
-        const header = req.headers.authorization ?? ''
-        const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : null
+        const userId = await this.auth.getUserId(req.headers)
 
-        if (!token) {
-            throw new UnauthorizedException('Missing bearer token')
+        if (!userId) {
+            throw new UnauthorizedException('Not authenticated')
         }
 
-        req.userId = this.auth.verify(token)
+        req.userId = userId
 
         return true
     }

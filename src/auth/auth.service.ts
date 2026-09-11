@@ -1,33 +1,18 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import * as jwt from 'jsonwebtoken'
+import type { IncomingHttpHeaders } from 'node:http'
 
-// The auth seam. Today it verifies a signed JWT (the documented Passport-JWT fallback); Better Auth
-// slots in behind this same interface later without touching guards or controllers.
+import { Inject, Injectable } from '@nestjs/common'
+import { fromNodeHeaders } from 'better-auth/node'
+
+import { AUTH, type AuthInstance } from './auth.instance'
+
 @Injectable()
 export class AuthService {
-    private readonly secret: string
+    constructor(@Inject(AUTH) private readonly auth: AuthInstance) {}
 
-    constructor(config: ConfigService) {
-        this.secret = config.getOrThrow<string>('JWT_SECRET')
-    }
+    // Resolves the authenticated user id from request headers (session cookie or bearer token), or null.
+    async getUserId(headers: IncomingHttpHeaders): Promise<string | null> {
+        const result = await this.auth.api.getSession({ headers: fromNodeHeaders(headers) })
 
-    verify(token: string): string {
-        try {
-            const payload = jwt.verify(token, this.secret)
-            const sub = typeof payload === 'object' ? payload.sub : undefined
-
-            if (!sub || typeof sub !== 'string') {
-                throw new Error('missing sub')
-            }
-
-            return sub
-        } catch {
-            throw new UnauthorizedException('Invalid or expired token')
-        }
-    }
-
-    issueDevToken(userId: string): string {
-        return jwt.sign({ sub: userId }, this.secret, { expiresIn: '7d' })
+        return result?.user?.id ?? null
     }
 }
