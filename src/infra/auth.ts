@@ -1,7 +1,7 @@
 import type { RequestHandler } from 'express'
 
-import { verifyIdToken } from '@/lib/firebase'
-import { AppError } from '@/lib/errors'
+import { verifyIdToken } from '@/infra/firebase'
+import { AppError } from '@/infra/errors'
 
 // uid is taken from the verified token only, never from the request body.
 export const requireAuth: RequestHandler = async (req, _res, next) => {

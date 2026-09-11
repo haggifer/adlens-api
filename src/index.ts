@@ -5,6 +5,7 @@ import { createApp } from '@/app'
 
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 })
 
-export const api = onRequest({ memory: '256MiB', timeoutSeconds: 60 }, createApp())
+// 1GiB/120s covers the synchronous content verification (download + ffprobe) in /analyze.
+export const api = onRequest({ memory: '1GiB', timeoutSeconds: 120 }, createApp())
 
-export { transcribeVideo } from '@/tasks/transcribe-video'
+export { analyzeVideo } from '@/tasks/analyze-video'

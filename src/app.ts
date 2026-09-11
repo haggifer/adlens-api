@@ -2,14 +2,17 @@ import cors from 'cors'
 import express from 'express'
 import helmet from 'helmet'
 
-import { requireAuth } from '@/lib/auth'
-import { errorHandler, notFound } from '@/lib/errors'
+import { requireAuth } from '@/infra/auth'
+import { errorHandler, notFound } from '@/infra/errors'
 import { healthRouter } from '@/routes/health'
-import { jobsRouter } from '@/routes/jobs/index'
-import { aiRouter } from '@/routes/ai/index'
+import { v1Router } from '@/routes/v1/index'
 
-// Browser origins allowed to call the API. Add the deployed frontend origin here.
-const ALLOWED_ORIGINS = ['http://localhost:3000']
+// Browser origins allowed to call the API. Set ALLOWED_ORIGINS (comma-separated) to add the
+// deployed frontend origin(s); localhost is always allowed for local development.
+const ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    ...(process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean) ?? []),
+]
 
 export const createApp = () => {
     const app = express()
@@ -20,8 +23,7 @@ export const createApp = () => {
     app.use(express.json({ limit: '1mb' }))
 
     app.use('/health', healthRouter)
-    app.use('/jobs', requireAuth, jobsRouter)
-    app.use('/ai', requireAuth, aiRouter)
+    app.use('/v1', requireAuth, v1Router)
 
     app.use(notFound)
     app.use(errorHandler)
