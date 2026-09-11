@@ -66,7 +66,7 @@ Shared shapes (`Job`, `AnalysisSettings`, `Analysis`, `Finding`, …) live in th
 
 ## Gemini
 
-[`src/infra/gemini.ts`](src/infra/gemini.ts) uses **Vertex AI** (`vertexai: true`, `location: us-central1`), authenticated via **ADC** — no API key to manage. The worker passes the video's `gs://` URI straight to `generateContent` (`createPartFromUri`), so Vertex reads the object directly from Storage. The model is `gemini-2.5-flash` by default (see the `GEMINI_MODELS` registry), overridable with `GEMINI_MODEL`.
+[`src/infra/gemini.ts`](src/infra/gemini.ts) uses **Vertex AI** (`vertexai: true`), authenticated via **ADC** — no API key to manage. The worker passes the video's `gs://` URI straight to `generateContent` (`createPartFromUri`), so Vertex reads the object directly from Storage. The model is `gemini-3.6-flash` by default (override with `GEMINI_MODEL`). The Gemini 3.x models are served from the multi-region **`global`** endpoint (not `us-central1`), so the client location defaults to `global` (override with `GEMINI_LOCATION`).
 
 > Vertex reads a real GCS bucket, **not the Storage emulator**. Local end-to-end analysis therefore needs the real `us-central1` bucket plus ADC (`gcloud auth application-default login`); everything else (auth / Firestore / job creation / verification / quota / enqueue) runs fully emulated.
 
