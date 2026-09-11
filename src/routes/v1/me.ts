@@ -1,4 +1,4 @@
-import { updateProfileInputSchema } from 'adlens-types'
+import { updateProfileInputSchema } from 'adlens-shared'
 import { Router } from 'express'
 
 import { uidOf } from '@/infra/auth'

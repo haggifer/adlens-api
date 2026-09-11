@@ -2,7 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore'
 
 import { db } from '@/infra/firebase'
 import { profileDoc } from '@/utils/paths'
-import type { Profile } from 'adlens-types'
+import type { Profile } from 'adlens-shared'
 
 interface ProfilePatch {
     displayName?: string

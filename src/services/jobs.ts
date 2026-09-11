@@ -3,7 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { db, storage } from '@/infra/firebase'
 import { AppError } from '@/infra/errors'
 import { jobsCollection, sanitizeFilename, uploadPath } from '@/utils/paths'
-import type { CreateJobInput, Job } from 'adlens-types'
+import type { CreateJobInput, Job } from 'adlens-shared'
 
 const jobDoc = (uid: string, jobId: string) => db.doc(`${jobsCollection(uid)}/${jobId}`)
 

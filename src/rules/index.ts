@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import type { Advisory, AnalysisSettings, Finding, MetadataCheck } from 'adlens-types'
+import type { Advisory, AnalysisSettings, Finding, MetadataCheck } from 'adlens-shared'
 
 import { resolveRef, ruleSetSchema, type Rule, type RuleSet } from '@/rules/schema'
 

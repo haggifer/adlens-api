@@ -33,7 +33,7 @@
         "@types/cors": "^2.8.19",
         "@types/express": "^5.0.0",
         "@types/node": "^20.0.0",
-        "adlens-types": "git+https://github.com/haggifer/adlens-types.git",
+        "adlens-shared": "git+https://github.com/haggifer/adlens-shared.git",
         "eslint": "^9.0.0",
         "prettier": "^3.9.5",
         "tsc-alias": "^1.8.10",

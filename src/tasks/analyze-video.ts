@@ -1,6 +1,6 @@
 import { Timestamp } from 'firebase-admin/firestore'
 import { onTaskDispatched } from 'firebase-functions/v2/tasks'
-import type { Analysis } from 'adlens-types'
+import type { Analysis } from 'adlens-shared'
 
 import { storage } from '@/infra/firebase'
 import {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import ffprobeStatic from 'ffprobe-static'
 import { fileTypeFromBuffer } from 'file-type'
-import type { JobFile, JobMedia } from 'adlens-types'
+import type { JobFile, JobMedia } from 'adlens-shared'
 
 import { storage } from '@/infra/firebase'
 import { AppError } from '@/infra/errors'

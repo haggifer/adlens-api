@@ -1,4 +1,4 @@
-import { createJobInputSchema, type JobMedia } from 'adlens-types'
+import { createJobInputSchema, type JobMedia } from 'adlens-shared'
 import { Router } from 'express'
 
 import { uidOf } from '@/infra/auth'

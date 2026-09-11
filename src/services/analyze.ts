@@ -1,5 +1,5 @@
 import { createPartFromUri, createUserContent, Type } from '@google/genai'
-import type { AnalysisSettings } from 'adlens-types'
+import type { AnalysisSettings } from 'adlens-shared'
 import { z } from 'zod'
 
 import { GEMINI_MODEL, getGemini } from '@/infra/gemini'

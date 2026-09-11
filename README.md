@@ -60,9 +60,9 @@ Rules are validated with a Zod schema ([`src/rules/schema.ts`](src/rules/schema.
 - `/users/{uid}/jobs/{jobId}` — `Job` (settings + status + `media` + `analysis`)
 - Storage: `users/{uid}/{timestamp}/{filename}` — the uploaded video, plus `result.json` (server-written analysis artifact)
 
-Shared shapes (`Job`, `AnalysisSettings`, `Analysis`, `Finding`, …) live in the [`adlens-types`](https://github.com/haggifer/adlens-types) package.
+Shared shapes (`Job`, `AnalysisSettings`, `Analysis`, `Finding`, …) live in the [`adlens-shared`](https://github.com/haggifer/adlens-shared) package.
 
-> **Deploy note:** the routes import **runtime** Zod schemas from `adlens-types`, but it is currently listed under `devDependencies`. A production install omits it, so before deploying either move it to `dependencies` (and make the repo reachable by Cloud Build), bundle the function, or keep local schemas. Local dev/emulator is unaffected.
+> **Deploy note:** the routes import **runtime** Zod schemas from `adlens-shared`, but it is currently listed under `devDependencies`. A production install omits it, so before deploying either move it to `dependencies` (and make the repo reachable by Cloud Build), bundle the function, or keep local schemas. Local dev/emulator is unaffected.
 
 ## Gemini
 
