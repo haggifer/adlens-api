@@ -8,14 +8,17 @@ import { ConfigService } from '@nestjs/config'
 const SIGNED_URL_TTL_MS = 15 * 60 * 1000
 
 // Wraps the one GCS bucket both the client (via signed upload URLs) and the server use. Authenticated
-// via ADC — no key. Ownership is enforced by the API (every path is derived from the caller's userId).
+// via ADC — no key in production (Cloud Run's runtime SA signs V4 URLs). Ownership is enforced by the
+// API (every path is derived from the caller's userId). Locally, user ADC cannot sign V4 URLs, so an
+// optional STORAGE_KEY_FILE points at a service-account key used only for this Storage client.
 @Injectable()
 export class StorageService {
     private readonly storage: Storage
     readonly bucketName: string
 
     constructor(config: ConfigService) {
-        this.storage = new Storage()
+        const keyFilename = config.get<string>('STORAGE_KEY_FILE')
+        this.storage = new Storage(keyFilename ? { keyFilename } : {})
         this.bucketName = config.getOrThrow<string>('STORAGE_BUCKET')
     }
 
