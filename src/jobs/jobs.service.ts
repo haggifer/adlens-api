@@ -64,7 +64,9 @@ export class JobsService {
     }
 
     async getEntity(userId: string, id: string): Promise<JobEntity> {
-        return toEntity(await this.getDoc(userId, id))
+        const doc = await this.getDoc(userId, id)
+
+        return toEntity(doc)
     }
 
     async list(userId: string): Promise<JobEntity[]> {
