@@ -26,6 +26,9 @@ export class Job {
 
     @Prop({ type: String })
     error?: string
+
+    @Prop({ type: String })
+    execution?: string
 }
 
 export const JobSchema = SchemaFactory.createForClass(Job)

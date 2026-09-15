@@ -1,7 +1,7 @@
-import { Body, ConflictException, Controller, Get, Param, Post, UseGuards } from '@nestjs/common'
+import { Body, ConflictException, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common'
 import { createJobInputSchema, type CreateJobInput, type JobMedia } from 'adlens-shared'
 
-import { AnalysisQueue } from '../analysis/analysis.queue'
+import { AnalysisLauncher } from '../analysis/analysis-launcher.service'
 import { VerifyService } from '../analysis/verify.service'
 import { SessionGuard } from '../auth/session.guard'
 import { CurrentUser } from '../common/current-user.decorator'
@@ -17,7 +17,7 @@ export class JobsController {
         private readonly jobs: JobsService,
         private readonly quota: QuotaService,
         private readonly verify: VerifyService,
-        private readonly queue: AnalysisQueue,
+        private readonly launcher: AnalysisLauncher,
         private readonly storage: StorageService,
     ) {}
 
@@ -33,6 +33,7 @@ export class JobsController {
     // Verify the uploaded bytes, consume quota, and enqueue analysis. Quota is spent only after a
     // successful verification, so a bad upload never costs a run.
     @Post(':id/analyze')
+    @HttpCode(HttpStatus.ACCEPTED)
     async analyze(@CurrentUser() userId: string, @Param('id') id: string) {
         const job = await this.jobs.getDoc(userId, id)
 
@@ -60,8 +61,12 @@ export class JobsController {
 
         await this.quota.consume(userId)
 
-        const updated = await this.jobs.update(userId, id, { status: 'queued', media })
-        await this.queue.enqueue({ userId, jobId: id })
+        const execution = await this.launcher.launch({ userId, jobId: id })
+        const updated = await this.jobs.update(userId, id, {
+            status: 'queued',
+            media,
+            ...(execution ? { execution } : {}),
+        })
 
         return { job: updated }
     }

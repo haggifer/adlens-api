@@ -1,5 +1,5 @@
-# Single image for both Cloud Run services. The API runs `node dist/main`; the worker service
-# overrides the command to `node dist/worker`.
+# Single image for the API and the analysis job. The API runs `node dist/main`; the analysis Cloud
+# Run Job overrides the command to `node dist/job`.
 FROM node:20-slim AS build
 WORKDIR /app
 COPY package*.json ./

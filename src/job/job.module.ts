@@ -5,8 +5,9 @@ import { MongooseModule } from '@nestjs/mongoose'
 import { AnalysisRunner } from '../analysis/analysis-runner.service'
 import { Job, JobSchema } from '../schemas/job.schema'
 import { StorageModule } from '../storage/storage.module'
-import { AnalyzeProcessor } from './analyze.processor'
 
+// Minimal module for the on-demand analysis Cloud Run Job process (src/job.ts): just the pieces
+// AnalysisRunner needs — config, the Mongo connection, the Job model, and storage.
 @Module({
     imports: [
         ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
@@ -17,6 +18,6 @@ import { AnalyzeProcessor } from './analyze.processor'
         MongooseModule.forFeature([{ name: Job.name, schema: JobSchema }]),
         StorageModule,
     ],
-    providers: [AnalysisRunner, AnalyzeProcessor],
+    providers: [AnalysisRunner],
 })
-export class WorkerModule {}
+export class JobModule {}

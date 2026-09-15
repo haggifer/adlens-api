@@ -37,6 +37,10 @@ export class AnalysisRunner {
             return
         }
 
+        if (job.status === 'analyzed') {
+            return
+        }
+
         if (!job.file) {
             await this.model.updateOne({ _id: jobId }, { $set: { status: 'error', error: 'No file attached to job' } })
             return

@@ -7,7 +7,7 @@ import { sanitizeFilename, uploadPath } from '../common/paths'
 import { Job, JobDocument } from '../schemas/job.schema'
 import { StorageService } from '../storage/storage.service'
 
-type JobPatch = Partial<Pick<JobEntity, 'status' | 'media' | 'analysis' | 'error'>>
+type JobPatch = Partial<Pick<JobEntity, 'status' | 'media' | 'analysis' | 'error' | 'execution'>>
 
 const toEntity = (doc: JobDocument): JobEntity => ({
     id: doc._id.toString(),
@@ -18,6 +18,7 @@ const toEntity = (doc: JobDocument): JobEntity => ({
     media: doc.media,
     analysis: doc.analysis,
     error: doc.error,
+    execution: doc.execution,
     createdAt: doc.get('createdAt'),
     updatedAt: doc.get('updatedAt'),
 })
