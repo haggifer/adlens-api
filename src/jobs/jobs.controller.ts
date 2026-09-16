@@ -30,7 +30,7 @@ export class JobsController {
         return { job, uploadUrl }
     }
 
-    // Verify the uploaded bytes, consume quota, and enqueue analysis. Quota is spent only after a
+    // Verify the uploaded bytes, consume quota, and launch the analysis Cloud Run Job. Quota is spent only after a
     // successful verification, so a bad upload never costs a run.
     @Post(':id/analyze')
     @HttpCode(HttpStatus.ACCEPTED)
