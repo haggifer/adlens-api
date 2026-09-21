@@ -4,7 +4,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import type { Quota as QuotaEntity } from 'adlens-shared'
 import { Model } from 'mongoose'
 
-import { Quota, QuotaDocument } from '../schemas/quota.schema'
+import { QUOTA_MODEL, QuotaDocument } from '../schemas/quota.schema'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -13,7 +13,7 @@ export class QuotaService {
     private readonly defaultLimit: number
 
     constructor(
-        @InjectModel(Quota.name) private readonly model: Model<QuotaDocument>,
+        @InjectModel(QUOTA_MODEL) private readonly model: Model<QuotaDocument>,
         config: ConfigService,
     ) {
         this.defaultLimit = Number(config.get('QUOTA_LIMIT') ?? 3)

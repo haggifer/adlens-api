@@ -1,21 +1,10 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+import { quotaDocSchema, type QuotaDoc } from 'adlens-shared'
 import { HydratedDocument } from 'mongoose'
+import { zodToMongoose } from '../common/zod-to-mongoose'
 
-export type QuotaDocument = HydratedDocument<Quota>
+export const QUOTA_MODEL = 'Quota'
 
-@Schema({ collection: 'quotas' })
-export class Quota {
-    @Prop({ type: String, required: true, unique: true, index: true })
-    userId: string
+export type QuotaDocument = HydratedDocument<QuotaDoc>
 
-    @Prop({ type: Number, required: true, default: 0 })
-    used: number
-
-    @Prop({ type: Number, required: true })
-    limit: number
-
-    @Prop({ type: Number, required: true })
-    windowStart: number
-}
-
-export const QuotaSchema = SchemaFactory.createForClass(Quota)
+export const QuotaSchema = zodToMongoose(quotaDocSchema, { collection: 'quotas' })
+QuotaSchema.index({ userId: 1 }, { unique: true })

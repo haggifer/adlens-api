@@ -13,7 +13,7 @@ import {
     projectForModel,
     selectRules,
 } from '../rules'
-import { Job, JobDocument } from '../schemas/job.schema'
+import { JOB_MODEL, JobDocument } from '../schemas/job.schema'
 import { StorageService } from '../storage/storage.service'
 import { analyzeVideo } from './analyze'
 
@@ -25,7 +25,7 @@ export class AnalysisRunner {
     private readonly logger = new Logger(AnalysisRunner.name)
 
     constructor(
-        @InjectModel(Job.name) private readonly model: Model<JobDocument>,
+        @InjectModel(JOB_MODEL) private readonly model: Model<JobDocument>,
         private readonly storage: StorageService,
     ) {}
 

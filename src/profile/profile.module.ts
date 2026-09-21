@@ -3,12 +3,12 @@ import { MongooseModule } from '@nestjs/mongoose'
 
 import { AuthModule } from '../auth/auth.module'
 import { QuotaModule } from '../quota/quota.module'
-import { Profile, ProfileSchema } from '../schemas/profile.schema'
+import { PROFILE_MODEL, ProfileSchema } from '../schemas/profile.schema'
 import { ProfileController } from './profile.controller'
 import { ProfileService } from './profile.service'
 
 @Module({
-    imports: [MongooseModule.forFeature([{ name: Profile.name, schema: ProfileSchema }]), AuthModule, QuotaModule],
+    imports: [MongooseModule.forFeature([{ name: PROFILE_MODEL, schema: ProfileSchema }]), AuthModule, QuotaModule],
     controllers: [ProfileController],
     providers: [ProfileService],
 })

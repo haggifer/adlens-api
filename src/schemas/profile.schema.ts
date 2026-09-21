@@ -1,18 +1,10 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+import { profileDocSchema, type ProfileDoc } from 'adlens-shared'
 import { HydratedDocument } from 'mongoose'
+import { zodToMongoose } from '../common/zod-to-mongoose'
 
-export type ProfileDocument = HydratedDocument<Profile>
+export const PROFILE_MODEL = 'Profile'
 
-@Schema({ timestamps: true, collection: 'profiles' })
-export class Profile {
-    @Prop({ type: String, required: true, unique: true, index: true })
-    userId: string
+export type ProfileDocument = HydratedDocument<ProfileDoc>
 
-    @Prop({ type: String })
-    displayName?: string
-
-    @Prop({ type: String })
-    photoURL?: string
-}
-
-export const ProfileSchema = SchemaFactory.createForClass(Profile)
+export const ProfileSchema = zodToMongoose(profileDocSchema, { timestamps: true, collection: 'profiles' })
+ProfileSchema.index({ userId: 1 }, { unique: true })

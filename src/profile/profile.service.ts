@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import type { Profile as ProfileEntity, UpdateProfileInput } from 'adlens-shared'
 import { Model } from 'mongoose'
 
-import { Profile, ProfileDocument } from '../schemas/profile.schema'
+import { PROFILE_MODEL, ProfileDocument } from '../schemas/profile.schema'
 
 const toEntity = (doc: ProfileDocument): ProfileEntity => ({
     displayName: doc.displayName,
@@ -14,7 +14,7 @@ const toEntity = (doc: ProfileDocument): ProfileEntity => ({
 
 @Injectable()
 export class ProfileService {
-    constructor(@InjectModel(Profile.name) private readonly model: Model<ProfileDocument>) {}
+    constructor(@InjectModel(PROFILE_MODEL) private readonly model: Model<ProfileDocument>) {}
 
     async get(userId: string): Promise<ProfileEntity | null> {
         const doc = await this.model.findOne({ userId })

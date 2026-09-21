@@ -4,7 +4,7 @@ import type { CreateJobInput, Job as JobEntity } from 'adlens-shared'
 import { isValidObjectId, Model } from 'mongoose'
 
 import { sanitizeFilename, uploadPath } from '../common/paths'
-import { Job, JobDocument } from '../schemas/job.schema'
+import { JOB_MODEL, JobDocument } from '../schemas/job.schema'
 import { StorageService } from '../storage/storage.service'
 
 type JobPatch = Partial<Pick<JobEntity, 'status' | 'media' | 'analysis' | 'error' | 'execution'>>
@@ -26,7 +26,7 @@ const toEntity = (doc: JobDocument): JobEntity => ({
 @Injectable()
 export class JobsService {
     constructor(
-        @InjectModel(Job.name) private readonly model: Model<JobDocument>,
+        @InjectModel(JOB_MODEL) private readonly model: Model<JobDocument>,
         private readonly storage: StorageService,
     ) {}
 

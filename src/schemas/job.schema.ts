@@ -1,35 +1,10 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
-import type { Analysis, AnalysisSettings, JobFile, JobMedia, JobStatus } from 'adlens-shared'
+import { jobDocSchema, type JobDoc } from 'adlens-shared'
 import { HydratedDocument } from 'mongoose'
+import { zodToMongoose } from '../common/zod-to-mongoose'
 
-export type JobDocument = HydratedDocument<Job>
+export const JOB_MODEL = 'Job'
 
-@Schema({ timestamps: true, collection: 'jobs' })
-export class Job {
-    @Prop({ type: String, required: true, index: true })
-    userId: string
+export type JobDocument = HydratedDocument<JobDoc>
 
-    @Prop({ type: String, required: true, default: 'pending' })
-    status: JobStatus
-
-    @Prop({ type: Object, required: true })
-    settings: AnalysisSettings
-
-    @Prop({ type: Object, default: null })
-    file: JobFile | null
-
-    @Prop({ type: Object })
-    media?: JobMedia
-
-    @Prop({ type: Object })
-    analysis?: Analysis
-
-    @Prop({ type: String })
-    error?: string
-
-    @Prop({ type: String })
-    execution?: string
-}
-
-export const JobSchema = SchemaFactory.createForClass(Job)
+export const JobSchema = zodToMongoose(jobDocSchema, { timestamps: true, collection: 'jobs' })
 JobSchema.index({ userId: 1, createdAt: -1 })
