@@ -23,3 +23,8 @@ Records the non-obvious architecture choices for the off-Firebase stack. Compani
 - **Gemini 3 runs at its default temperature.** Google recommends keeping Gemini 3 at 1.0 because lower values can make it loop; a 0.2 setting produced exactly that (an 18k-token, malformed reply) in testing.
 - **Ports for the two external calls that matter.** `AnalysisDispatcher` (Cloud Run Job execution, or a local `node dist/worker` child process in development, the same entry point production runs) and `VideoReviewer` (Gemini on Vertex, with the response schema generated from the Zod schema that parses the reply).
 - **Tests against a real MongoDB.** The lifecycle and quota guarantees live in query semantics, so their tests use `mongodb-memory-server` rather than mocked models.
+
+## Rules as versioned data (2026-09-23)
+
+- **Rulesets live in MongoDB, one immutable document per version.** Publishing is `npm run rules:publish`: it validates the file with the worker's own schema and refuses an existing version. The earlier idea of an authenticated publish endpoint was dropped: it would need an admin identity model, while the script uses the database credentials a maintainer already has. The worker loads the newest version at start-up, so a rules change needs no redeploy and past analyses stay traceable through `rulesetVersion`.
+- **Rules target placements, not just platforms.** A rule can name the placements it applies to (the YouTube bumper's 6-second cap, Amazon Sponsored Brands specs). Before, those caps applied to every ad on the platform, so every YouTube ad over 6 seconds "failed". Markets gate UK/EU/US rules the same way, and a test proves every rule is reachable from some settings.

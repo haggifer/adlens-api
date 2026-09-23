@@ -89,9 +89,16 @@ user from the Better Auth session (never from the body) and every query is scope
 
 ## Ad-policy rules
 
-The ruleset is bundled ([`src/rules/rules.json`](src/rules/rules.json)) and validated at startup by
-[`RulesetService`](src/rules/ruleset.service.ts). Rules are selected by the job's platforms (YouTube also pulls in
-Google Ads policy) and markets (global rules always apply), then routed by `modality`:
+Rules are data. The authored ruleset lives in [`src/rules/rules.json`](src/rules/rules.json) and is published to MongoDB
+as an **immutable version** with `npm run rules:publish` (validated by the same Zod schema the worker parses it with; a
+version that already exists is refused). The worker serves the newest published version via
+[`RulesetService`](src/rules/ruleset.service.ts), so a rules update needs no redeploy, and every analysis records the
+`rulesetVersion` it ran with.
+
+Selection ([`src/rules/index.ts`](src/rules/index.ts)) targets the job's settings: its **platforms** (YouTube also pulls
+in Google Ads policy), its **markets** (global rules always apply; UK/EU/US rules only in their market) and, for
+format-specific rules such as the 6-second bumper cap, its **placements**. A test proves every rule is reachable from
+some combination of settings. Selected rules are then routed by `modality`:
 
 - `metadata` → checked in code against the measured media facts (duration, dimensions, real object size);
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
@@ -112,7 +119,8 @@ src/
   analysis/dispatch/                AnalysisDispatcher: Cloud Run Job execution, or a local child process in dev
   analysis/review/                  VideoReviewer port + Gemini on Vertex implementation + prompt/output schema
   analysis/pipeline/                the worker's pipeline and retry classification
-  rules/                            ruleset loading, selection, metadata checks, finding assembly
+  rules/                            ruleset schema and serving, selection, metadata checks, finding assembly
+scripts/publish-ruleset.ts          publishes rules.json as a new immutable ruleset version
   quota/ · me/                      quota accounting and GET /v1/me/quota
   realtime/                         Change Stream → Socket.IO
   auth/                             Better Auth on the app's Mongo connection, session guard
