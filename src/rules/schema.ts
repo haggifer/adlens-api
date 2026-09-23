@@ -1,20 +1,26 @@
+import { rulePlatformSchema, ruleScopeSchema, severitySchema } from 'adlens-shared'
 import { z } from 'zod'
 
 // Validator for the bundled rules.json — see rule_distillation_guide.md §9.
 export const ruleSchema = z
     .object({
         id: z.string().regex(/^[a-z0-9]+(\.[a-z0-9_]+)+$/),
-        platform: z
-            .array(z.enum(['Meta', 'Google', 'YouTube', 'TikTok', 'Snapchat', 'Pinterest', 'LinkedIn', 'Amazon', 'all']))
-            .min(1),
+        platform: z.array(rulePlatformSchema).min(1),
         region: z.enum(['global', 'US', 'UK', 'EU']),
-        scope: z.enum(['compliance', 'best_practice']),
+        scope: ruleScopeSchema,
         appliesTo: z.enum(['video', 'image', 'all']),
         topic: z.string().regex(/^[a-z_]+(:[a-z_]+)?$/),
         modality: z.enum(['metadata', 'text', 'visual', 'audiovisual', 'out_of_creative']),
-        checkType: z.enum(['judgment', 'duration_max', 'duration_min', 'aspect_ratio_in', 'filesize_max', 'resolution_min']),
+        checkType: z.enum([
+            'judgment',
+            'duration_max',
+            'duration_min',
+            'aspect_ratio_in',
+            'filesize_max',
+            'resolution_min',
+        ]),
         check: z.string().min(1),
-        severity: z.enum(['blocker', 'warning', 'info']),
+        severity: severitySchema,
         quote: z.string().min(1),
         ref: z.string().regex(/^\{\{[A-Z0-9_]+\}\}(\/|#).*/),
         value: z.number().optional(),
