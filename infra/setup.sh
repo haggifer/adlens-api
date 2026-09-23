@@ -9,7 +9,7 @@
 # Prereqs: gcloud authenticated (`gcloud auth login`), and these set in your shell first:
 #   export MONGODB_URI='mongodb+srv://…/adlens?retryWrites=true&w=majority'
 #   export BETTER_AUTH_SECRET='<a long random string>'
-#   export WEB_ORIGIN='https://www.useadlens.com'
+# RESEND_API_KEY must already exist in Secret Manager (a sending-only Resend key for mail.useadlens.com).
 set -euo pipefail
 
 PROJECT=adlens-ca57f
@@ -18,6 +18,9 @@ BUCKET=adlens-ca57f-uploads
 RUNTIME_SA="adlens-run@${PROJECT}.iam.gserviceaccount.com"
 API_SVC=adlens-api
 ANALYZE_JOB=adlens-analyze
+WEB_ORIGIN=https://www.useadlens.com
+API_URL=https://api.useadlens.com
+COOKIE_DOMAIN=useadlens.com
 
 gcloud config set project "$PROJECT"
 
@@ -46,6 +49,7 @@ for name in MONGODB_URI BETTER_AUTH_SECRET; do
         printf '%s' "${!name}" | gcloud secrets versions add "$name" --data-file=-
     gcloud secrets add-iam-policy-binding "$name" --member="serviceAccount:$RUNTIME_SA" --role="roles/secretmanager.secretAccessor"
 done
+gcloud secrets add-iam-policy-binding RESEND_API_KEY --member="serviceAccount:$RUNTIME_SA" --role="roles/secretmanager.secretAccessor"
 
 echo "== deploy analysis worker job (on-demand; runs dist/worker to completion, retried twice) =="
 gcloud run jobs deploy "$ANALYZE_JOB" --source . --region="$REGION" --service-account="$RUNTIME_SA" \
@@ -58,14 +62,9 @@ gcloud run jobs deploy "$ANALYZE_JOB" --source . --region="$REGION" --service-ac
 gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
     --member="serviceAccount:$RUNTIME_SA" --role="roles/run.developer"
 
-echo "== deploy API =="
+echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --source . --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
-    --set-secrets="MONGODB_URI=MONGODB_URI:latest,BETTER_AUTH_SECRET=BETTER_AUTH_SECRET:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB"
-API_URL=$(gcloud run services describe "$API_SVC" --region="$REGION" --format="value(status.url)")
-# BETTER_AUTH_URL must be the API's own public URL.
-gcloud run services update "$API_SVC" --region="$REGION" --update-env-vars="BETTER_AUTH_URL=$API_URL"
-echo "API deployed at $API_URL"
-
-echo "Done. Set the web's NEXT_PUBLIC_API_BASE_URL to: $API_URL"
+    --set-secrets="MONGODB_URI=MONGODB_URI:latest,BETTER_AUTH_SECRET=BETTER_AUTH_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest" \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB"
+echo "Done. The web app's NEXT_PUBLIC_API_BASE_URL is $API_URL"
