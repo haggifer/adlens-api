@@ -7,7 +7,7 @@ import ffprobeStatic from 'ffprobe-static'
 
 import { StorageService } from '../storage/storage.service'
 
-const MAX_DURATION_S = 180
+const MAX_DURATION_S = 60
 
 interface ProbeResult {
     durationS: number
