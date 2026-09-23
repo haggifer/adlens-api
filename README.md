@@ -25,8 +25,8 @@ repos.
       MongoDB Atlas ─────┘  (jobs, quotas, Better Auth collections) ◄┘
 ```
 
-- **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run. Better Auth, Mongoose on Atlas, GCS signed URLs,
-  ffprobe verification, quota, Socket.IO.
+- **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run at `api.useadlens.com`. Better Auth, Mongoose on Atlas,
+  GCS signed URLs, ffprobe verification, quota, Socket.IO.
 - **Worker** (`src/worker.ts` → `WorkerModule`): the same image run as an **on-demand Cloud Run Job**. The API starts
   one execution per analysis; the worker analyzes that job once and exits. It has no HTTP layer and no dispatcher, so
   it can never start another worker.
@@ -70,10 +70,25 @@ the window it was charged to (`chargedWindowStart`); ending a run clears that fi
 final status, and the pre-image decides who refunds, so a refund happens at most once and only into the window the
 charge came from.
 
+## Authentication
+
+[Better Auth](src/auth/auth.instance.ts) on the app's own Mongo connection, email and password:
+
+- **Sessions are httpOnly, `SameSite=Lax` cookies.** The web app (`www.useadlens.com`) and the API (`api.useadlens.com`)
+  share the parent domain (`COOKIE_DOMAIN`), so the cookie is first-party for both and no token ever sits in
+  JavaScript-readable storage. Socket.IO authenticates its handshake with the same cookie.
+- **Email verification is required** before the first sign-in; the link signs the user in and returns them to the web
+  app. Signing in unverified resends it.
+- **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
+- **Account deletion** (password-confirmed) purges the user's jobs, quota and every uploaded object before Better Auth
+  removes the account.
+- Emails go through Resend from `mail.useadlens.com` and are sent without awaiting, so response timing doesn't reveal
+  whether an address has an account. Rate limits are stored in MongoDB so they hold across instances.
+
 ## API
 
-Every `/v1/*` route requires `Authorization: Bearer <token>`; [`SessionGuard`](src/auth/session.guard.ts) resolves the
-user from the Better Auth session (never from the body) and every query is scoped by it. Errors share one shape,
+Every `/v1/*` route requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
+session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
 
 | Method & path               | Purpose                                                         | Returns                        |
@@ -139,6 +154,9 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 | `BETTER_AUTH_SECRET`     | required by the API     | Better Auth signing secret                                                  |
 | `BETTER_AUTH_URL`        | `http://localhost:8080` | The API's own public URL                                                    |
 | `WEB_ORIGIN`             | `http://localhost:3000` | The one web origin allowed by CORS, Socket.IO and Better Auth               |
+| `COOKIE_DOMAIN`          | —                       | Parent domain for the session cookie in production (`useadlens.com`)        |
+| `RESEND_API_KEY`         | —                       | Resend sending key; without it, auth emails are printed to the console      |
+| `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                      |
 | `PORT`                   | `8080`                  | API listen port                                                             |
 | `STORAGE_KEY_FILE`       | —                       | Local only: SA key used to sign V4 URLs (user ADC can't sign)               |
 | `GCP_REGION`             | `europe-west1`          | Region of the analysis Cloud Run Job                                        |
@@ -168,6 +186,7 @@ Vertex reads the real `gs://` object, so a real bucket and ADC are needed for th
 ```bash
 npm test          # unit: quota, job lifecycle, pipeline, verification (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
+npm run test:auth # after a build: sign-up, verification, reset and deletion against the real Better Auth
 ```
 
 The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, because the guarantees that matter
