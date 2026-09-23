@@ -45,7 +45,8 @@ const buildField = (schema: unknown): unknown => {
 
         if (def.type === 'default') {
             required = false
-            defaultValue = typeof def.defaultValue === 'function' ? (def.defaultValue as () => unknown)() : def.defaultValue
+            defaultValue =
+                typeof def.defaultValue === 'function' ? (def.defaultValue as () => unknown)() : def.defaultValue
             node = def.innerType
             continue
         }
