@@ -4,25 +4,12 @@ import {
     type Finding,
     type JobMedia,
     type MetadataCheck,
-    Platform,
     RulePlatform,
     type TimeRange,
 } from 'adlens-shared'
-import { resolveRef, type Rule, type RuleSet } from './schema'
+import { resolveRef, type Rule, RULE_PLATFORMS, type RuleSet } from './schema'
 
 const ASPECT_RATIO_TOLERANCE = 0.02
-
-// The rule platforms whose policies govern ads on each platform. YouTube ads are bought and reviewed through Google Ads,
-// so Google Ads policy applies to them too.
-const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
-    [Platform.Meta]: [RulePlatform.Meta],
-    [Platform.TikTok]: [RulePlatform.TikTok],
-    [Platform.YouTube]: [RulePlatform.YouTube, RulePlatform.Google],
-    [Platform.Snapchat]: [RulePlatform.Snapchat],
-    [Platform.Pinterest]: [RulePlatform.Pinterest],
-    [Platform.LinkedIn]: [RulePlatform.LinkedIn],
-    [Platform.Amazon]: [RulePlatform.Amazon],
-}
 
 export interface SelectedRules {
     content: Rule[]
@@ -47,16 +34,19 @@ export interface ModelFinding {
 const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
     new Set([RulePlatform.All, ...settings.platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
 
-// The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives and to
-// the selected markets (global rules always apply), then split by how each one is checked.
+// The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives, to the
+// selected markets (global rules always apply) and, for placement-specific rules, to the selected placements. Then
+// split by how each one is checked.
 export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): SelectedRules => {
     const platforms = rulePlatformsFor(settings)
     const markets = new Set<string>(settings.markets)
+    const placements = new Set(settings.placements)
     const relevant = ruleSet.rules.filter(
         (rule) =>
             rule.appliesTo !== 'image' &&
             rule.platform.some((platform) => platforms.has(platform)) &&
-            (rule.region === 'global' || markets.has(rule.region)),
+            (rule.region === 'global' || markets.has(rule.region)) &&
+            (!rule.placements || rule.placements.some((placement) => placements.has(placement))),
     )
 
     return {

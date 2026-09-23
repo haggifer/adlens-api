@@ -1,11 +1,33 @@
-import { rulePlatformSchema, ruleScopeSchema, severitySchema } from 'adlens-shared'
+import {
+    PLACEMENT_PLATFORM,
+    Platform,
+    placementSchema,
+    RulePlatform,
+    rulePlatformSchema,
+    ruleScopeSchema,
+    severitySchema,
+} from 'adlens-shared'
 import { z } from 'zod'
 
-// Validator for the bundled rules.json — see rule_distillation_guide.md §9.
+// The rule platforms whose policies govern ads on each platform. YouTube ads are bought and reviewed through Google Ads,
+// so Google Ads policy applies to them too.
+export const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
+    [Platform.Meta]: [RulePlatform.Meta],
+    [Platform.TikTok]: [RulePlatform.TikTok],
+    [Platform.YouTube]: [RulePlatform.YouTube, RulePlatform.Google],
+    [Platform.Snapchat]: [RulePlatform.Snapchat],
+    [Platform.Pinterest]: [RulePlatform.Pinterest],
+    [Platform.LinkedIn]: [RulePlatform.LinkedIn],
+    [Platform.Amazon]: [RulePlatform.Amazon],
+}
+
+// Validator for a ruleset (rules.json and every published version) — see rule_distillation_guide.md §9.
 export const ruleSchema = z
     .object({
         id: z.string().regex(/^[a-z0-9]+(\.[a-z0-9_]+)+$/),
         platform: z.array(rulePlatformSchema).min(1),
+        // Limits the rule to these placements (e.g. a bumper-only duration cap); absent means every placement.
+        placements: z.array(placementSchema).min(1).optional(),
         region: z.enum(['global', 'US', 'UK', 'EU']),
         scope: ruleScopeSchema,
         appliesTo: z.enum(['video', 'image', 'all']),
@@ -34,6 +56,13 @@ export const ruleSchema = z
     .refine((r) => r.modality !== 'metadata' || (r.value !== undefined && r.unit !== undefined), {
         message: 'metadata rules need value + unit',
     })
+    .refine(
+        (r) =>
+            (r.placements ?? []).every((placement) =>
+                RULE_PLATFORMS[PLACEMENT_PLATFORM[placement]].some((platform) => r.platform.includes(platform)),
+            ),
+        { message: "a rule's placements must belong to its platforms" },
+    )
 
 export const ruleSourceSchema = z.object({ baseUrl: z.url(), label: z.string(), fetchedAt: z.string() })
 
