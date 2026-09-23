@@ -2,7 +2,7 @@ import { createPartFromUri, createUserContent, Type } from '@google/genai'
 import type { AnalysisSettings } from 'adlens-shared'
 import { z } from 'zod'
 
-import { GEMINI_MODEL, getGemini } from '../gemini/gemini'
+import { GEMINI_MODEL, getGemini } from '../ai/gemini'
 import type { ModelFinding, RuleProjection } from '../rules'
 
 const modelOutputSchema = z.object({
@@ -84,15 +84,14 @@ export interface AnalyzeResult {
 // One multimodal pass that both transcribes and evaluates the content rules. Vertex reads the gs://
 // URI directly (ADC auth), so there is no upload/download step for the model.
 export const analyzeVideo = async ({ gcsUri, mimeType, contentRules, settings }: AnalyzeArgs): Promise<AnalyzeResult> => {
-    const ai = getGemini()
+    const aiModel = getGemini(GEMINI_MODEL, { temperature: 0.2 })
 
-    const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+    const response = await aiModel.request({
         contents: createUserContent([createPartFromUri(gcsUri, mimeType), buildPrompt(settings, contentRules)]),
-        config: { responseMimeType: 'application/json', responseSchema, temperature: 0.2 },
+        config: { responseMimeType: 'application/json', responseSchema },
     })
 
-    const parsed = modelOutputSchema.parse(JSON.parse(response.text ?? '{}'))
+    const parsed = modelOutputSchema.parse(JSON.parse(response.text || '{}'))
 
-    return { model: GEMINI_MODEL, transcript: parsed.transcript, modelFindings: parsed.findings }
+    return { model: response.model, transcript: parsed.transcript, modelFindings: parsed.findings }
 }
