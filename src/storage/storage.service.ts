@@ -1,6 +1,3 @@
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
 import { Storage } from '@google-cloud/storage'
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -37,11 +34,14 @@ export class StorageService {
         return url
     }
 
-    async downloadToTmp(path: string): Promise<string> {
-        const tmpPath = join(tmpdir(), `dl-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-        await this.object(path).download({ destination: tmpPath })
+    async signedDownloadUrl(path: string): Promise<string> {
+        const [url] = await this.object(path).getSignedUrl({
+            version: 'v4',
+            action: 'read',
+            expires: Date.now() + SIGNED_URL_TTL_MS,
+        })
 
-        return tmpPath
+        return url
     }
 
     async delete(path: string): Promise<void> {

@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process'
-import { unlink } from 'node:fs/promises'
 
 import { Injectable, UnprocessableEntityException } from '@nestjs/common'
 import type { JobFile, JobMedia } from 'adlens-shared'
@@ -16,7 +15,7 @@ interface ProbeResult {
     hasAudio: boolean
 }
 
-const probeMedia = (path: string): Promise<ProbeResult> =>
+const probeMedia = (input: string): Promise<ProbeResult> =>
     new Promise((resolve, reject) => {
         const proc = spawn(ffprobeStatic.path, [
             '-v',
@@ -25,7 +24,7 @@ const probeMedia = (path: string): Promise<ProbeResult> =>
             'json',
             '-show_format',
             '-show_streams',
-            path,
+            input,
         ])
         let out = ''
         let err = ''
@@ -62,36 +61,32 @@ const probeMedia = (path: string): Promise<ProbeResult> =>
         })
     })
 
-// Confirms the uploaded object is a real, decodable video within the duration cap (ffprobe both proves
-// it decodes as video and yields the media facts). Throws 422 on any failure; the caller deletes the
-// object and skips quota.
+// Confirms the uploaded object is a real, decodable video within the duration cap. ffprobe reads it over
+// a short-lived signed URL via HTTP range requests — it pulls only the header/moov, not the whole file —
+// so no video bytes are copied into the instance.
 @Injectable()
 export class VerifyService {
     constructor(private readonly storage: StorageService) {}
 
     async verify(file: JobFile): Promise<JobMedia> {
-        const tmpPath = await this.storage.downloadToTmp(file.path)
+        const url = await this.storage.signedDownloadUrl(file.path)
+
+        let media: ProbeResult
 
         try {
-            let media: ProbeResult
-
-            try {
-                media = await probeMedia(tmpPath)
-            } catch {
-                throw new UnprocessableEntityException('Uploaded file is not a recognized video')
-            }
-
-            if (!Number.isFinite(media.durationS) || media.durationS <= 0) {
-                throw new UnprocessableEntityException('Uploaded file is not a decodable video')
-            }
-
-            if (media.durationS > MAX_DURATION_S) {
-                throw new UnprocessableEntityException(`Video exceeds the ${MAX_DURATION_S}s limit`)
-            }
-
-            return { durationS: media.durationS, width: media.width, height: media.height, hasAudio: media.hasAudio }
-        } finally {
-            await unlink(tmpPath).catch(() => {})
+            media = await probeMedia(url)
+        } catch {
+            throw new UnprocessableEntityException('Uploaded file is not a recognized video')
         }
+
+        if (!Number.isFinite(media.durationS) || media.durationS <= 0) {
+            throw new UnprocessableEntityException('Uploaded file is not a decodable video')
+        }
+
+        if (media.durationS > MAX_DURATION_S) {
+            throw new UnprocessableEntityException(`Video exceeds the ${MAX_DURATION_S}s limit`)
+        }
+
+        return { durationS: media.durationS, width: media.width, height: media.height, hasAudio: media.hasAudio }
     }
 }
