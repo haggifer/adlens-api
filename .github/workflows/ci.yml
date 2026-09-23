@@ -1,0 +1,21 @@
+name: CI
+
+on:
+    push:
+        branches: [init-setup, main]
+    pull_request:
+
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v5
+              with:
+                  node-version-file: .nvmrc
+                  cache: npm
+            - run: npm ci
+            - run: npm run check:deps
+            - run: npm run lint
+            - run: npm run build
+            - run: npm test
