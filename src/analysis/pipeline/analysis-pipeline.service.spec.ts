@@ -5,6 +5,7 @@ import { QUOTA_MODEL, type QuotaDoc, QuotaSchema } from '../../database/quota.do
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
+import { loadBundledRuleSet } from '../../testing/bundled-ruleset'
 import { configStub } from '../../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../../testing/memory-mongo'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
@@ -33,10 +34,9 @@ describe('AnalysisPipeline', () => {
     let lifecycle: JobLifecycle
     let reviewer: FakeReviewer
     let pipeline: AnalysisPipeline
-    const ruleset = new RulesetService()
-    const contentRule = ruleset
-        .current()
-        .rules.find((r) => r.modality === 'visual' && r.platform.includes(RulePlatform.Meta))!
+    const ruleSet = loadBundledRuleSet()
+    const ruleset = { current: async () => ruleSet } as unknown as RulesetService
+    const contentRule = ruleSet.rules.find((r) => r.modality === 'visual' && r.platform.includes(RulePlatform.Meta))!
 
     const queueJob = async (): Promise<string> => {
         const job = await jobs.create({
@@ -104,7 +104,7 @@ describe('AnalysisPipeline', () => {
 
         expect(job?.status).toBe(JobStatus.Analyzed)
         expect(job?.usage).toEqual(USAGE)
-        expect(job?.analysis?.rulesetVersion).toBe(ruleset.current().meta.version)
+        expect(job?.analysis?.rulesetVersion).toBe(ruleSet.meta.version)
         expect(job?.analysis?.findings).toEqual([
             expect.objectContaining({ id: contentRule.id, time: { startS: 1, endS: 3 }, quote: contentRule.quote }),
         ])

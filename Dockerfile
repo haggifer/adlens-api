@@ -12,7 +12,6 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev
-# rules.json is emitted into dist by the nest-cli asset step during the build stage.
 COPY --from=build /app/dist ./dist
 EXPOSE 8080
 CMD ["node", "dist/main"]

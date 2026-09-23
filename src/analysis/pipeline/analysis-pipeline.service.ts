@@ -59,7 +59,7 @@ export class AnalysisPipeline {
             throw new Error('Job has no verified media')
         }
 
-        const ruleSet = this.ruleset.current()
+        const ruleSet = await this.ruleset.current()
         const selected = selectRules(ruleSet, job.settings)
         const review = await this.reviewer.review({
             videoUri: gcsUri(job.file.bucket, job.file.path),

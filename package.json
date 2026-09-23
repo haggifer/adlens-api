@@ -16,7 +16,8 @@
         "format": "prettier --write .",
         "test": "jest",
         "test:e2e": "jest --config test/jest-e2e.json",
-        "check:deps": "node scripts/check-no-file-deps.mjs"
+        "check:deps": "node scripts/check-no-file-deps.mjs",
+        "rules:publish": "ts-node --transpile-only scripts/publish-ruleset.ts"
     },
     "dependencies": {
         "@google-cloud/run": "^4.1.0",
