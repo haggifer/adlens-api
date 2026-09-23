@@ -13,6 +13,8 @@ export default tseslint.config(
                 require: 'readonly',
                 __dirname: 'readonly',
                 URL: 'readonly',
+                fetch: 'readonly',
+                setTimeout: 'readonly',
             },
         },
     },
