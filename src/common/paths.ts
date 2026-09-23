@@ -1,12 +1,7 @@
-// Each upload gets its own timestamped folder holding the video and any derived files (result.json).
-export const uploadFolder = (userId: string, timestamp: number) => `users/${userId}/${timestamp}`
+// Every object a user owns lives under their prefix, so deleting an account is one prefix delete.
+export const userPrefix = (userId: string) => `users/${userId}/`
 
-export const uploadPath = (userId: string, timestamp: number, filename: string) =>
-    `${uploadFolder(userId, timestamp)}/${filename}`
-
-export const parentFolder = (path: string) => path.slice(0, path.lastIndexOf('/'))
-
-export const resultPath = (folder: string) => `${folder}/result.json`
+export const jobVideoPath = (userId: string, jobId: string) => `${userPrefix(userId)}jobs/${jobId}/video`
 
 export const gcsUri = (bucket: string, path: string) => `gs://${bucket}/${path}`
 

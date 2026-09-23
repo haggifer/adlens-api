@@ -1,139 +1,109 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import { HttpStatus, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import type { CreateJobInput, Job as JobEntity, JobMedia } from 'adlens-shared'
-import { isValidObjectId, Model } from 'mongoose'
-import { AnalysisLauncher } from '../analysis/analysis-launcher.service'
-import { VerifyService } from '../analysis/verify.service'
-import { sanitizeFilename, uploadPath } from '../common/paths'
-import { QuotaService } from '../quota/quota.service'
-import { JOB_MODEL, JobDocument } from '../schemas/job.schema'
+import {
+    type CreateJobPayload,
+    type CreateJobResponse,
+    type Job,
+    type JobListResponse,
+    JobStatus,
+    type JobVideoResponse,
+    RequestErrorCode,
+} from 'adlens-shared'
+import { isValidObjectId, Model, Types } from 'mongoose'
+import { z } from 'zod'
+import { ApiException } from '../common/api-exception'
+import { jobVideoPath } from '../common/paths'
+import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { StorageService } from '../storage/storage.service'
+import { JobLifecycle } from './job-lifecycle.service'
+import { toPublicJob } from './job.mapper'
 
-type JobPatch = Partial<Pick<JobEntity, 'status' | 'media' | 'analysis' | 'error' | 'execution'>>
-
-const toEntity = (doc: JobDocument): JobEntity => ({
-    id: doc._id.toString(),
-    userId: doc.userId,
-    status: doc.status,
-    settings: doc.settings,
-    file: doc.file,
-    media: doc.media,
-    analysis: doc.analysis,
-    error: doc.error,
-    execution: doc.execution,
-    createdAt: doc.get('createdAt'),
-    updatedAt: doc.get('updatedAt'),
+export const listJobsQuerySchema = z.object({
+    cursor: z
+        .string()
+        .regex(/^[a-f0-9]{24}$/)
+        .optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
 })
+
+export type ListJobsQuery = z.output<typeof listJobsQuerySchema>
+
+const notFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestErrorCode.NotFound, 'Job not found')
 
 @Injectable()
 export class JobsService {
     constructor(
-        @InjectModel(JOB_MODEL) private readonly model: Model<JobDocument>,
+        @InjectModel(JOB_MODEL) private readonly model: Model<JobDoc>,
         private readonly storage: StorageService,
-        private readonly verify: VerifyService,
-        private readonly quota: QuotaService,
-        private readonly launcher: AnalysisLauncher,
+        private readonly lifecycle: JobLifecycle,
     ) {}
 
-    async create(userId: string, input: CreateJobInput): Promise<{ job: JobEntity; uploadUrl: string }> {
-        const timestamp = Date.now()
-        const name = sanitizeFilename(input.file.name)
-        const path = uploadPath(userId, timestamp, name)
-        const doc = await this.model.create({
+    // Creates the pending job and a signed upload target bound to the declared type and size.
+    async create(userId: string, { settings, file }: CreateJobPayload): Promise<CreateJobResponse> {
+        const id = new Types.ObjectId()
+        const path = jobVideoPath(userId, id.toString())
+        const created = await this.model.create({
+            _id: id,
             userId,
-            status: 'pending',
-            settings: input.settings,
-            file: {
-                bucket: this.storage.bucketName,
-                path,
-                name,
-                contentType: input.file.contentType,
-                size: input.file.size,
-            },
+            status: JobStatus.Pending,
+            settings,
+            file: { ...file, bucket: this.storage.bucketName, path },
+            chargedWindowStart: null,
         })
-        const uploadUrl = await this.storage.signedUploadUrl(path, input.file.contentType)
+        const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 
-        return { job: toEntity(doc), uploadUrl }
+        return { job: toPublicJob(created.toObject<StoredJob>()), upload }
     }
 
-    // Quota is consumed only after a successful verification, so a bad upload never costs a run.
-    async analyze(userId: string, id: string): Promise<JobEntity> {
-        const job = await this.getDoc(userId, id)
+    async get(userId: string, jobId: string): Promise<Job> {
+        await this.lifecycle.expireStale(userId)
 
-        if (job.status !== 'pending') {
-            throw new ConflictException('Job is not pending')
-        }
+        const job = await this.findOwned(userId, jobId)
 
-        if (!job.file) {
-            throw new ConflictException('Job has no uploaded video')
-        }
-
-        let media: JobMedia
-
-        try {
-            media = await this.verify.verify(job.file)
-        } catch (err) {
-            await this.storage.delete(job.file.path)
-            await this.update(userId, id, {
-                status: 'error',
-                error: err instanceof Error ? err.message : 'Verification failed',
-            })
-
-            throw err
-        }
-
-        await this.quota.consume(userId)
-
-        let execution: string | undefined
-
-        try {
-            execution = await this.launcher.launch({ userId, jobId: id })
-        } catch (err) {
-            await this.quota.refund(userId)
-
-            throw err
-        }
-
-        return this.update(userId, id, {
-            status: 'queued',
-            media,
-            ...(execution ? { execution } : {}),
-        })
+        return toPublicJob(job)
     }
 
-    async getDoc(userId: string, id: string): Promise<JobDocument> {
-        if (!isValidObjectId(id)) {
-            throw new NotFoundException('Job not found')
+    // Newest first, paged by the last seen id.
+    async list(userId: string, { cursor, limit }: ListJobsQuery): Promise<JobListResponse> {
+        await this.lifecycle.expireStale(userId)
+
+        const jobs = await this.model
+            .find({ userId, ...(cursor ? { _id: { $lt: cursor } } : {}) })
+            .sort({ _id: -1 })
+            .limit(limit + 1)
+            .lean<StoredJob[]>()
+        const page = jobs.slice(0, limit)
+
+        return {
+            jobs: page.map(toPublicJob),
+            nextCursor: jobs.length > limit ? page[page.length - 1]._id.toString() : null,
         }
-
-        const doc = await this.model.findOne({ _id: id, userId })
-
-        if (!doc) {
-            throw new NotFoundException('Job not found')
-        }
-
-        return doc
     }
 
-    async getEntity(userId: string, id: string): Promise<JobEntity> {
-        const doc = await this.getDoc(userId, id)
+    // A short-lived URL for replaying the video; only verified uploads have one worth serving.
+    async createVideoUrl(userId: string, jobId: string): Promise<JobVideoResponse> {
+        const job = await this.findOwned(userId, jobId)
 
-        return toEntity(doc)
-    }
-
-    async list(userId: string): Promise<JobEntity[]> {
-        const docs = await this.model.find({ userId }).sort({ createdAt: -1 }).limit(50)
-
-        return docs.map(toEntity)
-    }
-
-    async update(userId: string, id: string, patch: JobPatch): Promise<JobEntity> {
-        const doc = await this.model.findOneAndUpdate({ _id: id, userId }, { $set: patch }, { new: true })
-
-        if (!doc) {
-            throw new NotFoundException('Job not found')
+        if (!job.media) {
+            throw notFound()
         }
 
-        return toEntity(doc)
+        const { url, expiresAt } = await this.storage.createReadUrl(job.file.path)
+
+        return { url, expiresAt: expiresAt.toISOString() }
+    }
+
+    async findOwned(userId: string, jobId: string): Promise<StoredJob> {
+        if (!isValidObjectId(jobId)) {
+            throw notFound()
+        }
+
+        const job = await this.model.findOne({ _id: jobId, userId }).lean<StoredJob>()
+
+        if (!job) {
+            throw notFound()
+        }
+
+        return job
     }
 }

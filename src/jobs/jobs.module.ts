@@ -1,23 +1,17 @@
 import { Module } from '@nestjs/common'
-import { MongooseModule } from '@nestjs/mongoose'
-
-import { AnalysisModule } from '../analysis/analysis.module'
-import { AuthModule } from '../auth/auth.module'
-import { QuotaModule } from '../quota/quota.module'
-import { JOB_MODEL, JobSchema } from '../schemas/job.schema'
+import { AnalysisDispatchModule } from '../analysis/dispatch/analysis-dispatch.module'
+import { DatabaseModule } from '../database/database.module'
 import { StorageModule } from '../storage/storage.module'
+import { JobAnalysisService } from './job-analysis.service'
+import { JobStoreModule } from './job-store.module'
 import { JobsController } from './jobs.controller'
 import { JobsService } from './jobs.service'
+import { MediaProber } from './verification/media-prober'
+import { VideoVerifier } from './verification/video-verifier.service'
 
 @Module({
-    imports: [
-        MongooseModule.forFeature([{ name: JOB_MODEL, schema: JobSchema }]),
-        AuthModule,
-        StorageModule,
-        QuotaModule,
-        AnalysisModule,
-    ],
+    imports: [DatabaseModule, JobStoreModule, StorageModule, AnalysisDispatchModule],
     controllers: [JobsController],
-    providers: [JobsService],
+    providers: [JobsService, JobAnalysisService, VideoVerifier, MediaProber],
 })
 export class JobsModule {}
