@@ -1,6 +1,9 @@
 import { Global, Module } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-
+import { getConnectionToken } from '@nestjs/mongoose'
+import type { Db, MongoClient } from 'mongodb'
+import type { Connection } from 'mongoose'
+import type { Env } from '../config/env'
 import { AUTH, createAuth } from './auth.instance'
 import { AuthService } from './auth.service'
 import { SessionGuard } from './session.guard'
@@ -10,17 +13,23 @@ import { SessionGuard } from './session.guard'
     providers: [
         {
             provide: AUTH,
-            inject: [ConfigService],
-            useFactory: (config: ConfigService) =>
-                createAuth({
-                    mongoUri: config.getOrThrow<string>('MONGODB_URI'),
-                    secret: config.getOrThrow<string>('BETTER_AUTH_SECRET'),
-                    baseURL: config.get<string>('BETTER_AUTH_URL') ?? 'http://localhost:8080',
-                    trustedOrigins: (config.get<string>('WEB_ORIGIN') ?? 'http://localhost:3000')
-                        .split(',')
-                        .map((o) => o.trim())
-                        .filter(Boolean),
-                }),
+            inject: [ConfigService, getConnectionToken()],
+            useFactory: (config: ConfigService<Env, true>, connection: Connection) => {
+                const secret = config.get('BETTER_AUTH_SECRET', { infer: true })
+
+                if (!secret) {
+                    throw new Error('BETTER_AUTH_SECRET is required')
+                }
+
+                // Mongoose bundles its own copy of the driver; the objects are the same at runtime.
+                return createAuth({
+                    db: connection.db as unknown as Db,
+                    client: connection.getClient() as unknown as MongoClient,
+                    secret,
+                    baseURL: config.get('BETTER_AUTH_URL', { infer: true }),
+                    trustedOrigins: [config.get('WEB_ORIGIN', { infer: true })],
+                })
+            },
         },
         AuthService,
         SessionGuard,
