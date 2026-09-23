@@ -1,13 +1,13 @@
 # Single image for the API and the analysis job. The API runs `node dist/main`; the analysis Cloud
 # Run Job overrides the command to `node dist/job`.
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
