@@ -1,0 +1,15 @@
+[
+    {
+        "origin": ["https://www.useadlens.com", "http://localhost:3000"],
+        "method": ["PUT", "GET", "HEAD"],
+        "responseHeader": [
+            "Content-Type",
+            "Content-Length",
+            "Content-Range",
+            "Accept-Ranges",
+            "Range",
+            "x-goog-content-length-range"
+        ],
+        "maxAgeSeconds": 3600
+    }
+]

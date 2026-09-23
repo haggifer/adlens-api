@@ -25,9 +25,10 @@ echo "== enable APIs =="
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
     aiplatform.googleapis.com secretmanager.googleapis.com storage.googleapis.com
 
-echo "== uploads bucket (created already; ensure CORS) =="
+echo "== uploads bucket + CORS =="
 gcloud storage buckets describe "gs://$BUCKET" >/dev/null 2>&1 || \
     gcloud storage buckets create "gs://$BUCKET" --location="$REGION" --uniform-bucket-level-access
+gcloud storage buckets update "gs://$BUCKET" --cors-file="$(dirname "$0")/cors.json"
 
 echo "== runtime service account =="
 gcloud iam service-accounts describe "$RUNTIME_SA" >/dev/null 2>&1 || \
