@@ -1,0 +1,12 @@
+# Only the in-house contract package is bumped automatically; every other dependency is updated deliberately.
+version: 2
+updates:
+    - package-ecosystem: npm
+      directory: /
+      target-branch: init-setup
+      schedule:
+          interval: daily
+      allow:
+          - dependency-name: adlens-shared
+      commit-message:
+          prefix: chore(deps)
