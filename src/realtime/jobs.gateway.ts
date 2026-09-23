@@ -1,13 +1,12 @@
-import type { IncomingHttpHeaders } from 'node:http'
-
 import { OnGatewayConnection, WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
+import type { Job } from 'adlens-shared'
+import type { IncomingHttpHeaders } from 'node:http'
 import { Server, Socket } from 'socket.io'
-
 import { AuthService } from '../auth/auth.service'
 
-// Authenticates the socket handshake with the same Better Auth session check as the HTTP guard, then
-// joins the socket to a per-user room so job updates only reach their owner.
-@WebSocketGateway({ cors: { origin: true, credentials: true } })
+// Authenticates the socket handshake with the same session check as the HTTP guard, then joins the socket to a
+// per-user room so job updates only reach their owner. CORS comes from the configured IoAdapter (realtime-io.adapter).
+@WebSocketGateway()
 export class JobsGateway implements OnGatewayConnection {
     @WebSocketServer() private readonly server: Server
 
@@ -32,10 +31,10 @@ export class JobsGateway implements OnGatewayConnection {
             return
         }
 
-        void client.join(`user:${userId}`)
+        await client.join(`user:${userId}`)
     }
 
-    emitJobUpdated(userId: string, job: unknown): void {
+    emitJobUpdated(userId: string, job: Job): void {
         this.server.to(`user:${userId}`).emit('job:updated', job)
     }
 }
