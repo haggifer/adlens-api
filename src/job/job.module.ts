@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { MongooseModule } from '@nestjs/mongoose'
 
 import { AnalysisRunner } from '../analysis/analysis-runner.service'
+import { QuotaModule } from '../quota/quota.module'
 import { JOB_MODEL, JobSchema } from '../schemas/job.schema'
 import { StorageModule } from '../storage/storage.module'
 
@@ -17,6 +18,7 @@ import { StorageModule } from '../storage/storage.module'
         }),
         MongooseModule.forFeature([{ name: JOB_MODEL, schema: JobSchema }]),
         StorageModule,
+        QuotaModule,
     ],
     providers: [AnalysisRunner],
 })

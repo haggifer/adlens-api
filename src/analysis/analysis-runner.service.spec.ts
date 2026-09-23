@@ -1,5 +1,6 @@
 import { Model } from 'mongoose'
 
+import { QuotaService } from '../quota/quota.service'
 import { JobDocument } from '../schemas/job.schema'
 import { StorageService } from '../storage/storage.service'
 import { AnalysisRunner } from './analysis-runner.service'
@@ -20,7 +21,8 @@ describe('AnalysisRunner', () => {
             updateOne,
         } as unknown as Model<JobDocument>
         const storage = { saveJson: jest.fn() } as unknown as StorageService
-        const runner = new AnalysisRunner(model, storage)
+        const quota = { refund: jest.fn() } as unknown as QuotaService
+        const runner = new AnalysisRunner(model, storage, quota)
 
         await runner.run('u1', 'j1')
 

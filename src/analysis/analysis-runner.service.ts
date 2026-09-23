@@ -4,6 +4,7 @@ import type { Analysis } from 'adlens-shared'
 import { Model } from 'mongoose'
 
 import { gcsUri, parentFolder, resultPath } from '../common/paths'
+import { QuotaService } from '../quota/quota.service'
 import {
     buildAdvisories,
     buildFindings,
@@ -27,6 +28,7 @@ export class AnalysisRunner {
     constructor(
         @InjectModel(JOB_MODEL) private readonly model: Model<JobDocument>,
         private readonly storage: StorageService,
+        private readonly quota: QuotaService,
     ) {}
 
     async run(userId: string, jobId: string): Promise<void> {
@@ -75,9 +77,21 @@ export class AnalysisRunner {
             await this.storage.saveJson(resultPath(folder), analysis)
             await this.model.updateOne({ _id: jobId }, { $set: { status: 'analyzed', analysis } })
         } catch (err) {
+            const shouldRefund = !job.quotaRefunded
+
+            if (shouldRefund) {
+                await this.quota.refund(userId)
+            }
+
             await this.model.updateOne(
                 { _id: jobId },
-                { $set: { status: 'error', error: err instanceof Error ? err.message : 'Analysis failed' } },
+                {
+                    $set: {
+                        status: 'error',
+                        error: err instanceof Error ? err.message : 'Analysis failed',
+                        ...(shouldRefund ? { quotaRefunded: true } : {}),
+                    },
+                },
             )
 
             throw err

@@ -46,6 +46,11 @@ export class QuotaService {
         }
     }
 
+    // Reverse a charge for a run that failed. Guarded (used > 0) so it can never go negative.
+    async refund(userId: string): Promise<void> {
+        await this.model.updateOne({ userId, used: { $gt: 0 } }, { $inc: { used: -1 } })
+    }
+
     async get(userId: string): Promise<QuotaEntity> {
         const now = Date.now()
         const doc = await this.model.findOne({ userId })
