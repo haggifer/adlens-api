@@ -1,5 +1,5 @@
-# Single image for the API and the analysis job. The API runs `node dist/main`; the analysis Cloud
-# Run Job overrides the command to `node dist/job`.
+# Single image for the API and the analysis worker. The API runs `node dist/main`; the analysis Cloud
+# Run Job overrides the command to `node dist/worker`.
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package*.json ./

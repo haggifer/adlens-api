@@ -9,7 +9,7 @@
 # Prereqs: gcloud authenticated (`gcloud auth login`), and these set in your shell first:
 #   export MONGODB_URI='mongodb+srv://…/adlens?retryWrites=true&w=majority'
 #   export BETTER_AUTH_SECRET='<a long random string>'
-#   export WEB_ORIGIN='https://<your-vercel-app>.vercel.app'   # set after the web is deployed
+#   export WEB_ORIGIN='https://www.useadlens.com'
 set -euo pipefail
 
 PROJECT=adlens-ca57f
@@ -47,12 +47,12 @@ for name in MONGODB_URI BETTER_AUTH_SECRET; do
     gcloud secrets add-iam-policy-binding "$name" --member="serviceAccount:$RUNTIME_SA" --role="roles/secretmanager.secretAccessor"
 done
 
-echo "== deploy analysis job (on-demand; runs dist/job to completion, retried twice) =="
+echo "== deploy analysis worker job (on-demand; runs dist/worker to completion, retried twice) =="
 gcloud run jobs deploy "$ANALYZE_JOB" --source . --region="$REGION" --service-account="$RUNTIME_SA" \
-    --command="node" --args="dist/job" --tasks=1 --max-retries=2 --task-timeout=15m \
+    --command="node" --args="dist/worker" --tasks=1 --max-retries=2 --task-timeout=15m \
     --cpu=2 --memory=2Gi \
     --set-secrets="MONGODB_URI=MONGODB_URI:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,GEMINI_LOCATION=global"
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,GEMINI_LOCATION=global,ANALYZE_MAX_RETRIES=2"
 # The API executes this job as the runtime SA. run.developer on the job includes run.jobs.run; narrow
 # to a custom role with only run.jobs.run + run.executions.get if you prefer (verify with a dry run).
 gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
