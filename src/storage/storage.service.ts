@@ -75,4 +75,8 @@ export class StorageService {
     async delete(path: string): Promise<void> {
         await this.object(path).delete({ ignoreNotFound: true })
     }
+
+    async deletePrefix(prefix: string): Promise<void> {
+        await this.storage.bucket(this.bucketName).deleteFiles({ prefix, force: true })
+    }
 }

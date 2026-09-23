@@ -3,18 +3,28 @@ import { ConfigService } from '@nestjs/config'
 import { getConnectionToken } from '@nestjs/mongoose'
 import type { Db, MongoClient } from 'mongodb'
 import type { Connection } from 'mongoose'
+import { AccountDataService } from '../account/account-data.service'
+import { AccountModule } from '../account/account.module'
 import type { Env } from '../config/env'
+import { MailModule } from '../mail/mail.module'
+import { Mailer } from '../mail/mailer'
 import { AUTH, createAuth } from './auth.instance'
 import { AuthService } from './auth.service'
 import { SessionGuard } from './session.guard'
 
 @Global()
 @Module({
+    imports: [AccountModule, MailModule],
     providers: [
         {
             provide: AUTH,
-            inject: [ConfigService, getConnectionToken()],
-            useFactory: (config: ConfigService<Env, true>, connection: Connection) => {
+            inject: [ConfigService, getConnectionToken(), Mailer, AccountDataService],
+            useFactory: (
+                config: ConfigService<Env, true>,
+                connection: Connection,
+                mailer: Mailer,
+                accountData: AccountDataService,
+            ) => {
                 const secret = config.get('BETTER_AUTH_SECRET', { infer: true })
 
                 if (!secret) {
@@ -27,7 +37,10 @@ import { SessionGuard } from './session.guard'
                     client: connection.getClient() as unknown as MongoClient,
                     secret,
                     baseURL: config.get('BETTER_AUTH_URL', { infer: true }),
-                    trustedOrigins: [config.get('WEB_ORIGIN', { infer: true })],
+                    webOrigin: config.get('WEB_ORIGIN', { infer: true }),
+                    cookieDomain: config.get('COOKIE_DOMAIN', { infer: true }),
+                    mailer,
+                    onDeleteUser: (userId) => accountData.purge(userId),
                 })
             },
         },

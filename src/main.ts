@@ -18,7 +18,7 @@ const bootstrap = async () => {
     const webOrigin = config.get('WEB_ORIGIN', { infer: true })
 
     app.use(helmet())
-    app.enableCors({ origin: webOrigin, credentials: true, exposedHeaders: ['set-auth-token'] })
+    app.enableCors({ origin: webOrigin, credentials: true })
     app.enableShutdownHooks()
     app.useGlobalFilters(new ApiExceptionFilter())
     app.useWebSocketAdapter(new RealtimeIoAdapter(app, webOrigin))

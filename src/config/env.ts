@@ -18,6 +18,11 @@ const envSchema = z.object({
     WEB_ORIGIN: z.url().default('http://localhost:3000'),
     BETTER_AUTH_URL: z.url().default('http://localhost:8080'),
     BETTER_AUTH_SECRET: z.string().optional(),
+    // Parent domain the session cookie is shared across (api. and www.); unset locally, where cookies stay host-only.
+    COOKIE_DOMAIN: z.string().optional(),
+    // Without a key, auth emails are logged instead of sent (local development).
+    RESEND_API_KEY: z.string().optional(),
+    MAIL_FROM: z.string().default('AdLens <no-reply@mail.useadlens.com>'),
     QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
     GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
     GEMINI_LOCATION: z.string().default('global'),
