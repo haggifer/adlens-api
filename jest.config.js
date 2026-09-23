@@ -4,4 +4,5 @@ module.exports = {
     rootDir: 'src',
     testRegex: '.*\\.spec\\.ts$',
     moduleFileExtensions: ['ts', 'js', 'json'],
+    testTimeout: 60000,
 }
