@@ -1,0 +1,85 @@
+import { Injectable, Logger } from '@nestjs/common'
+import { type Analysis, JobErrorCode } from 'adlens-shared'
+import { gcsUri } from '../../common/paths'
+import type { StoredJob, TokenUsage } from '../../database/job.doc'
+import { JobLifecycle } from '../../jobs/job-lifecycle.service'
+import { buildAdvisories, buildFindings, evaluateMetadataRules, projectForModel, selectRules } from '../../rules'
+import { RulesetService } from '../../rules/ruleset.service'
+import { VideoReviewer } from '../review/video-reviewer'
+import { isRetryable } from './retryable-error'
+
+export type RunOutcome = 'analyzed' | 'failed' | 'skipped'
+
+export interface RunAttempt {
+    isLast: boolean
+}
+
+// One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
+// attempt; any other failure ends the job in `error` with its charge refunded, and the process exits cleanly.
+@Injectable()
+export class AnalysisPipeline {
+    private readonly logger = new Logger(AnalysisPipeline.name)
+
+    constructor(
+        private readonly lifecycle: JobLifecycle,
+        private readonly reviewer: VideoReviewer,
+        private readonly ruleset: RulesetService,
+    ) {}
+
+    async run(jobId: string, attempt: RunAttempt): Promise<RunOutcome> {
+        const job = await this.lifecycle.startAttempt(jobId)
+
+        if (!job) {
+            this.logger.warn(`job ${jobId} is not in flight; nothing to do`)
+            return 'skipped'
+        }
+
+        try {
+            const { analysis, usage } = await this.analyze(job)
+            const isCompleted = await this.lifecycle.complete(jobId, analysis, usage)
+
+            return isCompleted ? 'analyzed' : 'skipped'
+        } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err)
+
+            if (isRetryable(err) && !attempt.isLast) {
+                this.logger.warn(`job ${jobId} failed transiently, leaving it for a retry: ${detail}`)
+                throw err
+            }
+
+            this.logger.error(`job ${jobId} failed: ${detail}`)
+            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail)
+
+            return 'failed'
+        }
+    }
+
+    private async analyze(job: StoredJob): Promise<{ analysis: Analysis; usage: TokenUsage }> {
+        if (!job.media) {
+            throw new Error('Job has no verified media')
+        }
+
+        const ruleSet = this.ruleset.current()
+        const selected = selectRules(ruleSet, job.settings)
+        const review = await this.reviewer.review({
+            videoUri: gcsUri(job.file.bucket, job.file.path),
+            mimeType: job.file.contentType,
+            rules: projectForModel(selected.content),
+            settings: job.settings,
+        })
+
+        return {
+            analysis: {
+                model: review.model,
+                promptVersion: review.promptVersion,
+                rulesetVersion: ruleSet.meta.version,
+                transcript: review.transcript,
+                findings: buildFindings(ruleSet, selected.content, review.findings),
+                metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, job.media),
+                advisories: buildAdvisories(ruleSet, selected.advisory),
+                completedAt: new Date().toISOString(),
+            },
+            usage: review.usage,
+        }
+    }
+}
