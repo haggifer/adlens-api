@@ -1,68 +1,78 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common'
+import { HttpStatus, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { InjectModel } from '@nestjs/mongoose'
-import type { Quota as QuotaEntity } from 'adlens-shared'
+import { type Quota, QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
 import { Model } from 'mongoose'
+import { ApiException } from '../common/api-exception'
+import type { Env } from '../config/env'
+import { QUOTA_MODEL, type QuotaDoc } from '../database/quota.doc'
 
-import { QUOTA_MODEL, QuotaDocument } from '../schemas/quota.schema'
-
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+// A window is closed when it never opened, holds a pre-Date legacy value, or started more than a window ago.
+const isWindowClosed = (cutoff: Date) => ({
+    $or: [{ $ne: [{ $type: '$windowStart' }, 'date'] }, { $lt: ['$windowStart', cutoff] }],
+})
 
 @Injectable()
 export class QuotaService {
     private readonly defaultLimit: number
 
     constructor(
-        @InjectModel(QUOTA_MODEL) private readonly model: Model<QuotaDocument>,
-        config: ConfigService,
+        @InjectModel(QUOTA_MODEL) private readonly model: Model<QuotaDoc>,
+        config: ConfigService<Env, true>,
     ) {
-        this.defaultLimit = Number(config.get('QUOTA_LIMIT') ?? 3)
+        this.defaultLimit = config.get('QUOTA_LIMIT', { infer: true })
     }
 
-    // The only place a run is counted. The doc is server-owned, so quota is unspoofable. Atomicity comes
-    // from a single findOneAndUpdate guarded by used < limit ($expr) — no transaction needed.
-    async consume(userId: string): Promise<void> {
-        const now = Date.now()
-
+    // Charges one run and returns the window it was charged to. The charge is a single conditional update: it
+    // matches only when the window is closed (it restarts at 1) or still has room, so concurrent calls can't overdraw.
+    async consume(userId: string, now = new Date()): Promise<Date> {
         await this.model.updateOne(
             { userId },
-            { $setOnInsert: { used: 0, limit: this.defaultLimit, windowStart: now } },
+            { $setOnInsert: { used: 0, limit: this.defaultLimit, windowStart: null } },
             { upsert: true },
         )
 
-        await this.model.updateOne(
-            { userId, windowStart: { $lt: now - WEEK_MS } },
-            { $set: { used: 0, windowStart: now } },
-        )
+        const closed = isWindowClosed(new Date(now.getTime() - QUOTA_WINDOW_MS))
+        const charged = await this.model
+            .findOneAndUpdate(
+                { userId, $expr: { $or: [closed, { $lt: ['$used', '$limit'] }] } },
+                [
+                    {
+                        $set: {
+                            windowStart: { $cond: [closed, now, '$windowStart'] },
+                            used: { $cond: [closed, 1, { $add: ['$used', 1] }] },
+                        },
+                    },
+                ],
+                { new: true },
+            )
+            .lean<QuotaDoc>()
 
-        const updated = await this.model.findOneAndUpdate(
-            { userId, $expr: { $lt: ['$used', '$limit'] } },
-            { $inc: { used: 1 } },
-            { new: true },
-        )
-
-        if (!updated) {
-            throw new HttpException('Weekly limit reached', HttpStatus.TOO_MANY_REQUESTS)
+        if (!charged?.windowStart) {
+            throw new ApiException(
+                HttpStatus.TOO_MANY_REQUESTS,
+                RequestErrorCode.QuotaExceeded,
+                'Analysis limit reached',
+            )
         }
+
+        return charged.windowStart
     }
 
-    // Reverse a charge for a run that failed. Guarded (used > 0) so it can never go negative.
-    async refund(userId: string): Promise<void> {
-        await this.model.updateOne({ userId, used: { $gt: 0 } }, { $inc: { used: -1 } })
+    // Gives a charge back, but only to the window it was taken from: a refund after the window rolled over is dropped.
+    async refund(userId: string, windowStart: Date): Promise<void> {
+        await this.model.updateOne({ userId, windowStart, used: { $gt: 0 } }, { $inc: { used: -1 } })
     }
 
-    async get(userId: string): Promise<QuotaEntity> {
-        const now = Date.now()
-        const doc = await this.model.findOne({ userId })
+    async get(userId: string, now = new Date()): Promise<Quota> {
+        const doc = await this.model.findOne({ userId }).lean<QuotaDoc>()
+        const limit = doc?.limit ?? this.defaultLimit
+        const windowStart = doc?.windowStart instanceof Date ? doc.windowStart : null
 
-        if (!doc) {
-            return { used: 0, limit: this.defaultLimit, windowStart: now }
+        if (!doc || !windowStart || now.getTime() - windowStart.getTime() >= QUOTA_WINDOW_MS) {
+            return { used: 0, limit, windowStart: null }
         }
 
-        if (now - doc.windowStart >= WEEK_MS) {
-            return { used: 0, limit: doc.limit, windowStart: now }
-        }
-
-        return { used: doc.used, limit: doc.limit, windowStart: doc.windowStart }
+        return { used: doc.used, limit, windowStart: windowStart.toISOString() }
     }
 }
