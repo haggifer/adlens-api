@@ -1,25 +1,15 @@
 import { Module } from '@nestjs/common'
-import { ConfigModule, ConfigService } from '@nestjs/config'
-import { MongooseModule } from '@nestjs/mongoose'
-
 import { AuthModule } from './auth/auth.module'
+import { appConfigModule } from './config/env'
+import { DatabaseModule } from './database/database.module'
 import { HealthController } from './health.controller'
 import { JobsModule } from './jobs/jobs.module'
-import { ProfileModule } from './profile/profile.module'
+import { MeModule } from './me/me.module'
 import { RealtimeModule } from './realtime/realtime.module'
 
+// Composition root of the API process (main.ts).
 @Module({
-    imports: [
-        ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
-        MongooseModule.forRootAsync({
-            inject: [ConfigService],
-            useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>('MONGODB_URI') }),
-        }),
-        AuthModule,
-        JobsModule,
-        ProfileModule,
-        RealtimeModule,
-    ],
+    imports: [appConfigModule, DatabaseModule, AuthModule, JobsModule, MeModule, RealtimeModule],
     controllers: [HealthController],
 })
 export class AppModule {}
