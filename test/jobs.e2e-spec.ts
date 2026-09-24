@@ -10,6 +10,7 @@ import { AppModule } from '../src/app.module'
 import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
+import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { JobEventsService } from '../src/realtime/job-events.service'
@@ -18,6 +19,7 @@ import { type ObjectInfo, StorageService } from '../src/storage/storage.service'
 const OWNER = 'owner'
 const STRANGER = 'stranger'
 const SAMPLER = 'sampler'
+const DELETER = 'deleter'
 const FILE = { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 5_000_000 }
 const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
 
@@ -26,6 +28,7 @@ describe('Jobs API (e2e)', () => {
     let storedObject: ObjectInfo | null
     let probe: ProbeResult
     const dispatch = jest.fn(async () => 'executions/exec-1')
+    const deleteObject = jest.fn(async (_path: string) => undefined)
 
     const as = (userId: string) => ({ 'x-test-user': userId })
     const createJob = async (): Promise<string> => {
@@ -56,7 +59,7 @@ describe('Jobs API (e2e)', () => {
                     expiresAt: new Date(),
                 }),
                 getObjectInfo: async () => storedObject,
-                delete: async () => undefined,
+                delete: deleteObject,
             })
             .overrideProvider(MediaProber)
             .useValue({ probe: async () => probe })
@@ -75,6 +78,7 @@ describe('Jobs API (e2e)', () => {
         storedObject = { sizeBytes: FILE.size, contentType: FILE.contentType }
         probe = { durationS: 20, width: 1080, height: 1920, hasAudio: true }
         dispatch.mockClear()
+        deleteObject.mockClear()
     })
 
     afterAll(async () => {
@@ -319,6 +323,73 @@ describe('Jobs API (e2e)', () => {
             expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
             expect(job.body.job.status).toBe(JobStatus.Pending)
             expect(dispatch).not.toHaveBeenCalled()
+        })
+
+        it('deletes a sample analysis without touching the shared sample video', async () => {
+            const created = await request(app.getHttpServer())
+                .post('/v1/jobs/from-sample')
+                .set(as(SAMPLER))
+                .send({ sampleId, settings: SETTINGS })
+                .expect(201)
+
+            await request(app.getHttpServer()).delete(`/v1/jobs/${created.body.job.id}`).set(as(SAMPLER)).expect(204)
+
+            expect(deleteObject).not.toHaveBeenCalled()
+        })
+    })
+
+    describe('deleting an analysis', () => {
+        let jobs: Model<JobDoc>
+
+        const createAs = async (userId: string): Promise<string> => {
+            const res = await request(app.getHttpServer())
+                .post('/v1/jobs')
+                .set(as(userId))
+                .send({ settings: SETTINGS, file: FILE })
+                .expect(201)
+
+            return res.body.job.id
+        }
+
+        beforeAll(() => {
+            jobs = app.get(getModelToken(JOB_MODEL))
+        })
+
+        it('deletes a finished analysis and its uploaded video', async () => {
+            const jobId = await createAs(DELETER)
+
+            await jobs.updateOne({ _id: jobId }, { $set: { status: JobStatus.Analyzed } })
+            await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(204)
+
+            expect(deleteObject).toHaveBeenCalledWith(`users/${DELETER}/jobs/${jobId}/video`)
+            await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(404)
+        })
+
+        it('deletes an analysis that never started', async () => {
+            const jobId = await createAs(DELETER)
+
+            await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(204)
+            await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(404)
+        })
+
+        it("refuses to delete another user's analysis", async () => {
+            const jobId = await createAs(DELETER)
+            const res = await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(STRANGER)).expect(404)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+            expect(deleteObject).not.toHaveBeenCalled()
+        })
+
+        it('refuses to delete an analysis while it runs', async () => {
+            const jobId = await createAs(DELETER)
+
+            await jobs.updateOne({ _id: jobId }, { $set: { status: JobStatus.Analyzing } })
+
+            const res = await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(409)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.JobInProgress)
+            expect(deleteObject).not.toHaveBeenCalled()
+            await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(200)
         })
     })
 })

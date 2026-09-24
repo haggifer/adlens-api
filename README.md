@@ -102,6 +102,7 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)    | `{ jobs, nextCursor }`         |
 | `GET /v1/jobs/:id`          | One owned job                                                   | `{ job }`                      |
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
+| `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
 

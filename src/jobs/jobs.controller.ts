@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common'
 import {
     createJobInputSchema,
     type CreateJobPayload,
@@ -56,6 +56,12 @@ export class JobsController {
     @Get(':id')
     async getOne(@CurrentUser() userId: string, @Param('id') id: string): Promise<JobResponse> {
         return { job: await this.jobs.get(userId, id) }
+    }
+
+    @Delete(':id')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    remove(@CurrentUser() userId: string, @Param('id') id: string): Promise<void> {
+        return this.jobs.remove(userId, id)
     }
 
     @Get(':id/video')

@@ -13,7 +13,7 @@ import {
 import { isValidObjectId, Model, Types } from 'mongoose'
 import { z } from 'zod'
 import { ApiException } from '../common/api-exception'
-import { jobVideoPath } from '../common/paths'
+import { jobVideoPath, userPrefix } from '../common/paths'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
@@ -29,6 +29,12 @@ export const listJobsQuerySchema = z.object({
 })
 
 export type ListJobsQuery = z.output<typeof listJobsQuerySchema>
+
+// A job in these states is being worked on and can't be deleted until it finishes (or is expired as stale).
+const IN_PROGRESS = [JobStatus.Verifying, JobStatus.Queued, JobStatus.Analyzing]
+
+const inProgress = () =>
+    new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobInProgress, 'The analysis is still running')
 
 const notFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestErrorCode.NotFound, 'Job not found')
 
@@ -96,6 +102,28 @@ export class JobsService {
         return {
             jobs: page.map(toPublicJob),
             nextCursor: jobs.length > limit ? page[page.length - 1]._id.toString() : null,
+        }
+    }
+
+    // Deletes an analysis and, for an upload, its video. A run's quota charge stays spent. The video goes first, so a
+    // failed storage call leaves the job in place to retry; a sample's shared video is never deleted.
+    async remove(userId: string, jobId: string): Promise<void> {
+        await this.lifecycle.expireStale(userId)
+
+        const job = await this.findOwned(userId, jobId)
+
+        if (IN_PROGRESS.includes(job.status)) {
+            throw inProgress()
+        }
+
+        if (!job.sampleId && job.file.path.startsWith(userPrefix(userId))) {
+            await this.storage.delete(job.file.path)
+        }
+
+        const { deletedCount } = await this.model.deleteOne({ _id: job._id, userId, status: { $nin: IN_PROGRESS } })
+
+        if (!deletedCount) {
+            throw inProgress()
         }
     }
 
