@@ -5,6 +5,7 @@ export interface MailMessage {
     subject: string
     text: string
     html: string
+    replyTo?: string
 }
 
 export abstract class Mailer {
@@ -21,11 +22,11 @@ export class ResendMailer extends Mailer {
         super()
     }
 
-    async send({ to, subject, text, html }: MailMessage): Promise<void> {
+    async send({ to, subject, text, html, replyTo }: MailMessage): Promise<void> {
         const response = await fetch(RESEND_ENDPOINT, {
             method: 'POST',
             headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: this.from, to: [to], subject, text, html }),
+            body: JSON.stringify({ from: this.from, to: [to], subject, text, html, reply_to: replyTo }),
         })
 
         if (!response.ok) {
