@@ -122,23 +122,14 @@ some combination of settings. Selected rules are then routed by `modality`:
 
 Every analysis records `model`, `promptVersion` and `rulesetVersion`, plus token usage on the job for cost tracking.
 
-## Code map
+## Layout
 
 ```
-src/
-  main.ts · app.module.ts           API process
-  worker.ts · worker.module.ts      analysis worker process
-  config/env.ts                     one Zod-validated env schema for both processes
-  database/                         Mongo connection + document schemas (Zod → Mongoose via zodToMongoose)
-  jobs/                             REST endpoints, JobLifecycle (status owner), start orchestration, verification
-  analysis/dispatch/                AnalysisDispatcher: Cloud Run Job execution, or a local child process in dev
-  analysis/review/                  VideoReviewer port + Gemini on Vertex implementation + prompt/output schema
-  analysis/pipeline/                the worker's pipeline and retry classification
-  rules/                            ruleset schema and serving, selection, metadata checks, finding assembly
-scripts/publish-ruleset.ts          publishes rules.json as a new immutable ruleset version
-  quota/ · me/                      quota accounting and GET /v1/me/quota
-  realtime/                         Change Stream → Socket.IO
-  auth/                             Better Auth on the app's Mongo connection, session guard
+src/        main.ts (API) and worker.ts (analysis worker), one Nest module per feature: jobs, analysis, rules, quota,
+            auth, account, mail, storage, realtime, database, config
+test/       e2e (Supertest) and auth-flow tests
+scripts/    ruleset publishing, dependency guard
+infra/      gcloud setup script and bucket CORS policy
 ```
 
 ## Environment
@@ -200,20 +191,75 @@ Identity Federation: GitHub's OIDC token is exchanged for a short-lived credenti
 only this repository's pushes to `init-setup` are accepted. It builds one image, pushes it to Artifact Registry, rolls
 the `adlens-analyze` job and then the `adlens-api` service to that digest, and ends with a health check.
 
-[`infra/setup.sh`](infra/setup.sh) (gcloud; Pulumi deliberately skipped, see [DECISIONS.md](DECISIONS.md)) creates
+[`infra/setup.sh`](infra/setup.sh) (plain gcloud, see [Design decisions](#design-decisions)) creates
 everything the workflow relies on: the APIs, the bucket and its CORS policy from [`infra/cors.json`](infra/cors.json),
 the runtime and deploy service accounts, the Workload Identity provider, the secrets and the image repository. It also
 owns the runtime config (env vars, secrets, the job's 2 retries and 15-minute timeout), which CI leaves untouched, and
 can deploy the current checkout by hand. The API is served at `https://api.useadlens.com` through a Cloud Run domain
 mapping.
 
-## Decisions
+## Design decisions
 
-See [DECISIONS.md](DECISIONS.md). The two worth calling out:
+Why the system is built this way, and what was rejected. Decisions that span the three repos are recorded here.
 
-- **Sizing the architecture to the load.** Analysis was first a BullMQ worker on Redis, an always-on service idle
-  99% of the time for a product with a few runs per week. It became an on-demand Cloud Run Job: no idle cost, per-run
-  isolation, retries and a hard timeout.
-- **Correctness by construction.** A job's status has one owner and every transition is a guarded atomic update, so
-  the failure modes of an asynchronous pipeline (double submits, crashed or retried workers, lost dispatches) end in a
-  defined state with the quota refunded exactly once, and tests prove it against a real MongoDB.
+**Architecture**
+
+- **Analysis runs as an on-demand Cloud Run Job.** It started as a BullMQ worker on Redis: an always-on service idle
+  over 99% of the time at a few analyses a week. A job costs nothing when idle and gives per-run isolation, retries and
+  a hard timeout. Cloud Tasks pushing to a scale-to-zero service would also work; worker pools with an external
+  autoscaler were more moving parts for no gain at this load.
+- **One image, two entry points.** The API (`dist/main`) and the worker (`dist/worker`) share code and an image but have
+  separate composition roots, so the worker has no HTTP layer and can't start another worker.
+- **MongoDB (Atlas) over Postgres.** A job is one nested document (settings, media facts, analysis), and Change Streams
+  give realtime updates without a separate broker. They need a replica set, which Atlas provides (and Better Auth needs
+  for transactions).
+- **Realtime through Socket.IO fed by a Change Stream**, one watcher per API instance. Running several instances
+  behind a load balancer would need a shared Socket.IO adapter.
+- **Gemini on Vertex AI with Application Default Credentials**, so no API key exists. Gemini 3 models are served from
+  the `global` location.
+
+**Correctness**
+
+- **One owner for job status.** `JobLifecycle` performs every transition as a conditional update on the expected
+  current status. Status written from several places allowed double charges and dispatches, regressions from
+  `analyzing` to `queued`, and jobs stuck in progress after a crashed worker.
+- **Charge when queued, refund at most once.** The atomic charge is the gate; charging only after success would let
+  concurrent requests pass a non-consuming check. The job stores the window it was charged to, and the write that ends
+  a run clears it, so exactly one caller refunds, into the window the charge came from.
+- **Attempt-aware retries.** Cloud Run retries any non-zero exit, so the worker reads its attempt number: transient
+  failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. Malformed or truncated model
+  output counts as transient because generation is stochastic, and `maxOutputTokens` caps what an attempt can cost.
+- **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
+  loop into an 18k-token malformed reply in testing.
+- **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
+  the signed upload URL binds the exact declared size. Only a definite problem with the file deletes it; storage or
+  network trouble leaves the job pending.
+- **Lazy expiry instead of a scheduler.** Abandoned jobs are expired when their owner next reads their jobs, which
+  needs no Cloud Scheduler.
+- **Tests run against a real MongoDB** (`mongodb-memory-server`), because the guarantees above live in query semantics
+  that mocks can't prove. Auth flows run against the real Better Auth, which Jest can't load (ESM), under Node's test
+  runner.
+
+**Contract and rules**
+
+- **The contract package holds only the contract.** `adlens-shared` publishes request, response and public job
+  schemas. The stored job is composed here from those blocks plus server-only fields (owner, storage path, execution,
+  accounting), so they never reach a client. It is published by CI and pinned exactly, because a `file:` link only
+  works on one machine.
+- **Rulesets are immutable, versioned data in MongoDB.** `npm run rules:publish` validates with the worker's own
+  schema and refuses an existing version, so a rules change needs no deploy and every analysis records its
+  `rulesetVersion`. A script was chosen over an admin endpoint, which would need an admin identity model.
+- **Rules target placements and markets, not just platforms.** Format caps such as the 6-second bumper apply only to
+  their placement, and UK/EU/US rules only in their market; a test proves every rule is reachable.
+
+**Auth and hosting**
+
+- **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
+  Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
+  `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
+  keep its sending reputation separate.
+- **Keyless deploys, one image per commit.** GitHub Actions authenticates through Workload Identity Federation, limited
+  to this repository's `init-setup` branch by numeric ids, so no long-lived key exists. The worker job and the API are
+  rolled to the same digest, the job first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
+- **Infrastructure as a gcloud script.** The infrastructure is a handful of set-once resources, so an idempotent,
+  committed script is enough; Terraform or Pulumi would be the step up if it grows.

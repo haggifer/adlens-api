@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # AdLens infrastructure setup. Idempotent-ish gcloud script — safe to re-run.
-# Pulumi was deliberately skipped: infra is small/set-once and IaC is already shown twice in the
-# portfolio (CDK, Terraform). See DECISIONS.md.
+# A handful of set-once resources, so a committed gcloud script instead of Terraform/Pulumi (see the README's
+# design decisions).
 #
 # The analysis runs as an on-demand Cloud Run Job (adlens-analyze) launched by the API — there is no
 # always-on worker service and no Redis.
