@@ -68,8 +68,7 @@ web_modules/
 # dotenv environment variable files
 .env.*
 !.env.example
-# .env holds only non-secret Functions config (STORAGE_BUCKET etc.); real secrets live in
-# Secret Manager / .secret.local, so it is committed.
+# .env holds only non-secret defaults (STORAGE_BUCKET etc.), so it is committed; secrets go in .env.local.
 !.env
 
 # parcel-bundler cache (https://parceljs.org/)
@@ -146,3 +145,7 @@ vite.config.ts.timestamp-*
 
 # Firebase emulator secrets (never commit)
 .secret.local
+
+# Personal agent settings and notes
+.claude/
+CLAUDE.local.md
