@@ -5,11 +5,13 @@ import type { Env } from '../config/env'
 import { JOB_MODEL, JobSchema } from './job.doc'
 import { QUOTA_MODEL, QuotaSchema } from './quota.doc'
 import { RULESET_MODEL, RulesetSchema } from './ruleset.doc'
+import { SAMPLE_MODEL, SampleSchema } from './sample.doc'
 
 const models = MongooseModule.forFeature([
     { name: JOB_MODEL, schema: JobSchema },
     { name: QUOTA_MODEL, schema: QuotaSchema },
     { name: RULESET_MODEL, schema: RulesetSchema },
+    { name: SAMPLE_MODEL, schema: SampleSchema },
 ])
 
 // The Mongo connection and every model, registered once for both the API and the worker.

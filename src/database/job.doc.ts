@@ -35,6 +35,8 @@ export const jobDocSchema = z.object({
     // The quota window this job's run was charged to; null when nothing is charged (never charged, or refunded).
     chargedWindowStart: z.date().nullable(),
     usage: tokenUsageSchema.optional(),
+    // Set when the job analyzes a published sample; its file then points at the sample's object, never a user upload.
+    sampleId: z.string().optional(),
 })
 
 export type JobDoc = z.infer<typeof jobDocSchema>

@@ -14,6 +14,7 @@ npm test                 # unit tests (real MongoDB via mongodb-memory-server)
 npm run test:e2e         # Supertest against the app with fake storage, prober, dispatcher and auth
 npm run test:auth        # after `npm run build`: real Better Auth flows under Node's test runner
 npm run rules:publish    # publish src/rules/rules.json as a new immutable ruleset version
+npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a sample ad
 ```
 
 ## Rules that must not break
@@ -31,6 +32,8 @@ npm run rules:publish    # publish src/rules/rules.json as a new immutable rules
 - `ANALYZE_MAX_RETRIES` must equal the Cloud Run Job's `--max-retries` in `infra/setup.sh`.
 - Never delete a user's upload on a transient storage or network error; only a definite problem with the file
   deletes it.
+- A job with a `sampleId` points at a shared sample video under `samples/`: it skips upload verification, and nothing
+  that cleans up jobs or accounts may ever delete that object.
 
 ## Conventions
 

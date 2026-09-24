@@ -3,6 +3,8 @@ import {
     createJobInputSchema,
     type CreateJobPayload,
     type CreateJobResponse,
+    createSampleJobInputSchema,
+    type CreateSampleJobPayload,
     type JobListResponse,
     type JobResponse,
     type JobVideoResponse,
@@ -27,6 +29,14 @@ export class JobsController {
         @Body(new ZodValidationPipe(createJobInputSchema)) input: CreateJobPayload,
     ): Promise<CreateJobResponse> {
         return this.jobs.create(userId, input)
+    }
+
+    @Post('from-sample')
+    async createFromSample(
+        @CurrentUser() userId: string,
+        @Body(new ZodValidationPipe(createSampleJobInputSchema)) input: CreateSampleJobPayload,
+    ): Promise<JobResponse> {
+        return { job: await this.jobs.createFromSample(userId, input) }
     }
 
     @Post(':id/analyze')

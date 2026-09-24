@@ -50,7 +50,8 @@ conditional update on the expected current status, so two racing callers can nev
    - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
      metadata plus ffprobe over a signed read URL (range reads, no download). A bad file (unreadable, too long, too
      large, unsupported type) is rejected with 422 and deleted. A missing upload (409 `UPLOAD_INCOMPLETE`) or a storage
-     or network problem (503) puts the job back to `pending` and never deletes the user's file;
+     or network problem (503) puts the job back to `pending` and never deletes the user's file. A job on a
+     [sample ad](#sample-ads) skips this step: its video was measured when the sample was published;
    - **charge** one run and move to `queued` (429 `QUOTA_EXCEEDED` when the window is spent);
    - **dispatch** the worker. If that fails, the job goes back to `pending` and the charge is refunded (503).
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
@@ -87,7 +88,7 @@ charge came from.
 
 ## API
 
-Every `/v1/*` route requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
+Every `/v1/*` route except `GET /v1/samples` requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
 
@@ -96,11 +97,13 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `ALL /api/auth/*`           | Better Auth (public)                                            | Better Auth                    |
 | `GET /health`               | Liveness (public)                                               | `{ status, service, time }`    |
 | `POST /v1/jobs`             | Create a pending job and its signed upload target               | `{ job, upload }`              |
+| `POST /v1/jobs/from-sample` | Create a pending job on a published sample ad (no upload)       | `{ job }`                      |
 | `POST /v1/jobs/:id/analyze` | Verify → charge → dispatch                                      | **202** `{ job }`              |
 | `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)    | `{ jobs, nextCursor }`         |
 | `GET /v1/jobs/:id`          | One owned job                                                   | `{ job }`                      |
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
+| `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
 
 ## Ad-policy rules
 
@@ -121,6 +124,35 @@ some combination of settings. Selected rules are then routed by `modality`:
 - `out_of_creative` → an advisory checklist, never auto-judged.
 
 Every analysis records `model`, `promptVersion` and `rulesetVersion`, plus token usage on the job for cost tracking.
+
+## Sample ads
+
+Sample ads let anyone try AdLens without an ad of their own. Each is a document in the `samples` collection (title,
+description, storage path, media facts, suggested settings, display order, published flag), and its video is stored
+under `samples/` in the uploads bucket. `GET /v1/samples` lists them with short-lived preview URLs; the web app fills
+in the suggested settings, which the user can change, and `POST /v1/jobs/from-sample` creates a job that points at the
+sample's video. Analyzing it skips upload verification (the video was measured when it was published); the only check
+is that a published sample still points at that object. It is charged like any other analysis.
+
+Publish or update a sample from a manifest (the `video` path is relative to the manifest):
+
+```json
+{
+    "slug": "running-shoes",
+    "title": "Running shoes",
+    "description": "A 15-second product spot with a spoken offer",
+    "video": "running-shoes.mp4",
+    "settings": { "platforms": ["YouTube"], "placements": ["youtube_shorts"], "markets": ["US"] },
+    "order": 1
+}
+```
+
+```bash
+npm run samples:publish -- path/to/running-shoes.json --dry-run   # validate and measure only
+npm run samples:publish -- path/to/running-shoes.json             # upload to samples/ and upsert by slug
+```
+
+Set `"isPublished": false` and publish again to hide a sample.
 
 ## Layout
 

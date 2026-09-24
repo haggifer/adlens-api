@@ -10,6 +10,7 @@ export const toPublicJob = (job: StoredJob): Job => ({
     media: job.media,
     analysis: job.analysis,
     errorCode: job.errorCode,
+    sampleId: job.sampleId,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
 })

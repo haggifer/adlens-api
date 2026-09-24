@@ -1,6 +1,8 @@
 import type { INestApplication } from '@nestjs/common'
+import { getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
 import { JobErrorCode, JobStatus, RequestErrorCode, VideoMimeType } from 'adlens-shared'
+import type { Model } from 'mongoose'
 import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
 import { AnalysisDispatcher } from '../src/analysis/dispatch/analysis-dispatcher'
@@ -8,14 +10,16 @@ import { AppModule } from '../src/app.module'
 import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
+import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { JobEventsService } from '../src/realtime/job-events.service'
 import { type ObjectInfo, StorageService } from '../src/storage/storage.service'
 
 const OWNER = 'owner'
 const STRANGER = 'stranger'
+const SAMPLER = 'sampler'
 const FILE = { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 5_000_000 }
-const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'], objective: 'Awareness' }
+const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
 
 describe('Jobs API (e2e)', () => {
     let app: INestApplication
@@ -177,5 +181,144 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.jobs).toHaveLength(2)
         expect(res.body.nextCursor).toEqual(expect.any(String))
         expect(next.body.jobs[0].id < res.body.jobs[1].id).toBe(true)
+    })
+
+    describe('sample ads', () => {
+        const SAMPLE_MEDIA = {
+            durationS: 15,
+            width: 1920,
+            height: 1080,
+            hasAudio: true,
+            sizeBytes: 4_000_000,
+            contentType: VideoMimeType.Mp4,
+        }
+        let samples: Model<SampleDoc>
+        let sampleId: string
+
+        beforeAll(async () => {
+            samples = app.get(getModelToken(SAMPLE_MODEL))
+
+            const [published] = await samples.create([
+                {
+                    slug: 'running-shoes',
+                    title: 'Running shoes',
+                    description: 'A 15-second product spot',
+                    file: {
+                        name: 'running-shoes.mp4',
+                        contentType: VideoMimeType.Mp4,
+                        size: 4_000_000,
+                        bucket: 'test-bucket',
+                        path: 'samples/running-shoes.mp4',
+                    },
+                    media: SAMPLE_MEDIA,
+                    settings: { platforms: ['YouTube'], placements: ['youtube_shorts'], markets: ['US'] },
+                    order: 1,
+                },
+                {
+                    slug: 'hidden',
+                    title: 'Unpublished',
+                    description: 'Not listed',
+                    file: {
+                        name: 'hidden.mp4',
+                        contentType: VideoMimeType.Mp4,
+                        size: 1000,
+                        bucket: 'test-bucket',
+                        path: 'samples/hidden.mp4',
+                    },
+                    media: SAMPLE_MEDIA,
+                    settings: {},
+                    isPublished: false,
+                },
+            ])
+
+            sampleId = published._id.toString()
+        })
+
+        it('lists published samples to anyone, with a preview URL and no storage path', async () => {
+            const res = await request(app.getHttpServer()).get('/v1/samples').expect(200)
+
+            expect(res.body.samples).toHaveLength(1)
+            expect(res.body.samples[0]).toMatchObject({
+                id: sampleId,
+                title: 'Running shoes',
+                settings: { platforms: ['YouTube'] },
+                media: { durationS: 15 },
+                previewUrl: 'https://storage.googleapis.com/signed-read',
+            })
+            expect(JSON.stringify(res.body)).not.toContain('samples/running-shoes.mp4')
+        })
+
+        it('creates a sample job with the sample media and the chosen settings', async () => {
+            const res = await request(app.getHttpServer())
+                .post('/v1/jobs/from-sample')
+                .set(as(SAMPLER))
+                .send({ sampleId, settings: SETTINGS })
+                .expect(201)
+
+            expect(res.body.job).toMatchObject({
+                status: JobStatus.Pending,
+                sampleId,
+                settings: SETTINGS,
+                media: { durationS: 15 },
+                file: { name: 'running-shoes.mp4' },
+            })
+        })
+
+        it('refuses an unknown or unpublished sample', async () => {
+            const hidden = await samples.findOne({ slug: 'hidden' })
+
+            for (const id of ['64b000000000000000000000', 'not-an-id', hidden!._id.toString()]) {
+                const res = await request(app.getHttpServer())
+                    .post('/v1/jobs/from-sample')
+                    .set(as(SAMPLER))
+                    .send({ sampleId: id, settings: SETTINGS })
+                    .expect(404)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+            }
+        })
+
+        it('starts a sample job without verifying an upload, and charges it', async () => {
+            const created = await request(app.getHttpServer())
+                .post('/v1/jobs/from-sample')
+                .set(as(SAMPLER))
+                .send({ sampleId, settings: SETTINGS })
+                .expect(201)
+            const jobId = created.body.job.id
+
+            storedObject = null
+
+            const res = await request(app.getHttpServer())
+                .post(`/v1/jobs/${jobId}/analyze`)
+                .set(as(SAMPLER))
+                .expect(202)
+            const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(SAMPLER)).expect(200)
+
+            expect(res.body.job).toMatchObject({ status: JobStatus.Queued, sampleId })
+            expect(dispatch).toHaveBeenCalledWith(jobId)
+            expect(quota.body.quota.used).toBe(1)
+        })
+
+        it('keeps a sample job pending when its sample has been removed', async () => {
+            const created = await request(app.getHttpServer())
+                .post('/v1/jobs/from-sample')
+                .set(as(SAMPLER))
+                .send({ sampleId, settings: SETTINGS })
+                .expect(201)
+
+            await samples.updateOne({ _id: sampleId }, { $set: { 'file.path': 'samples/moved.mp4' } })
+
+            const res = await request(app.getHttpServer())
+                .post(`/v1/jobs/${created.body.job.id}/analyze`)
+                .set(as(SAMPLER))
+                .expect(404)
+            const job = await request(app.getHttpServer()).get(`/v1/jobs/${created.body.job.id}`).set(as(SAMPLER))
+
+            await samples.updateOne({ _id: sampleId }, { $set: { 'file.path': 'samples/running-shoes.mp4' } })
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+            expect(job.body.job.status).toBe(JobStatus.Pending)
+            expect(dispatch).not.toHaveBeenCalled()
+        })
     })
 })

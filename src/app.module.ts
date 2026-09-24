@@ -6,10 +6,11 @@ import { HealthController } from './health.controller'
 import { JobsModule } from './jobs/jobs.module'
 import { MeModule } from './me/me.module'
 import { RealtimeModule } from './realtime/realtime.module'
+import { SamplesModule } from './samples/samples.module'
 
 // Composition root of the API process (main.ts).
 @Module({
-    imports: [appConfigModule, DatabaseModule, AuthModule, JobsModule, MeModule, RealtimeModule],
+    imports: [appConfigModule, DatabaseModule, AuthModule, JobsModule, MeModule, RealtimeModule, SamplesModule],
     controllers: [HealthController],
 })
 export class AppModule {}

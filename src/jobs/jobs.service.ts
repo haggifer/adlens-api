@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import {
     type CreateJobPayload,
     type CreateJobResponse,
+    type CreateSampleJobPayload,
     type Job,
     type JobListResponse,
     JobStatus,
@@ -14,6 +15,7 @@ import { z } from 'zod'
 import { ApiException } from '../common/api-exception'
 import { jobVideoPath } from '../common/paths'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
+import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
 import { JobLifecycle } from './job-lifecycle.service'
 import { toPublicJob } from './job.mapper'
@@ -36,6 +38,7 @@ export class JobsService {
         @InjectModel(JOB_MODEL) private readonly model: Model<JobDoc>,
         private readonly storage: StorageService,
         private readonly lifecycle: JobLifecycle,
+        private readonly samples: SamplesService,
     ) {}
 
     // Creates the pending job and a signed upload target bound to the declared type and size.
@@ -53,6 +56,22 @@ export class JobsService {
         const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 
         return { job: toPublicJob(created.toObject<StoredJob>()), upload }
+    }
+
+    // A pending job on a published sample: its video is already stored and measured, so nothing is uploaded.
+    async createFromSample(userId: string, { sampleId, settings }: CreateSampleJobPayload): Promise<Job> {
+        const sample = await this.samples.findPublished(sampleId)
+        const created = await this.model.create({
+            userId,
+            status: JobStatus.Pending,
+            settings,
+            file: sample.file,
+            media: sample.media,
+            sampleId: sample._id.toString(),
+            chargedWindowStart: null,
+        })
+
+        return toPublicJob(created.toObject<StoredJob>())
     }
 
     async get(userId: string, jobId: string): Promise<Job> {
