@@ -9,7 +9,6 @@ const settingsFor = (overrides: Partial<AnalysisSettings>): AnalysisSettings => 
     platforms: [],
     placements: [],
     markets: [],
-    objective: 'Awareness',
     ...overrides,
 })
 
