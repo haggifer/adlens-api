@@ -194,10 +194,18 @@ The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, b
 
 ## Deployment
 
-[`infra/setup.sh`](infra/setup.sh) (gcloud; Pulumi deliberately skipped, see [DECISIONS.md](DECISIONS.md)) enables the
-APIs, applies the bucket CORS policy from [`infra/cors.json`](infra/cors.json), sets up the runtime service account and
-secrets, deploys the `adlens-analyze` job (`node dist/worker`, 2 retries, 15-minute timeout) and the `adlens-api`
-service. The API is served at `https://api.useadlens.com` through a Cloud Run domain mapping.
+Every push to `init-setup` that passes CI deploys to production
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The `deploy` job signs in to Google Cloud with Workload
+Identity Federation: GitHub's OIDC token is exchanged for a short-lived credential, no service account key exists, and
+only this repository's pushes to `init-setup` are accepted. It builds one image, pushes it to Artifact Registry, rolls
+the `adlens-analyze` job and then the `adlens-api` service to that digest, and ends with a health check.
+
+[`infra/setup.sh`](infra/setup.sh) (gcloud; Pulumi deliberately skipped, see [DECISIONS.md](DECISIONS.md)) creates
+everything the workflow relies on: the APIs, the bucket and its CORS policy from [`infra/cors.json`](infra/cors.json),
+the runtime and deploy service accounts, the Workload Identity provider, the secrets and the image repository. It also
+owns the runtime config (env vars, secrets, the job's 2 retries and 15-minute timeout), which CI leaves untouched, and
+can deploy the current checkout by hand. The API is served at `https://api.useadlens.com` through a Cloud Run domain
+mapping.
 
 ## Decisions
 
