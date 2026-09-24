@@ -13,6 +13,7 @@
 # Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, export it first:
 #   export MONGODB_URI='mongodb+srv://…/adlens?retryWrites=true&w=majority'
 #   export BETTER_AUTH_SECRET='<a long random string>'
+#   export CONTACT_EMAIL='<the inbox that receives Contact form messages>'
 # Unset secrets are left as they are. RESEND_API_KEY must already exist in Secret Manager (a sending-only Resend key
 # for mail.useadlens.com).
 set -euo pipefail
@@ -58,7 +59,7 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --member="servi
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --member="serviceAccount:$RUNTIME_SA" --role="roles/iam.serviceAccountUser"
 
 echo "== secrets =="
-for name in MONGODB_URI BETTER_AUTH_SECRET; do
+for name in MONGODB_URI BETTER_AUTH_SECRET CONTACT_EMAIL; do
     if [ -n "${!name:-}" ]; then
         printf '%s' "${!name}" | gcloud secrets create "$name" --data-file=- 2>/dev/null || \
             printf '%s' "${!name}" | gcloud secrets versions add "$name" --data-file=-
@@ -114,6 +115,6 @@ gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
-    --set-secrets="MONGODB_URI=MONGODB_URI:latest,BETTER_AUTH_SECRET=BETTER_AUTH_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest" \
+    --set-secrets="MONGODB_URI=MONGODB_URI:latest,BETTER_AUTH_SECRET=BETTER_AUTH_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,CONTACT_EMAIL=CONTACT_EMAIL:latest" \
     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB"
 echo "Done. The web app's NEXT_PUBLIC_API_BASE_URL is $API_URL"

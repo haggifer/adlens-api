@@ -88,7 +88,7 @@ charge came from.
 
 ## API
 
-Every `/v1/*` route except `GET /v1/samples` requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
+Every `/v1/*` route except `GET /v1/samples` and `POST /v1/contact` requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
 
@@ -104,6 +104,7 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
 | `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
+| `POST /v1/contact`          | Email a Contact form message to the team (public, rate-limited) | **204**                        |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
 
 ## Ad-policy rules
@@ -180,6 +181,7 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 | `WEB_ORIGIN`             | `http://localhost:3000` | The one web origin allowed by CORS, Socket.IO and Better Auth               |
 | `COOKIE_DOMAIN`          | —                       | Parent domain for the session cookie in production (`useadlens.com`)        |
 | `RESEND_API_KEY`         | —                       | Resend sending key; without it, auth emails are printed to the console      |
+| `CONTACT_EMAIL`          | —                       | Where Contact form messages go; unset, the form answers 503                 |
 | `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                      |
 | `PORT`                   | `8080`                  | API listen port                                                             |
 | `STORAGE_KEY_FILE`       | —                       | Local only: SA key used to sign V4 URLs (user ADC can't sign)               |

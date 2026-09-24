@@ -10,9 +10,11 @@ import { AppModule } from '../src/app.module'
 import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
+import { CONTACT_MESSAGE_MODEL, type ContactMessageDoc } from '../src/database/contact-message.doc'
 import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
+import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { JobEventsService } from '../src/realtime/job-events.service'
 import { type ObjectInfo, StorageService } from '../src/storage/storage.service'
 
@@ -29,6 +31,7 @@ describe('Jobs API (e2e)', () => {
     let probe: ProbeResult
     const dispatch = jest.fn(async () => 'executions/exec-1')
     const deleteObject = jest.fn(async (_path: string) => undefined)
+    const sendMail = jest.fn(async (_message: MailMessage) => undefined)
 
     const as = (userId: string) => ({ 'x-test-user': userId })
     const createJob = async (): Promise<string> => {
@@ -65,6 +68,8 @@ describe('Jobs API (e2e)', () => {
             .useValue({ probe: async () => probe })
             .overrideProvider(AnalysisDispatcher)
             .useValue({ dispatch })
+            .overrideProvider(Mailer)
+            .useValue({ send: sendMail })
             .overrideProvider(JobEventsService)
             .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
             .compile()
@@ -79,6 +84,7 @@ describe('Jobs API (e2e)', () => {
         probe = { durationS: 20, width: 1080, height: 1920, hasAudio: true }
         dispatch.mockClear()
         deleteObject.mockClear()
+        sendMail.mockClear()
     })
 
     afterAll(async () => {
@@ -390,6 +396,76 @@ describe('Jobs API (e2e)', () => {
             expect(res.body.errorCode).toBe(RequestErrorCode.JobInProgress)
             expect(deleteObject).not.toHaveBeenCalled()
             await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(200)
+        })
+    })
+
+    describe('contact messages', () => {
+        const MESSAGE = { email: 'visitor@example.com', message: 'Hello, I would like to know more about AdLens.' }
+        let contactMessages: Model<ContactMessageDoc>
+
+        beforeAll(() => {
+            contactMessages = app.get(getModelToken(CONTACT_MESSAGE_MODEL))
+        })
+
+        beforeEach(async () => {
+            await contactMessages.deleteMany({})
+        })
+
+        it('emails the message to the team without a session, replying to the sender', async () => {
+            await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(204)
+
+            expect(sendMail).toHaveBeenCalledTimes(1)
+            expect(sendMail.mock.calls[0][0]).toMatchObject({ to: 'team@adlens.test', replyTo: MESSAGE.email })
+            expect(sendMail.mock.calls[0][0].text).toContain(MESSAGE.message)
+        })
+
+        it('escapes the message in the HTML version', async () => {
+            await request(app.getHttpServer())
+                .post('/v1/contact')
+                .send({ ...MESSAGE, message: '<script>alert(1)</script> hello there' })
+                .expect(204)
+
+            expect(sendMail.mock.calls[0][0].html).not.toContain('<script>')
+        })
+
+        it('accepts but drops a message that filled in the honeypot', async () => {
+            await request(app.getHttpServer())
+                .post('/v1/contact')
+                .send({ ...MESSAGE, website: 'https://spam.example' })
+                .expect(204)
+
+            expect(sendMail).not.toHaveBeenCalled()
+        })
+
+        it('rejects an invalid message', async () => {
+            const res = await request(app.getHttpServer())
+                .post('/v1/contact')
+                .send({ email: 'nope', message: 'hi' })
+                .expect(400)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+        })
+
+        it('limits how often one sender can write', async () => {
+            for (let sent = 0; sent < 3; sent++) {
+                await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(204)
+            }
+
+            const res = await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(429)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.RateLimited)
+            expect(sendMail).toHaveBeenCalledTimes(3)
+        })
+
+        it('caps the total number of messages per hour', async () => {
+            await contactMessages.insertMany(
+                Array.from({ length: 20 }, (_, index) => ({ email: `sender${index}@example.com` })),
+            )
+
+            const res = await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(429)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.RateLimited)
+            expect(sendMail).not.toHaveBeenCalled()
         })
     })
 })

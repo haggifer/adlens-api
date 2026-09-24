@@ -15,5 +15,6 @@ export default async function globalSetup(): Promise<void> {
         GOOGLE_CLOUD_PROJECT: 'test-project',
         STORAGE_BUCKET: 'test-bucket',
         QUOTA_LIMIT: '3',
+        CONTACT_EMAIL: 'team@adlens.test',
     })
 }

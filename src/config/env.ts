@@ -23,6 +23,8 @@ const envSchema = z.object({
     // Without a key, auth emails are logged instead of sent (local development).
     RESEND_API_KEY: z.string().optional(),
     MAIL_FROM: z.string().default('AdLens <no-reply@mail.useadlens.com>'),
+    // Where Contact form messages go. Unset, the form answers 503.
+    CONTACT_EMAIL: z.email().optional(),
     QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
     GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
     GEMINI_LOCATION: z.string().default('global'),
