@@ -190,3 +190,20 @@ test('a password reset request fails with EMAIL_NOT_SENT when the email cannot b
         isMailDown = false
     }
 })
+
+test('no one can make themselves an admin at sign-up', async () => {
+    const { MongoClient } = require('mongodb')
+    const email = 'wannabe-admin@example.com'
+
+    await post('/api/auth/sign-up/email', { name: 'Wannabe', email, password: 'first-password', isAdmin: true })
+
+    const client = await MongoClient.connect(mongo.getUri())
+
+    try {
+        const user = await client.db().collection('user').findOne({ email })
+
+        assert.notEqual(user?.isAdmin, true)
+    } finally {
+        await client.close()
+    }
+})

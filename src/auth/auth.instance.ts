@@ -99,6 +99,11 @@ export const createAuth = ({
                 queueMail(mailer, verificationEmail(user.email, toWebLink(webOrigin, '/confirm-email', token))),
         },
         user: {
+            // Set by hand in the database (QuotaService lifts the analysis limit for admins). `input: false` keeps it
+            // out of sign-up and profile updates, so no one can make themselves an admin.
+            additionalFields: {
+                isAdmin: { type: 'boolean', required: false, defaultValue: false, input: false },
+            },
             deleteUser: {
                 enabled: true,
                 beforeDelete: async (user) => onDeleteUser(user.id),

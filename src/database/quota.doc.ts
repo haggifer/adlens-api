@@ -8,8 +8,6 @@ export const quotaDocSchema = z.object({
     used: z.number().int().nonnegative().default(0),
     limit: z.number().int().positive(),
     windowStart: z.date().nullable(),
-    // Set by hand in the database for admin accounts: their runs are still counted, but never capped.
-    isUnlimited: z.boolean().optional(),
 })
 
 export type QuotaDoc = z.infer<typeof quotaDocSchema>

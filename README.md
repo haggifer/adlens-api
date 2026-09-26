@@ -71,10 +71,9 @@ the window it was charged to (`chargedWindowStart`); ending a run clears that fi
 final status, and the pre-image decides who refunds, so a refund happens at most once and only into the window the
 charge came from.
 
-**Unlimited accounts** (for admins): set `isUnlimited: true` on the user's document in the `quotas` collection
-(`userId` is the `_id` of their Better Auth `user` document; create the document if they have never run an analysis,
-with `used: 0`, `limit: 3`, `windowStart: null`). Their runs are still counted, but never capped, and
-`GET /v1/me/quota` reports `limit: null`.
+**Admins have no limit**: set `isAdmin: true` on the user's document in Better Auth's `user` collection. Their runs
+are still counted but never capped, and `GET /v1/me/quota` reports `limit: null`. The field is declared to Better Auth
+with `input: false`, so sign-up and profile updates can't set it.
 
 ## Authentication
 

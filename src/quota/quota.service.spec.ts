@@ -1,6 +1,6 @@
 import { HttpStatus } from '@nestjs/common'
 import { QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
-import type { Model } from 'mongoose'
+import { type Model, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { QUOTA_MODEL, type QuotaDoc, QuotaSchema } from '../database/quota.doc'
 import { configStub } from '../testing/config-stub'
@@ -22,6 +22,7 @@ describe('QuotaService', () => {
 
     afterEach(async () => {
         await model.deleteMany({})
+        await mongo.connection.collection('user').deleteMany({})
     })
 
     afterAll(async () => {
@@ -36,16 +37,21 @@ describe('QuotaService', () => {
         expect(await quota.get('u1', now)).toEqual({ used: 1, limit: LIMIT, windowStart: now.toISOString() })
     })
 
-    it('never caps an unlimited account, but still counts its runs', async () => {
+    it('never caps an admin, but still counts their runs', async () => {
         const now = new Date('2026-09-23T10:00:00Z')
+        const adminId = new Types.ObjectId()
 
-        await model.create({ userId: 'admin', used: 0, limit: LIMIT, windowStart: null, isUnlimited: true })
+        await mongo.connection.collection('user').insertOne({ _id: adminId, email: 'admin@example.com', isAdmin: true })
 
         for (let i = 0; i < LIMIT + 2; i++) {
-            await quota.consume('admin', now)
+            await quota.consume(adminId.toString(), now)
         }
 
-        expect(await quota.get('admin', now)).toEqual({ used: LIMIT + 2, limit: null, windowStart: now.toISOString() })
+        expect(await quota.get(adminId.toString(), now)).toEqual({
+            used: LIMIT + 2,
+            limit: null,
+            windowStart: now.toISOString(),
+        })
     })
 
     it('rejects runs past the limit with QUOTA_EXCEEDED', async () => {

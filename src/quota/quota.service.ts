@@ -2,10 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { InjectModel } from '@nestjs/mongoose'
 import { type Quota, QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
-import { Model } from 'mongoose'
+import { Model, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import type { Env } from '../config/env'
 import { QUOTA_MODEL, type QuotaDoc } from '../database/quota.doc'
+
+// Better Auth's user collection. Its `isAdmin` flag is set by hand in the database and can't be set by users.
+const USER_COLLECTION = 'user'
 
 // A window is closed when it never opened, holds a pre-Date legacy value, or started more than a window ago.
 const isWindowClosed = (cutoff: Date) => ({
@@ -23,9 +26,22 @@ export class QuotaService {
         this.defaultLimit = config.get('QUOTA_LIMIT', { infer: true })
     }
 
+    // Admins have no limit: their runs are still counted, but never capped.
+    private async isAdmin(userId: string): Promise<boolean> {
+        if (!Types.ObjectId.isValid(userId)) {
+            return false
+        }
+
+        const user = await this.model.db
+            .collection(USER_COLLECTION)
+            .findOne({ _id: new Types.ObjectId(userId) }, { projection: { isAdmin: 1 } })
+
+        return user?.isAdmin === true
+    }
+
     // Charges one run and returns the window it was charged to. The charge is a single conditional update: it
-    // matches only when the window is closed (it restarts at 1), still has room, or the account is unlimited, so
-    // concurrent calls can't overdraw.
+    // matches only when the window is closed (it restarts at 1) or still has room, so concurrent calls can't overdraw.
+    // An admin's charge matches unconditionally.
     async consume(userId: string, now = new Date()): Promise<Date> {
         await this.model.updateOne(
             { userId },
@@ -34,12 +50,10 @@ export class QuotaService {
         )
 
         const closed = isWindowClosed(new Date(now.getTime() - QUOTA_WINDOW_MS))
+        const isAdmin = await this.isAdmin(userId)
         const charged = await this.model
             .findOneAndUpdate(
-                {
-                    userId,
-                    $expr: { $or: [closed, { $lt: ['$used', '$limit'] }, { $eq: ['$isUnlimited', true] }] },
-                },
+                isAdmin ? { userId } : { userId, $expr: { $or: [closed, { $lt: ['$used', '$limit'] }] } },
                 [
                     {
                         $set: {
@@ -69,8 +83,11 @@ export class QuotaService {
     }
 
     async get(userId: string, now = new Date()): Promise<Quota> {
-        const doc = await this.model.findOne({ userId }).lean<QuotaDoc>()
-        const limit = doc?.isUnlimited ? null : (doc?.limit ?? this.defaultLimit)
+        const [doc, isAdmin] = await Promise.all([
+            this.model.findOne({ userId }).lean<QuotaDoc>(),
+            this.isAdmin(userId),
+        ])
+        const limit = isAdmin ? null : (doc?.limit ?? this.defaultLimit)
         const windowStart = doc?.windowStart instanceof Date ? doc.windowStart : null
 
         if (!doc || !windowStart || now.getTime() - windowStart.getTime() >= QUOTA_WINDOW_MS) {
