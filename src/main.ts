@@ -5,7 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express'
 import { toNodeHandler } from 'better-auth/node'
 import helmet from 'helmet'
 import { AppModule } from './app.module'
-import { AUTH, type AuthInstance } from './auth/auth.instance'
+import { AUTH, type AuthInstance, withOutbox } from './auth/auth.instance'
 import { ApiExceptionFilter } from './common/api-exception.filter'
 import type { Env } from './config/env'
 import { RealtimeIoAdapter } from './realtime/realtime-io.adapter'
@@ -22,7 +22,10 @@ const bootstrap = async () => {
     app.enableShutdownHooks()
     app.useGlobalFilters(new ApiExceptionFilter())
     app.useWebSocketAdapter(new RealtimeIoAdapter(app, webOrigin))
-    app.getHttpAdapter().getInstance().all('/api/auth/*splat', toNodeHandler(auth))
+    const authHandler = toNodeHandler(auth)
+    app.getHttpAdapter()
+        .getInstance()
+        .all('/api/auth/*splat', (req, res) => withOutbox(() => authHandler(req, res)))
     app.useBodyParser('json', { limit: '1mb' })
 
     await app.listen(config.get('PORT', { infer: true }))

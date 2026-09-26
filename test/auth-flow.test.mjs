@@ -13,6 +13,7 @@ const EMAIL = 'flow@example.com'
 
 const outbox = []
 const purgedPrefixes = []
+let isMailDown = false
 let mongo
 let app
 let session
@@ -46,13 +47,21 @@ before(async () => {
     const { Test } = require('@nestjs/testing')
     const { toNodeHandler } = require('better-auth/node')
     const { AppModule } = require('../dist/app.module')
-    const { AUTH } = require('../dist/auth/auth.instance')
+    const { AUTH, withOutbox } = require('../dist/auth/auth.instance')
     const { Mailer } = require('../dist/mail/mailer')
     const { JobEventsService } = require('../dist/realtime/job-events.service')
     const { StorageService } = require('../dist/storage/storage.service')
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
         .overrideProvider(Mailer)
-        .useValue({ send: async (message) => outbox.push(message) })
+        .useValue({
+            send: async (message) => {
+                if (isMailDown) {
+                    throw new Error('Resend is down')
+                }
+
+                outbox.push(message)
+            },
+        })
         .overrideProvider(StorageService)
         .useValue({ bucketName: 'test-bucket', deletePrefix: async (prefix) => purgedPrefixes.push(prefix) })
         .overrideProvider(JobEventsService)
@@ -61,9 +70,10 @@ before(async () => {
 
     app = moduleRef.createNestApplication({ bodyParser: false, logger: false })
     app.enableCors({ origin: WEB, credentials: true })
+    const authHandler = toNodeHandler(app.get(AUTH))
     app.getHttpAdapter()
         .getInstance()
-        .all('/api/auth/*splat', toNodeHandler(app.get(AUTH)))
+        .all('/api/auth/*splat', (req, res) => withOutbox(() => authHandler(req, res)))
     app.useBodyParser('json')
     await app.listen(PORT)
 })
@@ -142,4 +152,41 @@ test("deleting the account purges the user's stored files and blocks sign-in", a
     assert.equal(purgedPrefixes.length, 1)
     assert.match(purgedPrefixes[0], /^users\/[^/]+\/$/)
     assert.equal(signIn.status, 401)
+})
+
+test('sign-up fails with EMAIL_NOT_SENT when the verification email cannot be sent', async () => {
+    isMailDown = true
+
+    try {
+        const res = await post('/api/auth/sign-up/email', {
+            name: 'Unlucky',
+            email: 'mail-down@example.com',
+            password: 'first-password',
+        })
+        const body = await res.json()
+
+        assert.equal(res.status, 503)
+        assert.equal(body.code, 'EMAIL_NOT_SENT')
+    } finally {
+        isMailDown = false
+    }
+})
+
+test('a password reset request fails with EMAIL_NOT_SENT when the email cannot be sent', async () => {
+    await post('/api/auth/sign-up/email', {
+        name: 'Reset',
+        email: 'reset-down@example.com',
+        password: 'first-password',
+    })
+    isMailDown = true
+
+    try {
+        const res = await post('/api/auth/request-password-reset', { email: 'reset-down@example.com' })
+        const body = await res.json()
+
+        assert.equal(res.status, 503)
+        assert.equal(body.code, 'EMAIL_NOT_SENT')
+    } finally {
+        isMailDown = false
+    }
 })

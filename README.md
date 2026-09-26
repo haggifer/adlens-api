@@ -83,8 +83,11 @@ charge came from.
 - **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
 - **Account deletion** (password-confirmed) purges the user's jobs, quota and every uploaded object before Better Auth
   removes the account.
-- Emails go through Resend from `mail.useadlens.com` and are sent without awaiting, so response timing doesn't reveal
-  whether an address has an account. Rate limits are stored in MongoDB so they hold across instances.
+- **An email that can't be sent fails the request.** Emails go through Resend from `mail.useadlens.com`. Better Auth
+  runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
+  and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
+  forever. The cost is that a password-reset request for an existing address takes a Resend round trip longer than one
+  for an unknown address. Rate limits are stored in MongoDB so they hold across instances.
 
 ## API
 
@@ -180,7 +183,7 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 | `BETTER_AUTH_URL`        | `http://localhost:8080` | The API's own public URL                                                    |
 | `WEB_ORIGIN`             | `http://localhost:3000` | The one web origin allowed by CORS, Socket.IO and Better Auth               |
 | `COOKIE_DOMAIN`          | —                       | Parent domain for the session cookie in production (`useadlens.com`)        |
-| `RESEND_API_KEY`         | —                       | Resend sending key; without it, auth emails are printed to the console      |
+| `RESEND_API_KEY`         | required by the API     | Resend sending key; the API won't start without it                          |
 | `CONTACT_EMAIL`          | —                       | Where Contact form messages go; unset, the form answers 503                 |
 | `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                      |
 | `PORT`                   | `8080`                  | API listen port                                                             |
@@ -200,7 +203,7 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 ```bash
 gcloud auth application-default login   # once; the account needs Vertex AI User
 npm install
-# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, ANALYZE_LOCAL=1, STORAGE_KEY_FILE
+# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, RESEND_API_KEY, ANALYZE_LOCAL=1, STORAGE_KEY_FILE
 npm run start:dev                        # keeps dist/ built, which the local worker process runs
 ```
 

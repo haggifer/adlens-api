@@ -20,7 +20,7 @@ const envSchema = z.object({
     BETTER_AUTH_SECRET: z.string().optional(),
     // Parent domain the session cookie is shared across (api. and www.); unset locally, where cookies stay host-only.
     COOKIE_DOMAIN: z.string().optional(),
-    // Without a key, auth emails are logged instead of sent (local development).
+    // Required by the API, which asserts it in MailModule; the worker sends no email.
     RESEND_API_KEY: z.string().optional(),
     MAIL_FROM: z.string().default('AdLens <no-reply@mail.useadlens.com>'),
     // Where Contact form messages go. Unset, the form answers 503.

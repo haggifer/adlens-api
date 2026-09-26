@@ -1,5 +1,3 @@
-import { Logger } from '@nestjs/common'
-
 export interface MailMessage {
     to: string
     subject: string
@@ -32,14 +30,5 @@ export class ResendMailer extends Mailer {
         if (!response.ok) {
             throw new Error(`Resend responded ${response.status}: ${await response.text()}`)
         }
-    }
-}
-
-// Local development without a Resend key: the message (including its links) goes to the console.
-export class ConsoleMailer extends Mailer {
-    private readonly logger = new Logger(ConsoleMailer.name)
-
-    async send({ to, subject, text }: MailMessage): Promise<void> {
-        this.logger.log(`email to ${to}: ${subject}\n${text}`)
     }
 }
