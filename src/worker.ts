@@ -31,7 +31,12 @@ const run = async (): Promise<number> => {
         logger.log(`job ${jobId}: ${outcome} (attempt ${attempt})`)
 
         return EXIT_DONE
-    } catch {
+    } catch (err) {
+        // Anything that escapes the pipeline (it failed before claiming the job, or transiently) must be visible: locally
+        // nothing retries, so without this line the job just sits queued until it expires.
+        logger.error(
+            `job ${jobId} attempt ${attempt} failed: ${err instanceof Error ? (err.stack ?? err.message) : err}`,
+        )
         return EXIT_RETRY
     } finally {
         await app.close()
@@ -40,4 +45,8 @@ const run = async (): Promise<number> => {
 
 void run()
     .then((code) => process.exit(code))
-    .catch(() => process.exit(EXIT_RETRY))
+    .catch((err: unknown) => {
+        // Startup failed (config, database connection, module wiring) before the job could be looked at.
+        new Logger('Worker').error(`worker failed to start: ${err instanceof Error ? (err.stack ?? err.message) : err}`)
+        process.exit(EXIT_RETRY)
+    })
