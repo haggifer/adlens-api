@@ -36,6 +36,18 @@ describe('QuotaService', () => {
         expect(await quota.get('u1', now)).toEqual({ used: 1, limit: LIMIT, windowStart: now.toISOString() })
     })
 
+    it('never caps an unlimited account, but still counts its runs', async () => {
+        const now = new Date('2026-09-23T10:00:00Z')
+
+        await model.create({ userId: 'admin', used: 0, limit: LIMIT, windowStart: null, isUnlimited: true })
+
+        for (let i = 0; i < LIMIT + 2; i++) {
+            await quota.consume('admin', now)
+        }
+
+        expect(await quota.get('admin', now)).toEqual({ used: LIMIT + 2, limit: null, windowStart: now.toISOString() })
+    })
+
     it('rejects runs past the limit with QUOTA_EXCEEDED', async () => {
         for (let i = 0; i < LIMIT; i++) {
             await quota.consume('u1')

@@ -24,7 +24,8 @@ export class QuotaService {
     }
 
     // Charges one run and returns the window it was charged to. The charge is a single conditional update: it
-    // matches only when the window is closed (it restarts at 1) or still has room, so concurrent calls can't overdraw.
+    // matches only when the window is closed (it restarts at 1), still has room, or the account is unlimited, so
+    // concurrent calls can't overdraw.
     async consume(userId: string, now = new Date()): Promise<Date> {
         await this.model.updateOne(
             { userId },
@@ -35,7 +36,10 @@ export class QuotaService {
         const closed = isWindowClosed(new Date(now.getTime() - QUOTA_WINDOW_MS))
         const charged = await this.model
             .findOneAndUpdate(
-                { userId, $expr: { $or: [closed, { $lt: ['$used', '$limit'] }] } },
+                {
+                    userId,
+                    $expr: { $or: [closed, { $lt: ['$used', '$limit'] }, { $eq: ['$isUnlimited', true] }] },
+                },
                 [
                     {
                         $set: {
@@ -66,7 +70,7 @@ export class QuotaService {
 
     async get(userId: string, now = new Date()): Promise<Quota> {
         const doc = await this.model.findOne({ userId }).lean<QuotaDoc>()
-        const limit = doc?.limit ?? this.defaultLimit
+        const limit = doc?.isUnlimited ? null : (doc?.limit ?? this.defaultLimit)
         const windowStart = doc?.windowStart instanceof Date ? doc.windowStart : null
 
         if (!doc || !windowStart || now.getTime() - windowStart.getTime() >= QUOTA_WINDOW_MS) {
