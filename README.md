@@ -81,8 +81,9 @@ charge came from.
 - **Email verification is required** before the first sign-in; signing in unverified resends the link.
 - **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
 - **Emailed links open the web app** (`/confirm-email`, `/reset-password`), never the API: users only see the site's
-  domain, and the confirmation page calls `verify-email` on a button press, so mail scanners that open every link can't
-  use the token up. Confirming signs the user in (Better Auth sets the session cookie on that response).
+  domain, and the confirmation page calls `verify-email` from the browser once it loads, so mail scanners that fetch
+  links without running JavaScript can't use the token up. Confirming signs the user in (Better Auth sets the session
+  cookie on that response).
 - **Account deletion** (password-confirmed) purges the user's jobs, quota and every uploaded object before Better Auth
   removes the account.
 - **An email that can't be sent fails the request.** Emails go through Resend from `mail.useadlens.com`. Better Auth
