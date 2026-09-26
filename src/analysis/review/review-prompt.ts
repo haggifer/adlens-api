@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { ModelFinding, RuleProjection } from '../../rules'
 
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
-export const PROMPT_VERSION = '3'
+export const PROMPT_VERSION = '4'
 
 const reviewOutputSchema = z.object({
     transcript: z.string(),
@@ -46,11 +46,7 @@ const describeCampaign = (settings: AnalysisSettings): string =>
         `Platforms: ${settings.platforms.join(', ') || 'not specified'}`,
         `Placements: ${settings.placements.join(', ') || 'not specified'}`,
         `Markets: ${settings.markets.join(', ') || 'not specified'}`,
-        settings.brand ? `Brand: ${settings.brand}` : null,
-        settings.audience ? `Audience: ${settings.audience}` : null,
-    ]
-        .filter(Boolean)
-        .join('\n')
+    ].join('\n')
 
 export const buildReviewPrompt = (settings: AnalysisSettings, rules: RuleProjection[]): string =>
     [
