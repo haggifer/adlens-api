@@ -46,6 +46,11 @@ const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> =>
     queue.push(message)
 }
 
+// Emailed links open the web app, not Better Auth's own endpoints: users only ever see the site's domain, and the
+// pages confirm on a button press, so mail scanners that open every link can't use the token up first.
+const toWebLink = (webOrigin: string, path: string, token: string) =>
+    `${webOrigin}${path}?token=${encodeURIComponent(token)}`
+
 const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
     const messages = outbox.getStore()?.splice(0) ?? []
 
@@ -83,13 +88,15 @@ export const createAuth = ({
             minPasswordLength: 8,
             resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_S,
             revokeSessionsOnPasswordReset: true,
-            sendResetPassword: async ({ user, url }) => queueMail(mailer, passwordResetEmail(user.email, url)),
+            sendResetPassword: async ({ user, token }) =>
+                queueMail(mailer, passwordResetEmail(user.email, toWebLink(webOrigin, '/reset-password', token))),
         },
         emailVerification: {
             sendOnSignUp: true,
             sendOnSignIn: true,
             autoSignInAfterVerification: true,
-            sendVerificationEmail: async ({ user, url }) => queueMail(mailer, verificationEmail(user.email, url)),
+            sendVerificationEmail: async ({ user, token }) =>
+                queueMail(mailer, verificationEmail(user.email, toWebLink(webOrigin, '/confirm-email', token))),
         },
         user: {
             deleteUser: {

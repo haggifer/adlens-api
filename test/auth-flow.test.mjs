@@ -27,7 +27,7 @@ const cookieOf = (res) =>
         .join('; ')
 const post = (path, body, cookie) =>
     fetch(API + path, { method: 'POST', headers: headers(cookie), body: JSON.stringify(body), redirect: 'manual' })
-const linkIn = (message) => message.text.match(/https?:\/\/\S+/)[0]
+const linkIn = (message) => new URL(message.text.match(/https?:\/\/\S+/)[0])
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300))
 
 before(async () => {
@@ -88,7 +88,6 @@ test('sign-up sends a verification email and creates no session yet', async () =
         name: 'Flow',
         email: EMAIL,
         password: 'first-password',
-        callbackURL: `${WEB}/auth/verified`,
     })
 
     await settle()
@@ -103,12 +102,14 @@ test('an unverified account cannot sign in', async () => {
     assert.equal(res.status, 403)
 })
 
-test('the verification link signs the user in with an httpOnly SameSite=Lax cookie', async () => {
-    const res = await fetch(linkIn(outbox[0]), { redirect: 'manual' })
+test('the emailed link opens the web app, which confirms the email and gets an httpOnly SameSite=Lax cookie', async () => {
+    const link = linkIn(outbox[0])
+    const token = link.searchParams.get('token')
+    const res = await fetch(`${API}/api/auth/verify-email?token=${encodeURIComponent(token)}`, { headers: headers() })
 
     session = cookieOf(res)
-    assert.equal(res.status, 302)
-    assert.ok(res.headers.get('location').startsWith(`${WEB}/auth/verified`))
+    assert.equal(link.origin + link.pathname, `${WEB}/confirm-email`)
+    assert.equal(res.status, 200)
     assert.ok(
         res.headers
             .getSetCookie()
@@ -125,20 +126,19 @@ test('the API accepts the session cookie', async () => {
 test('a password reset works through the emailed link and revokes existing sessions', async () => {
     outbox.length = 0
 
-    await post('/api/auth/request-password-reset', { email: EMAIL, redirectTo: `${WEB}/reset-password` })
+    await post('/api/auth/request-password-reset', { email: EMAIL })
     await settle()
 
-    const redirect = await fetch(linkIn(outbox[0]), { redirect: 'manual' })
-    const target = new URL(redirect.headers.get('location'))
+    const link = linkIn(outbox[0])
     const reset = await post('/api/auth/reset-password', {
         newPassword: 'second-password',
-        token: target.searchParams.get('token'),
+        token: link.searchParams.get('token'),
     })
     const withOldSession = await fetch(`${API}/v1/me/quota`, { headers: headers(session) })
     const signIn = await post('/api/auth/sign-in/email', { email: EMAIL, password: 'second-password' })
 
     freshSession = cookieOf(signIn)
-    assert.equal(target.pathname, '/reset-password')
+    assert.equal(link.origin + link.pathname, `${WEB}/reset-password`)
     assert.equal(reset.status, 200)
     assert.equal(withOldSession.status, 401)
     assert.equal(signIn.status, 200)
