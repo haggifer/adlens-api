@@ -47,5 +47,6 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 
 - Every push to `init-setup` that passes CI deploys to production.
 - Jest can't load Better Auth's ESM build, so the e2e suite stubs it; real auth behaviour is covered by `test:auth`.
-- Better Auth needs MongoDB transactions, so tests use an in-memory replica set.
+- Better Auth needs MongoDB transactions, so `test:auth` runs on an in-memory replica set; the unit and e2e tests use
+  a standalone in-memory server.
 - With `ANALYZE_LOCAL=1` the API spawns `node dist/worker`, so `dist/` must be built.
