@@ -150,6 +150,35 @@ test('a password reset works through the emailed link and revokes existing sessi
     assert.equal(signIn.status, 200)
 })
 
+test("update-user can't set isAdmin or grant quota runs", async () => {
+    // isAdmin is declared with `input: false`, so Better Auth rejects the whole request (400
+    // FIELD_NOT_ALLOWED) rather than silently dropping it; `runs` isn't a Better Auth field at all,
+    // so it's never written either way. The name change in the same body is proof the write didn't
+    // partially apply.
+    const { MongoClient } = require('mongodb')
+
+    const res = await post(
+        '/api/auth/update-user',
+        { name: 'Flow Updated', isAdmin: true, runs: [{ id: 'x', startedAt: new Date().toISOString(), jobId: 'x' }] },
+        freshSession,
+    )
+    const body = await res.json()
+
+    const client = await MongoClient.connect(mongo.getUri())
+
+    try {
+        const user = await client.db().collection('user').findOne({ email: EMAIL })
+
+        assert.equal(res.status, 400)
+        assert.equal(body.code, 'FIELD_NOT_ALLOWED')
+        assert.notEqual(user?.name, 'Flow Updated')
+        assert.notEqual(user?.isAdmin, true)
+        assert.equal(user?.runs, undefined)
+    } finally {
+        await client.close()
+    }
+})
+
 test("deleting the account purges the user's stored files and blocks sign-in", async () => {
     const deleted = await post('/api/auth/delete-user', { password: 'second-password' }, freshSession)
     const signIn = await post('/api/auth/sign-in/email', { email: EMAIL, password: 'second-password' })
