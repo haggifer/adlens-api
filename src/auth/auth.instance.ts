@@ -1,12 +1,14 @@
 import { Logger } from '@nestjs/common'
-import { MIN_PASSWORD_LENGTH } from 'adlens-shared'
+import { MIN_PASSWORD_LENGTH, RequestErrorCode } from 'adlens-shared'
 import { betterAuth } from 'better-auth'
 import { mongodbAdapter } from 'better-auth/adapters/mongodb'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { anonymous } from 'better-auth/plugins/anonymous'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Db, MongoClient } from 'mongodb'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
+import { isDisposableEmail } from './disposable-email'
 import type { SocialProviderOptions } from './social-providers'
 
 export const AUTH = 'BETTER_AUTH'
@@ -22,8 +24,13 @@ const NO_PROVIDER_TOKENS = {
     refreshTokenExpiresAt: null,
 }
 
-// The client maps this Better Auth error code to its own copy.
+// The client maps these Better Auth error codes to its own copy.
 export const EMAIL_NOT_SENT = 'EMAIL_NOT_SENT'
+const ACCOUNT_LINK_FAILED = 'ACCOUNT_LINK_FAILED'
+
+// The anonymous plugin gives anonymous users `<id>@anonymous.placeholder.invalid` (createPlaceholderEmail in
+// @better-auth/core); the .invalid TLD can never receive mail.
+const ANONYMOUS_EMAIL_SUFFIX = '@anonymous.placeholder.invalid'
 
 export interface AuthOptions {
     db: Db
@@ -35,6 +42,7 @@ export interface AuthOptions {
     socialProviders: SocialProviderOptions
     mailer: Mailer
     onDeleteUser: (userId: string) => Promise<void>
+    onLinkAnonymous: (anonymousUserId: string, userId: string) => Promise<void>
 }
 
 const logger = new Logger('Auth')
@@ -47,6 +55,11 @@ const outbox = new AsyncLocalStorage<MailMessage[]>()
 export const withOutbox = <T>(run: () => T): T => outbox.run([], run)
 
 const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> => {
+    // An anonymous user has no mailbox: a send would only fail the request.
+    if (message.to.endsWith(ANONYMOUS_EMAIL_SUFFIX)) {
+        return
+    }
+
     const queue = outbox.getStore()
 
     if (!queue) {
@@ -85,6 +98,7 @@ export const createAuth = ({
     socialProviders,
     mailer,
     onDeleteUser,
+    onLinkAnonymous,
 }: AuthOptions) =>
     betterAuth({
         database: mongodbAdapter(db, { client }),
@@ -137,7 +151,41 @@ export const createAuth = ({
                 },
             },
         },
+        plugins: [
+            anonymous({
+                // Runs before the plugin deletes the anonymous user. That delete goes through the internal adapter,
+                // which skips deleteUser.beforeDelete and so never purges the videos the moved jobs still point at.
+                // An APIError stops the delete, so a failed move leaves the anonymous user and its data in place.
+                onLinkAccount: async ({ anonymousUser, newUser }) => {
+                    try {
+                        await onLinkAnonymous(anonymousUser.user.id, newUser.user.id)
+                    } catch (err) {
+                        logger.error(
+                            `could not move anonymous user ${anonymousUser.user.id}: ${err instanceof Error ? err.message : err}`,
+                        )
+                        throw new APIError('INTERNAL_SERVER_ERROR', {
+                            code: ACCOUNT_LINK_FAILED,
+                            message: 'The earlier analyses could not be moved',
+                        })
+                    }
+                },
+            }),
+        ],
         hooks: {
+            before: createAuthMiddleware(async (ctx) => {
+                // That endpoint also deletes through the internal adapter, skipping the purge and orphaning the
+                // user's jobs and uploads.
+                if (ctx.path === '/delete-anonymous-user') {
+                    throw new APIError('NOT_FOUND', { message: 'Not found' })
+                }
+
+                if (ctx.path === '/sign-up/email' && isDisposableEmail(String(ctx.body?.email ?? ''))) {
+                    throw new APIError('BAD_REQUEST', {
+                        code: RequestErrorCode.DisposableEmail,
+                        message: 'Sign up with a permanent email address',
+                    })
+                }
+            }),
             after: createAuthMiddleware(async () => sendQueuedMail(mailer)),
         },
     })

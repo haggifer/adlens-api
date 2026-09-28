@@ -1,4 +1,4 @@
-// The email/password flows against the real Better Auth (which Jest can't load as ESM), on the built app with an
+// The email/password and anonymous flows against the real Better Auth (which Jest can't load as ESM), on the built app with an
 // in-memory MongoDB replica set (Better Auth uses transactions). Emails are captured instead of sent; storage is faked.
 // Run after a build: npm run test:auth
 import assert from 'node:assert/strict'
@@ -13,6 +13,9 @@ const EMAIL = 'flow@example.com'
 
 const outbox = []
 const purgedPrefixes = []
+const deletedPaths = []
+let adoptedUpload
+let linkerSession
 let isMailDown = false
 let mongo
 let app
@@ -30,6 +33,43 @@ const post = (path, body, cookie) =>
     fetch(API + path, { method: 'POST', headers: headers(cookie), body: JSON.stringify(body), redirect: 'manual' })
 const linkIn = (message) => new URL(message.text.match(/https?:\/\/\S+/)[0])
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300))
+const lastMailTo = (email) => outbox.findLast((message) => message.to === email)
+const run = (id) => ({ id, startedAt: new Date(), jobId: `job-${id}` })
+
+const withDb = async (use) => {
+    const { MongoClient } = require('mongodb')
+    const client = await MongoClient.connect(mongo.getUri())
+
+    try {
+        return await use(client.db())
+    } finally {
+        await client.close()
+    }
+}
+
+const storedJob = (userId, path) => ({
+    userId,
+    status: 'analyzed',
+    settings: { platforms: [], placements: [], markets: [] },
+    file: { name: 'ad.mp4', contentType: 'video/mp4', size: 1000, bucket: 'test-bucket', path },
+    chargedRunId: null,
+    attempts: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+})
+
+const signInAnonymously = async () => {
+    const res = await post('/api/auth/sign-in/anonymous', {})
+    const body = await res.json()
+
+    return { status: res.status, cookie: cookieOf(res), user: body.user }
+}
+
+const confirmEmail = (email, cookie) => {
+    const token = linkIn(lastMailTo(email)).searchParams.get('token')
+
+    return fetch(`${API}/api/auth/verify-email?token=${encodeURIComponent(token)}`, { headers: headers(cookie) })
+}
 
 before(async () => {
     const { MongoMemoryReplSet } = require('mongodb-memory-server')
@@ -68,7 +108,11 @@ before(async () => {
             },
         })
         .overrideProvider(StorageService)
-        .useValue({ bucketName: 'test-bucket', deletePrefix: async (prefix) => purgedPrefixes.push(prefix) })
+        .useValue({
+            bucketName: 'test-bucket',
+            delete: async (path) => deletedPaths.push(path),
+            deletePrefix: async (prefix) => purgedPrefixes.push(prefix),
+        })
         .overrideProvider(JobEventsService)
         .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
         .compile()
@@ -307,4 +351,144 @@ test("a Google or GitHub account is stored without the provider's tokens", async
     assert.equal(stored.refreshToken ?? null, null)
     assert.equal(stored.idToken ?? null, null)
     assert.equal(stored.accessTokenExpiresAt ?? null, null)
+})
+
+test('an anonymous sign-in gets a session for a user with a placeholder address, and no email', async () => {
+    const { ObjectId } = require('mongodb')
+    const sentBefore = outbox.length
+    const anonymous = await signInAnonymously()
+    const quota = await fetch(`${API}/v1/me/quota`, { headers: headers(anonymous.cookie) })
+    const user = await withDb((db) => db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }))
+
+    assert.equal(anonymous.status, 200)
+    assert.ok(anonymous.cookie.includes('session_token'))
+    assert.match(user.email, /@anonymous\.placeholder\.invalid$/)
+    assert.equal(user.isAnonymous, true)
+    assert.equal(quota.status, 200)
+    assert.equal(outbox.length, sentBefore)
+})
+
+test('an anonymous user never gets email, even when asking for a confirmation link', async () => {
+    const anonymous = await signInAnonymously()
+    const sentBefore = outbox.length
+    const res = await post('/api/auth/send-verification-email', { email: anonymous.user.email }, anonymous.cookie)
+
+    await settle()
+    assert.equal(res.status, 200)
+    assert.equal(outbox.length, sentBefore)
+})
+
+test("an anonymous user can't be deleted around the account purge", async () => {
+    const { ObjectId } = require('mongodb')
+    const anonymous = await signInAnonymously()
+    const res = await post('/api/auth/delete-anonymous-user', {}, anonymous.cookie)
+
+    assert.equal(res.status, 404)
+    assert.ok(await withDb((db) => db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) })))
+})
+
+test('sign-up refuses a disposable email address', async () => {
+    const sentBefore = outbox.length
+    const res = await post('/api/auth/sign-up/email', {
+        name: 'Throwaway',
+        email: 'someone@mailinator.com',
+        password: 'first-password',
+    })
+    const body = await res.json()
+    const user = await withDb((db) => db.collection('user').findOne({ email: 'someone@mailinator.com' }))
+
+    assert.equal(res.status, 400)
+    assert.equal(body.code, 'DISPOSABLE_EMAIL')
+    assert.equal(user, null)
+    assert.equal(outbox.length, sentBefore)
+})
+
+test('confirming a sign-up in the same browser moves the anonymous history to the new account', async () => {
+    const { ObjectId } = require('mongodb')
+    const email = 'linker@example.com'
+    const anonymous = await signInAnonymously()
+
+    adoptedUpload = `users/${anonymous.user.id}/jobs/linked/video`
+    await withDb(async (db) => {
+        await db.collection('jobs').insertOne(storedJob(anonymous.user.id, adoptedUpload))
+        await db
+            .collection('user')
+            .updateOne({ _id: new ObjectId(anonymous.user.id) }, { $set: { runs: [run('anonymous-run')] } })
+    })
+
+    const purgedBefore = purgedPrefixes.length
+    const signUp = await post(
+        '/api/auth/sign-up/email',
+        { name: 'Linker', email, password: 'first-password' },
+        anonymous.cookie,
+    )
+
+    await settle()
+
+    const beforeConfirming = await withDb((db) =>
+        db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+    )
+    const confirmed = await confirmEmail(email, anonymous.cookie)
+
+    linkerSession = cookieOf(confirmed)
+
+    const listed = await fetch(`${API}/v1/jobs`, { headers: headers(linkerSession) })
+    const { jobs } = await listed.json()
+    const [linker, afterConfirming] = await withDb((db) =>
+        Promise.all([
+            db.collection('user').findOne({ email }),
+            db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+        ]),
+    )
+
+    assert.equal(signUp.status, 200)
+    assert.ok(beforeConfirming, 'sign-up alone creates no session, so nothing is linked yet')
+    assert.equal(confirmed.status, 200)
+    assert.equal(afterConfirming, null)
+    assert.deepEqual(
+        linker.runs.map((stored) => stored.id),
+        ['anonymous-run'],
+    )
+    assert.equal(jobs.length, 1)
+    assert.equal(purgedPrefixes.length, purgedBefore)
+    assert.deepEqual(deletedPaths, [])
+})
+
+test('deleting an account also deletes the videos it adopted from an anonymous session', async () => {
+    const linker = await withDb((db) => db.collection('user').findOne({ email: 'linker@example.com' }))
+    const deleted = await post('/api/auth/delete-user', { password: 'first-password' }, linkerSession)
+
+    assert.equal(deleted.status, 200)
+    assert.deepEqual(deletedPaths, [adoptedUpload])
+    assert.equal(purgedPrefixes.at(-1), `users/${linker._id.toString()}/`)
+})
+
+test('signing in from an anonymous session merges its runs into the existing account', async () => {
+    const { ObjectId } = require('mongodb')
+    const email = 'returning@example.com'
+
+    await post('/api/auth/sign-up/email', { name: 'Returning', email, password: 'first-password' })
+    await settle()
+    await confirmEmail(email)
+
+    const anonymous = await signInAnonymously()
+
+    await withDb(async (db) => {
+        await db.collection('user').updateOne({ email }, { $set: { runs: [run('own-run')] } })
+        await db
+            .collection('user')
+            .updateOne({ _id: new ObjectId(anonymous.user.id) }, { $set: { runs: [run('anonymous-run')] } })
+    })
+
+    const signIn = await post('/api/auth/sign-in/email', { email, password: 'first-password' }, anonymous.cookie)
+    const [returning, anonymousAfter] = await withDb((db) =>
+        Promise.all([
+            db.collection('user').findOne({ email }),
+            db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+        ]),
+    )
+
+    assert.equal(signIn.status, 200)
+    assert.deepEqual(returning.runs.map((stored) => stored.id).sort(), ['anonymous-run', 'own-run'])
+    assert.equal(anonymousAfter, null)
 })

@@ -48,6 +48,7 @@ import { toSocialProviders } from './social-providers'
                     }),
                     mailer,
                     onDeleteUser: (userId) => accountData.purge(userId),
+                    onLinkAnonymous: (anonymousUserId, userId) => accountData.adopt(anonymousUserId, userId),
                 })
             },
         },
