@@ -10,10 +10,16 @@
 # out to the job and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
 # owns the runtime config (env vars, secrets, limits); it also deploys the current checkout the same way CI does.
 #
-# Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, export it first:
+# Prereqs: gcloud authenticated (`gcloud auth login`), and the production OAuth client IDs exported. They aren't
+# secret, but the API deploy below replaces every env var, so each run must pass them:
+#   export GOOGLE_CLIENT_ID='<the Google OAuth client ID>'
+#   export GITHUB_CLIENT_ID='<the GitHub OAuth app client ID>'
+# To create or rotate a secret, export it first:
 #   export MONGODB_URI='mongodb+srv://…/adlens?retryWrites=true&w=majority'
 #   export BETTER_AUTH_SECRET='<a long random string>'
 #   export CONTACT_EMAIL='<the inbox that receives Contact form messages>'
+#   export GOOGLE_CLIENT_SECRET='<the Google OAuth client secret>'
+#   export GITHUB_CLIENT_SECRET='<the GitHub OAuth app client secret>'
 # Unset secrets are left as they are. RESEND_API_KEY must already exist in Secret Manager (a sending-only Resend key
 # for mail.useadlens.com).
 set -euo pipefail
@@ -35,6 +41,8 @@ COOKIE_DOMAIN=useadlens.com
 GITHUB_OWNER_ID=70646891
 GITHUB_REPO_ID=1306464238
 DEPLOY_BRANCH=init-setup
+: "${GOOGLE_CLIENT_ID:?export the production Google OAuth client ID}"
+: "${GITHUB_CLIENT_ID:?export the production GitHub OAuth client ID}"
 
 gcloud config set project "$PROJECT"
 
@@ -59,7 +67,7 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --member="servi
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --member="serviceAccount:$RUNTIME_SA" --role="roles/iam.serviceAccountUser"
 
 echo "== secrets =="
-for name in MONGODB_URI BETTER_AUTH_SECRET CONTACT_EMAIL; do
+for name in MONGODB_URI BETTER_AUTH_SECRET CONTACT_EMAIL GOOGLE_CLIENT_SECRET GITHUB_CLIENT_SECRET; do
     if [ -n "${!name:-}" ]; then
         printf '%s' "${!name}" | gcloud secrets create "$name" --data-file=- 2>/dev/null || \
             printf '%s' "${!name}" | gcloud secrets versions add "$name" --data-file=-
@@ -115,6 +123,6 @@ gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
-    --set-secrets="MONGODB_URI=MONGODB_URI:latest,BETTER_AUTH_SECRET=BETTER_AUTH_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,CONTACT_EMAIL=CONTACT_EMAIL:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB"
+    --set-secrets="MONGODB_URI=MONGODB_URI:latest,BETTER_AUTH_SECRET=BETTER_AUTH_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,CONTACT_EMAIL=CONTACT_EMAIL:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET:latest" \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID"
 echo "Done. The web app's NEXT_PUBLIC_API_BASE_URL is $API_URL"
