@@ -10,11 +10,7 @@
 # out to the job and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
 # owns the runtime config (env vars, secrets, limits); it also deploys the current checkout the same way CI does.
 #
-# Prereqs: gcloud authenticated (`gcloud auth login`), and the production OAuth client IDs exported. They aren't
-# secret, but the API deploy below replaces every env var, so each run must pass them:
-#   export GOOGLE_CLIENT_ID='<the Google OAuth client ID>'
-#   export GITHUB_CLIENT_ID='<the GitHub OAuth app client ID>'
-# To create or rotate a secret, export it first:
+# Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, export it first:
 #   export MONGODB_URI='mongodb+srv://…/adlens?retryWrites=true&w=majority'
 #   export BETTER_AUTH_SECRET='<a long random string>'
 #   export CONTACT_EMAIL='<the inbox that receives Contact form messages>'
@@ -41,8 +37,9 @@ COOKIE_DOMAIN=useadlens.com
 GITHUB_OWNER_ID=70646891
 GITHUB_REPO_ID=1306464238
 DEPLOY_BRANCH=init-setup
-: "${GOOGLE_CLIENT_ID:?export the production Google OAuth client ID}"
-: "${GITHUB_CLIENT_ID:?export the production GitHub OAuth client ID}"
+# OAuth client IDs are public (they appear in every sign-in redirect); their secrets are in Secret Manager.
+GOOGLE_CLIENT_ID=629217115736-aop8hg7sorfps05t4gp7fv83gt0h937s.apps.googleusercontent.com
+GITHUB_CLIENT_ID=Ov23ct4gfbO6JyiOGopx
 
 gcloud config set project "$PROJECT"
 
