@@ -56,7 +56,7 @@ export class JobsService {
             status: JobStatus.Pending,
             settings,
             file: { ...file, bucket: this.storage.bucketName, path },
-            chargedWindowStart: null,
+            chargedRunId: null,
         })
         const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 
@@ -73,7 +73,7 @@ export class JobsService {
             file: sample.file,
             media: sample.media,
             sampleId: sample._id.toString(),
-            chargedWindowStart: null,
+            chargedRunId: null,
         })
 
         return toPublicJob(created.toObject<StoredJob>())

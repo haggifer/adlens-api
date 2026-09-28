@@ -1,8 +1,8 @@
 import type { INestApplication } from '@nestjs/common'
-import { getModelToken } from '@nestjs/mongoose'
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
 import { JobErrorCode, JobStatus, RequestErrorCode, VideoMimeType } from 'adlens-shared'
-import type { Model } from 'mongoose'
+import { type Connection, type Model, Types } from 'mongoose'
 import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
 import { AnalysisDispatcher } from '../src/analysis/dispatch/analysis-dispatcher'
@@ -13,15 +13,16 @@ import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { CONTACT_MESSAGE_MODEL, type ContactMessageDoc } from '../src/database/contact-message.doc'
 import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
+import { USER_COLLECTION } from '../src/database/user.doc'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { JobEventsService } from '../src/realtime/job-events.service'
 import { type ObjectInfo, StorageService } from '../src/storage/storage.service'
 
-const OWNER = 'owner'
-const STRANGER = 'stranger'
-const SAMPLER = 'sampler'
-const DELETER = 'deleter'
+const OWNER = new Types.ObjectId().toString()
+const STRANGER = new Types.ObjectId().toString()
+const SAMPLER = new Types.ObjectId().toString()
+const DELETER = new Types.ObjectId().toString()
 const FILE = { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 5_000_000 }
 const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
 
@@ -77,6 +78,17 @@ describe('Jobs API (e2e)', () => {
         app = moduleRef.createNestApplication()
         app.useGlobalFilters(new ApiExceptionFilter())
         await app.init()
+
+        // Quota runs are stored on Better Auth's user documents, so every test user needs one.
+        await app
+            .get<Connection>(getConnectionToken())
+            .collection(USER_COLLECTION)
+            .insertMany(
+                [OWNER, STRANGER, SAMPLER, DELETER].map((id) => ({
+                    _id: new Types.ObjectId(id),
+                    email: `${id}@example.com`,
+                })),
+            )
     })
 
     beforeEach(() => {

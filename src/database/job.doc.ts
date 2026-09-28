@@ -32,8 +32,8 @@ export const jobDocSchema = z.object({
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
     attempts: z.number().int().nonnegative().default(0),
-    // The quota window this job's run was charged to; null when nothing is charged (never charged, or refunded).
-    chargedWindowStart: z.date().nullable(),
+    // The quota run this job was charged for; null when nothing is charged (never charged, or refunded).
+    chargedRunId: z.string().nullable(),
     usage: tokenUsageSchema.optional(),
     // Set when the job analyzes a published sample; its file then points at the sample's object, never a user upload.
     sampleId: z.string().optional(),

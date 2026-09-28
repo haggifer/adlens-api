@@ -1,7 +1,7 @@
 import { JobErrorCode, JobStatus, Market, Platform, RulePlatform, VideoMimeType } from 'adlens-shared'
-import type { Model } from 'mongoose'
+import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../../database/job.doc'
-import { QUOTA_MODEL, type QuotaDoc, QuotaSchema } from '../../database/quota.doc'
+import { USER_COLLECTION } from '../../database/user.doc'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
@@ -12,7 +12,7 @@ import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
 import { AnalysisPipeline } from './analysis-pipeline.service'
 import { RetryableError } from './retryable-error'
 
-const USER = 'u1'
+const USER = new Types.ObjectId().toString()
 const USAGE = { promptTokens: 20000, outputTokens: 800, totalTokens: 20800 }
 
 class FakeReviewer extends VideoReviewer {
@@ -30,7 +30,6 @@ class FakeReviewer extends VideoReviewer {
 describe('AnalysisPipeline', () => {
     let mongo: MemoryMongo
     let jobs: Model<JobDoc>
-    let quotas: Model<QuotaDoc>
     let lifecycle: JobLifecycle
     let reviewer: FakeReviewer
     let pipeline: AnalysisPipeline
@@ -38,13 +37,16 @@ describe('AnalysisPipeline', () => {
     const ruleset = { current: async () => ruleSet } as unknown as RulesetService
     const contentRule = ruleSet.rules.find((r) => r.modality === 'visual' && r.platform.includes(RulePlatform.Meta))!
 
+    const users = () => mongo.connection.collection(USER_COLLECTION)
+    const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
+
     const queueJob = async (): Promise<string> => {
         const job = await jobs.create({
             userId: USER,
             status: JobStatus.Pending,
             settings: { platforms: [Platform.Meta], placements: [], markets: [Market.EU], objective: 'Conversion' },
             file: { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 1000, bucket: 'b', path: 'p' },
-            chargedWindowStart: null,
+            chargedRunId: null,
         })
         const jobId = job._id.toString()
 
@@ -62,22 +64,21 @@ describe('AnalysisPipeline', () => {
     }
 
     const findJob = (jobId: string) => jobs.findById(jobId).lean<StoredJob>()
-    const used = async () => (await quotas.findOne({ userId: USER }).lean())?.used ?? 0
 
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
-        quotas = mongo.connection.model<QuotaDoc>(QUOTA_MODEL, QuotaSchema)
-        lifecycle = new JobLifecycle(jobs, new QuotaService(quotas, configStub({ QUOTA_LIMIT: 3 })))
+        lifecycle = new JobLifecycle(jobs, new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })))
     })
 
-    beforeEach(() => {
+    beforeEach(async () => {
         reviewer = new FakeReviewer()
         pipeline = new AnalysisPipeline(lifecycle, reviewer, ruleset)
+        await users().insertOne({ _id: new Types.ObjectId(USER), email: 'user@example.com' })
     })
 
     afterEach(async () => {
-        await Promise.all([jobs.deleteMany({}), quotas.deleteMany({})])
+        await Promise.all([jobs.deleteMany({}), users().deleteMany({})])
     })
 
     afterAll(async () => {

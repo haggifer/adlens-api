@@ -38,16 +38,16 @@ export class JobLifecycle {
         await this.transition({ _id: jobId, status: JobStatus.Verifying }, { status: JobStatus.Error, errorCode })
     }
 
-    // verifying → queued, after charging one run. If the job moved on meanwhile, the charge is given back.
+    // verifying → queued, after charging one run. If the job moved on meanwhile, the run is given back.
     async chargeAndQueue(jobId: string, userId: string, media: JobMedia): Promise<StoredJob> {
-        const windowStart = await this.quota.consume(userId)
+        const runId = await this.quota.consume(userId, jobId)
         const queued = await this.transition(
             { _id: jobId, status: JobStatus.Verifying },
-            { status: JobStatus.Queued, media, chargedWindowStart: windowStart },
+            { status: JobStatus.Queued, media, chargedRunId: runId },
         )
 
         if (!queued) {
-            await this.quota.refund(userId, windowStart)
+            await this.quota.refund(userId, runId)
             throw new ApiException(
                 HttpStatus.CONFLICT,
                 RequestErrorCode.JobNotPending,
@@ -133,15 +133,15 @@ export class JobLifecycle {
     // charge was held, so exactly one caller refunds it.
     private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<boolean> {
         const before = await this.model
-            .findOneAndUpdate(filter, { $set: { ...set, chargedWindowStart: null } }, { new: false })
+            .findOneAndUpdate(filter, { $set: { ...set, chargedRunId: null } }, { new: false })
             .lean<StoredJob>()
 
         if (!before) {
             return false
         }
 
-        if (before.chargedWindowStart) {
-            await this.quota.refund(before.userId, before.chargedWindowStart)
+        if (before.chargedRunId) {
+            await this.quota.refund(before.userId, before.chargedRunId)
         }
 
         return true

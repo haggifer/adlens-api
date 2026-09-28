@@ -1,13 +1,13 @@
 import { JobErrorCode, type JobMedia, JobStatus, Placement, Platform, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
-import { QUOTA_MODEL, type QuotaDoc, QuotaSchema } from '../database/quota.doc'
+import { USER_COLLECTION } from '../database/user.doc'
 import { QuotaService } from '../quota/quota.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { JobLifecycle } from './job-lifecycle.service'
 
-const USER = 'u1'
+const USER = new Types.ObjectId().toString()
 const MEDIA: JobMedia = {
     durationS: 12,
     width: 1080,
@@ -20,8 +20,10 @@ const MEDIA: JobMedia = {
 describe('JobLifecycle', () => {
     let mongo: MemoryMongo
     let jobs: Model<JobDoc>
-    let quotas: Model<QuotaDoc>
     let lifecycle: JobLifecycle
+
+    const users = () => mongo.connection.collection(USER_COLLECTION)
+    const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
 
     const createJob = async (status = JobStatus.Pending): Promise<string> => {
         const job = await jobs.create({
@@ -34,14 +36,13 @@ describe('JobLifecycle', () => {
                 objective: 'Awareness',
             },
             file: { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 1000, bucket: 'b', path: 'p' },
-            chargedWindowStart: null,
+            chargedRunId: null,
         })
 
         return job._id.toString()
     }
 
     const findJob = (jobId: string) => jobs.findById(jobId).lean<StoredJob>()
-    const used = async () => (await quotas.findOne({ userId: USER }).lean())?.used ?? 0
 
     const queueJob = async (): Promise<string> => {
         const jobId = await createJob()
@@ -55,12 +56,15 @@ describe('JobLifecycle', () => {
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
-        quotas = mongo.connection.model<QuotaDoc>(QUOTA_MODEL, QuotaSchema)
-        lifecycle = new JobLifecycle(jobs, new QuotaService(quotas, configStub({ QUOTA_LIMIT: 3 })))
+        lifecycle = new JobLifecycle(jobs, new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })))
+    })
+
+    beforeEach(async () => {
+        await users().insertOne({ _id: new Types.ObjectId(USER), email: 'user@example.com' })
     })
 
     afterEach(async () => {
-        await Promise.all([jobs.deleteMany({}), quotas.deleteMany({})])
+        await Promise.all([jobs.deleteMany({}), users().deleteMany({})])
     })
 
     afterAll(async () => {
@@ -90,7 +94,7 @@ describe('JobLifecycle', () => {
 
         expect(job?.status).toBe(JobStatus.Queued)
         expect(job?.media).toEqual(MEDIA)
-        expect(job?.chargedWindowStart).toBeInstanceOf(Date)
+        expect(job?.chargedRunId).toEqual(expect.any(String))
         expect(await used()).toBe(1)
     })
 
@@ -105,7 +109,7 @@ describe('JobLifecycle', () => {
         expect(results.filter(Boolean)).toHaveLength(1)
         expect(job?.status).toBe(JobStatus.Error)
         expect(job?.errorCode).toBe(JobErrorCode.AnalysisFailed)
-        expect(job?.chargedWindowStart).toBeNull()
+        expect(job?.chargedRunId).toBeNull()
         expect(await used()).toBe(0)
     })
 

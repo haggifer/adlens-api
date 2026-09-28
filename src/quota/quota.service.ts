@@ -1,72 +1,47 @@
 import { HttpStatus, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { InjectModel } from '@nestjs/mongoose'
+import { InjectConnection } from '@nestjs/mongoose'
 import { type Quota, QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
-import { Model, Types } from 'mongoose'
+import { type Connection, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import type { Env } from '../config/env'
-import { QUOTA_MODEL, type QuotaDoc } from '../database/quota.doc'
+import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/user.doc'
 
-// Better Auth's user collection. Its `isAdmin` flag is set by hand in the database and can't be set by users.
-const USER_COLLECTION = 'user'
-
-// A window is closed when it never opened, holds a pre-Date legacy value, or started more than a window ago.
-const isWindowClosed = (cutoff: Date) => ({
-    $or: [{ $ne: [{ $type: '$windowStart' }, 'date'] }, { $lt: ['$windowStart', cutoff] }],
+// The runs that still count: those started after the cutoff.
+const countedRuns = (cutoff: Date) => ({
+    $filter: { input: { $ifNull: ['$runs', []] }, cond: { $gt: ['$$this.startedAt', cutoff] } },
 })
 
 @Injectable()
 export class QuotaService {
-    private readonly defaultLimit: number
+    private readonly limit: number
 
     constructor(
-        @InjectModel(QUOTA_MODEL) private readonly model: Model<QuotaDoc>,
+        @InjectConnection() private readonly connection: Connection,
         config: ConfigService<Env, true>,
     ) {
-        this.defaultLimit = config.get('QUOTA_LIMIT', { infer: true })
+        this.limit = config.get('QUOTA_LIMIT', { infer: true })
     }
 
-    // Admins have no limit: their runs are still counted, but never capped.
-    private async isAdmin(userId: string): Promise<boolean> {
-        if (!Types.ObjectId.isValid(userId)) {
-            return false
-        }
-
-        const user = await this.model.db
-            .collection(USER_COLLECTION)
-            .findOne({ _id: new Types.ObjectId(userId) }, { projection: { isAdmin: 1 } })
-
-        return user?.isAdmin === true
+    private get users() {
+        return this.connection.collection<UserExtras>(USER_COLLECTION)
     }
 
-    // Charges one run and returns the window it was charged to. The charge is a single conditional update: it
-    // matches only when the window is closed (it restarts at 1) or still has room, so concurrent calls can't overdraw.
-    // An admin's charge matches unconditionally.
-    async consume(userId: string, now = new Date()): Promise<Date> {
-        await this.model.updateOne(
-            { userId },
-            { $setOnInsert: { used: 0, limit: this.defaultLimit, windowStart: null } },
-            { upsert: true },
+    // Charges one run for the job and returns the run's id. One conditional update on the user's document counts the
+    // runs of the last window, drops older ones and appends the new run, so concurrent calls can't overdraw. An
+    // admin's charge always matches: their runs are counted but never capped.
+    async consume(userId: string, jobId: string, now = new Date()): Promise<string> {
+        const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
+        const run: QuotaRun = { id: new Types.ObjectId().toString(), startedAt: now, jobId }
+        const charged = await this.users.findOneAndUpdate(
+            {
+                _id: new Types.ObjectId(userId),
+                $expr: { $or: [{ $eq: ['$isAdmin', true] }, { $lt: [{ $size: countedRuns(cutoff) }, this.limit] }] },
+            },
+            [{ $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] } } }],
         )
 
-        const closed = isWindowClosed(new Date(now.getTime() - QUOTA_WINDOW_MS))
-        const isAdmin = await this.isAdmin(userId)
-        const charged = await this.model
-            .findOneAndUpdate(
-                isAdmin ? { userId } : { userId, $expr: { $or: [closed, { $lt: ['$used', '$limit'] }] } },
-                [
-                    {
-                        $set: {
-                            windowStart: { $cond: [closed, now, '$windowStart'] },
-                            used: { $cond: [closed, 1, { $add: ['$used', 1] }] },
-                        },
-                    },
-                ],
-                { new: true },
-            )
-            .lean<QuotaDoc>()
-
-        if (!charged?.windowStart) {
+        if (!charged) {
             throw new ApiException(
                 HttpStatus.TOO_MANY_REQUESTS,
                 RequestErrorCode.QuotaExceeded,
@@ -74,26 +49,27 @@ export class QuotaService {
             )
         }
 
-        return charged.windowStart
+        return run.id
     }
 
-    // Gives a charge back, but only to the window it was taken from: a refund after the window rolled over is dropped.
-    async refund(userId: string, windowStart: Date): Promise<void> {
-        await this.model.updateOne({ userId, windowStart, used: { $gt: 0 } }, { $inc: { used: -1 } })
+    // A run that has already left the window is no longer stored, so refunding it changes nothing.
+    async refund(userId: string, runId: string): Promise<void> {
+        await this.users.updateOne({ _id: new Types.ObjectId(userId) }, { $pull: { runs: { id: runId } } })
     }
 
     async get(userId: string, now = new Date()): Promise<Quota> {
-        const [doc, isAdmin] = await Promise.all([
-            this.model.findOne({ userId }).lean<QuotaDoc>(),
-            this.isAdmin(userId),
-        ])
-        const limit = isAdmin ? null : (doc?.limit ?? this.defaultLimit)
-        const windowStart = doc?.windowStart instanceof Date ? doc.windowStart : null
+        const cutoff = now.getTime() - QUOTA_WINDOW_MS
+        const user = await this.users.findOne(
+            { _id: new Types.ObjectId(userId) },
+            { projection: { isAdmin: 1, runs: 1 } },
+        )
+        const starts = (user?.runs ?? []).map((run) => run.startedAt.getTime()).filter((start) => start > cutoff)
+        const oldest = starts.length ? Math.min(...starts) : null
 
-        if (!doc || !windowStart || now.getTime() - windowStart.getTime() >= QUOTA_WINDOW_MS) {
-            return { used: 0, limit, windowStart: null }
+        return {
+            used: starts.length,
+            limit: user?.isAdmin ? null : this.limit,
+            nextFreeAt: oldest === null ? null : new Date(oldest + QUOTA_WINDOW_MS).toISOString(),
         }
-
-        return { used: doc.used, limit, windowStart: windowStart.toISOString() }
     }
 }
