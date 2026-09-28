@@ -31,6 +31,8 @@ const envSchema = z.object({
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
     QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
+    // Proxies in front of the API that append to X-Forwarded-For: 1 on Cloud Run (Google's front end).
+    TRUSTED_PROXY_HOPS: z.coerce.number().int().positive().default(1),
     GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
     GEMINI_LOCATION: z.string().default('global'),
     ANALYZE_LOCAL: flagSchema,
