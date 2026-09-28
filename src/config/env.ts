@@ -36,6 +36,8 @@ const envSchema = z.object({
     IP_ANON_LIMIT: z.coerce.number().int().positive().default(3),
     IP_SOFT_LIMIT: z.coerce.number().int().positive().default(10),
     IP_HARD_LIMIT: z.coerce.number().int().positive().default(30),
+    // Cloudflare Turnstile. Unset, a required check can never pass.
+    TURNSTILE_SECRET_KEY: z.string().optional(),
     // Proxies in front of the API that append to X-Forwarded-For: 1 on Cloud Run (Google's front end).
     TRUSTED_PROXY_HOPS: z.coerce.number().int().positive().default(1),
     GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
