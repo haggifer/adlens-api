@@ -13,10 +13,7 @@ const CONTENT_TYPES: Record<string, VideoMimeType> = {
     '.mp4': VideoMimeType.Mp4,
     '.mov': VideoMimeType.QuickTime,
     '.webm': VideoMimeType.WebM,
-    '.mpeg': VideoMimeType.Mpeg,
-    '.mpg': VideoMimeType.Mpeg,
     '.3gp': VideoMimeType.ThreeGpp,
-    '.flv': VideoMimeType.Flv,
 }
 
 // What a maintainer writes for each sample. `video` is resolved relative to the manifest file.
