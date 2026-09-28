@@ -1,4 +1,4 @@
-﻿# adlens-api
+# adlens-api
 
 Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against a
 ~150-rule ad-policy set with one Gemini pass, and you get cited, timestamped findings pushed to the browser in
@@ -97,7 +97,8 @@ with `input: false`, so sign-up and profile updates can't set it.
   links without running JavaScript can't use the token up. Confirming signs the user in (Better Auth sets the session
   cookie on that response).
 - **Account deletion** (password-confirmed, or within a day of signing in for users without a password) purges the
-  user's jobs, quota and every uploaded object before Better Auth removes the account.
+  user's jobs and every uploaded object before Better Auth removes the account; the quota runs live on the user
+  document, so Better Auth's own delete clears them.
 - **An email that can't be sent fails the request.** Emails go through Resend from `mail.useadlens.com`. Better Auth
   runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
@@ -281,9 +282,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
   current status. Status written from several places allowed double charges and dispatches, regressions from
   `analyzing` to `queued`, and jobs stuck in progress after a crashed worker.
 - **Charge when queued, refund at most once.** The atomic charge is the gate; charging only after success would let
-  concurrent requests pass a non-consuming check. The job stores the window it was charged to, and the write that ends
-  a run clears it, so exactly one caller refunds, into the window the charge came from.
-- **Rolling quota window on the user document instead of a `quotas` collection.** The limit follows config; single-document atomicity; runs pruned to the window, so the document stays small; the runs go away with the account.
+  concurrent requests pass a non-consuming check. The job stores the run it was charged for (`chargedRunId`); the
+  write that ends the run clears that field, and the pre-image of that write decides who refunds, by `$pull` of that
+  run, so exactly one caller refunds.
+- **Rolling quota window on the user document instead of a `quotas` collection.** The limit follows config;
+  single-document atomicity; runs pruned to the window, so the document stays small; the runs go away with the
+  account.
 - **Attempt-aware retries.** Cloud Run retries any non-zero exit, so the worker reads its attempt number: transient
   failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. Malformed or truncated model
   output counts as transient because generation is stochastic, and `maxOutputTokens` caps what an attempt can cost.
