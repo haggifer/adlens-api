@@ -46,8 +46,8 @@ const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> =>
     queue.push(message)
 }
 
-// Emailed links open the web app, not Better Auth's own endpoints: users only ever see the site's domain, and the
-// pages confirm on a button press, so mail scanners that open every link can't use the token up first.
+// Emailed links open the web app, not Better Auth's own endpoints, so users only ever see the site's domain. The
+// confirmation page confirms on load: a mail scanner that runs JavaScript could use the token up first.
 const toWebLink = (webOrigin: string, path: string, token: string) =>
     `${webOrigin}${path}?token=${encodeURIComponent(token)}`
 
