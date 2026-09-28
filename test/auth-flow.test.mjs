@@ -240,3 +240,10 @@ test('GitHub sign-in starts at GitHub, asking for the email address, with the AP
     assert.equal(target.searchParams.get('redirect_uri'), `${API}/api/auth/callback/github`)
     assert.ok(target.searchParams.get('scope').split(' ').includes('user:email'))
 })
+
+test('social sign-in refuses to return to a site other than the web app', async () => {
+    const { status, body } = await startSocialSignIn('google', 'https://attacker.example/landing')
+
+    assert.equal(status, 403)
+    assert.equal(body.url, undefined)
+})

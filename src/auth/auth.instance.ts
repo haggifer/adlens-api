@@ -82,7 +82,12 @@ export const createAuth = ({
         baseURL,
         basePath: '/api/auth',
         trustedOrigins: [webOrigin],
-        advanced: cookieDomain ? { crossSubDomainCookies: { enabled: true, domain: cookieDomain } } : undefined,
+        advanced: {
+            // Better Auth skips its origin and callback-URL checks when NODE_ENV is test; keep them on so the tests
+            // run with the same protection as production.
+            disableOriginCheck: false,
+            ...(cookieDomain && { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }),
+        },
         rateLimit: { storage: 'database' },
         emailAndPassword: {
             enabled: true,
