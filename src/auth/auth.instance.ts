@@ -2,10 +2,11 @@ import { Logger } from '@nestjs/common'
 import { MIN_PASSWORD_LENGTH, RequestErrorCode } from 'adlens-shared'
 import { betterAuth } from 'better-auth'
 import { mongodbAdapter } from 'better-auth/adapters/mongodb'
-import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { anonymous } from 'better-auth/plugins/anonymous'
+import { type Db, type MongoClient, ObjectId } from 'mongodb'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import type { Db, MongoClient } from 'mongodb'
+import { USER_COLLECTION } from '../database/user.doc'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
 import { isDisposableEmail } from './disposable-email'
@@ -75,6 +76,8 @@ const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> =>
 const toWebLink = (webOrigin: string, path: string, token: string) =>
     `${webOrigin}${path}?token=${encodeURIComponent(token)}`
 
+const normalizeEmail = (email: string): string => email.trim().toLowerCase()
+
 const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
     const messages = outbox.getStore()?.splice(0) ?? []
 
@@ -99,8 +102,12 @@ export const createAuth = ({
     mailer,
     onDeleteUser,
     onLinkAnonymous,
-}: AuthOptions) =>
-    betterAuth({
+}: AuthOptions) => {
+    // Not a Better Auth field (no endpoint can set or return it): the email an anonymous session signed up with,
+    // so onLinkAccount can check a /verify-email confirmation against it before linking.
+    const pendingLinks = db.collection<{ pendingLinkEmail?: string | null }>(USER_COLLECTION)
+
+    return betterAuth({
         database: mongodbAdapter(db, { client }),
         secret,
         baseURL,
@@ -156,12 +163,32 @@ export const createAuth = ({
                 // Runs before the plugin deletes the anonymous user. That delete goes through the internal adapter,
                 // which skips deleteUser.beforeDelete and so never purges the videos the moved jobs still point at.
                 // An APIError stops the delete, so a failed move leaves the anonymous user and its data in place.
-                onLinkAccount: async ({ anonymousUser, newUser }) => {
+                onLinkAccount: async ({ anonymousUser, newUser, ctx }) => {
+                    // A verify-email confirmation can be opened by anyone who has the link, not just the visitor who
+                    // requested it: an attacker can sign up with their own address and mail the confirmation link to
+                    // a visitor, hijacking that visitor's anonymous history if we linked unconditionally. Password
+                    // and social sign-in need the visitor's own credentials or the OAuth state, so they keep linking
+                    // as designed.
+                    if (ctx.path === '/verify-email') {
+                        const pending = await pendingLinks.findOne({ _id: new ObjectId(anonymousUser.user.id) })
+                        const confirmedEmail = normalizeEmail(newUser.user.email)
+
+                        if (!pending?.pendingLinkEmail || pending.pendingLinkEmail !== confirmedEmail) {
+                            logger.error(
+                                `refused to link anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: the confirmed email does not match the sign-up that started the anonymous session`,
+                            )
+                            throw new APIError('FORBIDDEN', {
+                                code: ACCOUNT_LINK_FAILED,
+                                message: 'This confirmation link does not match the analyses you started',
+                            })
+                        }
+                    }
+
                     try {
                         await onLinkAnonymous(anonymousUser.user.id, newUser.user.id)
                     } catch (err) {
                         logger.error(
-                            `could not move anonymous user ${anonymousUser.user.id}: ${err instanceof Error ? err.message : err}`,
+                            `could not move anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: ${err instanceof Error ? err.message : err}`,
                         )
                         throw new APIError('INTERNAL_SERVER_ERROR', {
                             code: ACCOUNT_LINK_FAILED,
@@ -179,15 +206,30 @@ export const createAuth = ({
                     throw new APIError('NOT_FOUND', { message: 'Not found' })
                 }
 
-                if (ctx.path === '/sign-up/email' && isDisposableEmail(String(ctx.body?.email ?? ''))) {
-                    throw new APIError('BAD_REQUEST', {
-                        code: RequestErrorCode.DisposableEmail,
-                        message: 'Sign up with a permanent email address',
-                    })
+                if (ctx.path === '/sign-up/email') {
+                    const email = String(ctx.body?.email ?? '')
+
+                    if (isDisposableEmail(email)) {
+                        throw new APIError('BAD_REQUEST', {
+                            code: RequestErrorCode.DisposableEmail,
+                            message: 'Sign up with a permanent email address',
+                        })
+                    }
+
+                    const session = await getSessionFromCtx(ctx)
+
+                    // Recorded so onLinkAccount can check a later /verify-email confirmation against it.
+                    if (session?.user.isAnonymous) {
+                        await pendingLinks.updateOne(
+                            { _id: new ObjectId(session.user.id) },
+                            { $set: { pendingLinkEmail: normalizeEmail(email) } },
+                        )
+                    }
                 }
             }),
             after: createAuthMiddleware(async () => sendQueuedMail(mailer)),
         },
     })
+}
 
 export type AuthInstance = ReturnType<typeof createAuth>

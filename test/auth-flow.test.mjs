@@ -492,3 +492,43 @@ test('signing in from an anonymous session merges its runs into the existing acc
     assert.deepEqual(returning.runs.map((stored) => stored.id).sort(), ['anonymous-run', 'own-run'])
     assert.equal(anonymousAfter, null)
 })
+
+test('a verification link for a different email, opened with an anonymous cookie, moves nothing', async () => {
+    const { ObjectId } = require('mongodb')
+    const attackerEmail = 'attacker@example.com'
+    const victim = await signInAnonymously()
+    const victimJobPath = `users/${victim.user.id}/jobs/own/video`
+
+    await withDb(async (db) => {
+        await db.collection('jobs').insertOne(storedJob(victim.user.id, victimJobPath))
+        await db
+            .collection('user')
+            .updateOne({ _id: new ObjectId(victim.user.id) }, { $set: { runs: [run('victim-run')] } })
+    })
+
+    // The attacker signs up with their own address, then mails that confirmation link to the victim instead of
+    // opening it themselves. The victim opens it while still holding their own anonymous session cookie.
+    await post('/api/auth/sign-up/email', { name: 'Attacker', email: attackerEmail, password: 'first-password' })
+    await settle()
+
+    const opened = await confirmEmail(attackerEmail, victim.cookie)
+    const body = await opened.json()
+    const [victimAfter, attacker] = await withDb((db) =>
+        Promise.all([
+            db.collection('user').findOne({ _id: new ObjectId(victim.user.id) }),
+            db.collection('user').findOne({ email: attackerEmail }),
+        ]),
+    )
+    const victimJobs = await withDb((db) => db.collection('jobs').find({ userId: victim.user.id }).toArray())
+    const attackerJobs = await withDb((db) => db.collection('jobs').find({ userId: attacker._id.toString() }).toArray())
+
+    assert.equal(opened.status, 403)
+    assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
+    assert.ok(victimAfter, "the victim's anonymous user wasn't deleted")
+    assert.deepEqual(
+        victimAfter.runs.map((stored) => stored.id),
+        ['victim-run'],
+    )
+    assert.equal(victimJobs.length, 1)
+    assert.equal(attackerJobs.length, 0)
+})
