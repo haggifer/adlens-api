@@ -4,7 +4,6 @@ import { SessionGuard } from '../auth/session.guard'
 import { CurrentUser } from '../common/current-user.decorator'
 import { QuotaService } from '../quota/quota.service'
 
-// Resources of the signed-in user.
 @UseGuards(SessionGuard)
 @Controller('v1/me')
 export class MeController {

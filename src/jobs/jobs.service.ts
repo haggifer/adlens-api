@@ -47,7 +47,6 @@ export class JobsService {
         private readonly samples: SamplesService,
     ) {}
 
-    // Creates the pending job and a signed upload target bound to the declared type and size.
     async create(userId: string, { settings, file }: CreateJobPayload): Promise<CreateJobResponse> {
         const id = new Types.ObjectId()
         const path = jobVideoPath(userId, id.toString())
@@ -88,7 +87,6 @@ export class JobsService {
         return toPublicJob(job)
     }
 
-    // Newest first, paged by the last seen id.
     async list(userId: string, { cursor, limit }: ListJobsQuery): Promise<JobListResponse> {
         await this.lifecycle.expireStale(userId)
 

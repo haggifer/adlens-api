@@ -9,7 +9,6 @@ import { MeModule } from './me/me.module'
 import { RealtimeModule } from './realtime/realtime.module'
 import { SamplesModule } from './samples/samples.module'
 
-// Composition root of the API process (main.ts).
 @Module({
     imports: [
         appConfigModule,

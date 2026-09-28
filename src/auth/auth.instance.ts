@@ -32,7 +32,6 @@ const logger = new Logger('Auth')
 // the after hook below sends it and turns a failure into an error response.
 const outbox = new AsyncLocalStorage<MailMessage[]>()
 
-// Wraps each HTTP request to Better Auth (see main.ts), giving it its own outbox.
 export const withOutbox = <T>(run: () => T): T => outbox.run([], run)
 
 const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> => {
