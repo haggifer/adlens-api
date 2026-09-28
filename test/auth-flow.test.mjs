@@ -42,6 +42,10 @@ before(async () => {
         BETTER_AUTH_SECRET: 'auth-flow-test-secret-auth-flow-test-secret',
         BETTER_AUTH_URL: API,
         WEB_ORIGIN: WEB,
+        GOOGLE_CLIENT_ID: 'test-google-client-id',
+        GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
+        GITHUB_CLIENT_ID: 'test-github-client-id',
+        GITHUB_CLIENT_SECRET: 'test-github-client-secret',
     })
 
     const { Test } = require('@nestjs/testing')
@@ -206,4 +210,33 @@ test('no one can make themselves an admin at sign-up', async () => {
     } finally {
         await client.close()
     }
+})
+
+const startSocialSignIn = async (provider, callbackURL) => {
+    const res = await post('/api/auth/sign-in/social', { provider, callbackURL })
+    const body = await res.json()
+
+    return { status: res.status, body }
+}
+
+test('Google sign-in starts at Google, with the account picker and the API as the callback', async () => {
+    const { status, body } = await startSocialSignIn('google', `${WEB}/history`)
+    const target = new URL(body.url)
+
+    assert.equal(status, 200)
+    assert.equal(target.host, 'accounts.google.com')
+    assert.equal(target.searchParams.get('client_id'), 'test-google-client-id')
+    assert.equal(target.searchParams.get('redirect_uri'), `${API}/api/auth/callback/google`)
+    assert.equal(target.searchParams.get('prompt'), 'select_account')
+})
+
+test('GitHub sign-in starts at GitHub, asking for the email address, with the API as the callback', async () => {
+    const { status, body } = await startSocialSignIn('github', `${WEB}/history`)
+    const target = new URL(body.url)
+
+    assert.equal(status, 200)
+    assert.equal(target.host, 'github.com')
+    assert.equal(target.searchParams.get('client_id'), 'test-github-client-id')
+    assert.equal(target.searchParams.get('redirect_uri'), `${API}/api/auth/callback/github`)
+    assert.ok(target.searchParams.get('scope').split(' ').includes('user:email'))
 })

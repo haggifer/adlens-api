@@ -77,19 +77,23 @@ with `input: false`, so sign-up and profile updates can't set it.
 
 ## Authentication
 
-[Better Auth](src/auth/auth.instance.ts) on the app's own Mongo connection, email and password:
+[Better Auth](src/auth/auth.instance.ts) on the app's own Mongo connection: email and password, plus Google and GitHub:
 
 - **Sessions are httpOnly, `SameSite=Lax` cookies.** The web app (`www.useadlens.com`) and the API (`api.useadlens.com`)
   share the parent domain (`COOKIE_DOMAIN`), so the cookie is first-party for both and no token ever sits in
   JavaScript-readable storage. Socket.IO authenticates its handshake with the same cookie.
 - **Email verification is required** before the first sign-in; signing in unverified resends the link.
+- **Google and GitHub sign-in** (OAuth, callbacks on this API: `/api/auth/callback/{google,github}`). A provider is
+  on when both its client id and secret are set; half a pair stops the API at startup. A social sign-in links to an
+  existing user with the same email only when the provider reports that email as verified **and** the user's own
+  email is verified, so an unconfirmed sign-up can't be taken over. Google always shows its account picker.
 - **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
 - **Emailed links open the web app** (`/confirm-email`, `/reset-password`), never the API: users only see the site's
   domain, and the confirmation page calls `verify-email` from the browser once it loads, so mail scanners that fetch
   links without running JavaScript can't use the token up. Confirming signs the user in (Better Auth sets the session
   cookie on that response).
-- **Account deletion** (password-confirmed) purges the user's jobs, quota and every uploaded object before Better Auth
-  removes the account.
+- **Account deletion** (password-confirmed, or within a day of signing in for users without a password) purges the
+  user's jobs, quota and every uploaded object before Better Auth removes the account.
 - **An email that can't be sent fails the request.** Emails go through Resend from `mail.useadlens.com`. Better Auth
   runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
@@ -192,6 +196,10 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 | `COOKIE_DOMAIN`          | —                       | Parent domain for the session cookie in production (`useadlens.com`)        |
 | `RESEND_API_KEY`         | required by the API     | Resend sending key; the API won't start without it                          |
 | `CONTACT_EMAIL`          | —                       | Where Contact form messages go; unset, the form answers 503                 |
+| `GOOGLE_CLIENT_ID`       | —                       | Google sign-in; enabled with `GOOGLE_CLIENT_SECRET` (both or neither)       |
+| `GOOGLE_CLIENT_SECRET`   | —                       | Google OAuth client secret                                                  |
+| `GITHUB_CLIENT_ID`       | —                       | GitHub sign-in; enabled with `GITHUB_CLIENT_SECRET` (both or neither)       |
+| `GITHUB_CLIENT_SECRET`   | —                       | GitHub OAuth client secret                                                  |
 | `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                      |
 | `PORT`                   | `8080`                  | API listen port                                                             |
 | `STORAGE_KEY_FILE`       | —                       | Local only: SA key used to sign V4 URLs (user ADC can't sign)               |

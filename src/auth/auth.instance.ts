@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Db, MongoClient } from 'mongodb'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
+import type { SocialProviderOptions } from './social-providers'
 
 export const AUTH = 'BETTER_AUTH'
 
@@ -21,6 +22,7 @@ export interface AuthOptions {
     baseURL: string
     webOrigin: string
     cookieDomain?: string
+    socialProviders: SocialProviderOptions
     mailer: Mailer
     onDeleteUser: (userId: string) => Promise<void>
 }
@@ -70,6 +72,7 @@ export const createAuth = ({
     baseURL,
     webOrigin,
     cookieDomain,
+    socialProviders,
     mailer,
     onDeleteUser,
 }: AuthOptions) =>
@@ -90,6 +93,7 @@ export const createAuth = ({
             sendResetPassword: async ({ user, token }) =>
                 queueMail(mailer, passwordResetEmail(user.email, toWebLink(webOrigin, '/reset-password', token))),
         },
+        socialProviders,
         emailVerification: {
             sendOnSignUp: true,
             sendOnSignIn: true,

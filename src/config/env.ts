@@ -25,6 +25,11 @@ const envSchema = z.object({
     MAIL_FROM: z.string().default('AdLens <no-reply@mail.useadlens.com>'),
     // Where Contact form messages go. Unset, the form answers 503.
     CONTACT_EMAIL: z.email().optional(),
+    // Sign-in with Google / GitHub; a provider is enabled when both of its values are set.
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
+    GITHUB_CLIENT_ID: z.string().optional(),
+    GITHUB_CLIENT_SECRET: z.string().optional(),
     QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
     GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
     GEMINI_LOCATION: z.string().default('global'),

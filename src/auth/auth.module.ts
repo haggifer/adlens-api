@@ -11,6 +11,7 @@ import { Mailer } from '../mail/mailer'
 import { AUTH, createAuth } from './auth.instance'
 import { AuthService } from './auth.service'
 import { SessionGuard } from './session.guard'
+import { toSocialProviders } from './social-providers'
 
 @Global()
 @Module({
@@ -39,6 +40,12 @@ import { SessionGuard } from './session.guard'
                     baseURL: config.get('BETTER_AUTH_URL', { infer: true }),
                     webOrigin: config.get('WEB_ORIGIN', { infer: true }),
                     cookieDomain: config.get('COOKIE_DOMAIN', { infer: true }),
+                    socialProviders: toSocialProviders({
+                        GOOGLE_CLIENT_ID: config.get('GOOGLE_CLIENT_ID', { infer: true }),
+                        GOOGLE_CLIENT_SECRET: config.get('GOOGLE_CLIENT_SECRET', { infer: true }),
+                        GITHUB_CLIENT_ID: config.get('GITHUB_CLIENT_ID', { infer: true }),
+                        GITHUB_CLIENT_SECRET: config.get('GITHUB_CLIENT_SECRET', { infer: true }),
+                    }),
                     mailer,
                     onDeleteUser: (userId) => accountData.purge(userId),
                 })
