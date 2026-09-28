@@ -21,8 +21,16 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 
 - A job is created `pending`; after that, `JobLifecycle` is the only code that changes its status, and every transition
   is a conditional update on the expected current status. Don't write `status` anywhere else.
-- A quota charge is refunded at most once, by whoever clears `chargedRunId` in the write that ends the run. Keep
-  the charge, the final status and that field in one update.
+- A quota charge is refunded at most once, by whoever clears `chargedRunId` (and `chargedIpRunId` for the network)
+  in the write that ends the run. Keep the charges, the final status and those fields in one update. Never store a
+  network key or an address on a job.
+- The client's address comes only from `ClientNetworkResolver` (`X-Forwarded-For` read `TRUSTED_PROXY_HOPS` from the
+  right). Never store or log an address; networks are stored as an HMAC.
+- An account's purge runs in Better Auth's `user.deleteUser.beforeDelete`, never in `databaseHooks.user.delete`: the
+  anonymous plugin deletes a linked anonymous user through the internal adapter after its jobs moved to the account,
+  and their videos still sit under the anonymous user's prefix.
+- A job's upload is at `file.path`, which after linking can be under another user's prefix. Delete by that path; never
+  derive it from `userId`.
 - Clients only ever receive the public job shape from `jobs/job.mapper.ts`; owner, storage path, execution and
   accounting fields stay server-side.
 - The request, response and error shapes come from `adlens-shared`. Change the contract there first, publish it, then
@@ -50,3 +58,5 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 - Better Auth needs MongoDB transactions, so `test:auth` runs on an in-memory replica set; the unit and e2e tests use
   a standalone in-memory server.
 - With `ANALYZE_LOCAL=1` the API spawns `node dist/worker`, so `dist/` must be built.
+- The e2e suite sets `BETTER_AUTH_SECRET` in `test/global-setup.ts`: the network key is derived from it. It fakes the
+  Turnstile verifier (`'pass'` passes), and `X-Forwarded-For` picks each test's network.

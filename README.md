@@ -22,7 +22,7 @@ repos.
  └──────┬───────────────▲───────┘   │ node dist/worker (on demand)  │────┘
         │ Mongoose       │ Change    │ · rules · Gemini on Vertex    │
         ▼                │ Stream    └──────────────┬───────────────┘
-      MongoDB Atlas ─────┘  (jobs, Better Auth collections) ◄┘
+      MongoDB Atlas ─────┘  (jobs, ip_quotas, Better Auth collections) ◄┘
 ```
 
 - **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run at `api.useadlens.com`. Better Auth, Mongoose on Atlas,
@@ -44,7 +44,8 @@ conditional update on the expected current status, so two racing callers can nev
 "analyze" can't verify, charge or dispatch twice).
 
 1. **Create** `POST /v1/jobs`: a `pending` job and a V4 signed PUT URL that binds the declared content type **and exact
-   size** (`x-goog-content-length-range`), so the stored object must match the declaration.
+   size** (`x-goog-content-length-range`), so the stored object must match the declaration. The
+   [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)):
    - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
    - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
@@ -52,7 +53,9 @@ conditional update on the expected current status, so two racing callers can nev
      large, unsupported type) is rejected with 422 and deleted. A missing upload (409 `UPLOAD_INCOMPLETE`) or a storage
      or network problem (503) puts the job back to `pending` and never deletes the user's file. A job on a
      [sample ad](#sample-ads) skips this step: its video was measured when the sample was published;
-   - **charge** one run and move to `queued` (429 `QUOTA_EXCEEDED` when the window is spent);
+   - **charge** one run on the user's network, then one on the user, and move to `queued` (429 `QUOTA_EXCEEDED` when
+     the user's window is spent; the [network rules](#abuse-limits) answer with their own codes). If the user charge
+     fails, the network run is given back;
    - **dispatch** the worker. If that fails, the job goes back to `pending` and the charge is refunded (503).
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
@@ -78,6 +81,36 @@ once. Deleting a job keeps its run counted.
 are still counted but never capped, and `GET /v1/me/quota` reports `limit: null`. The field is declared to Better Auth
 with `input: false`, so sign-up and profile updates can't set it.
 
+## Abuse limits
+
+Anyone can analyze without signing up, so free runs are bounded per network as well as per user:
+
+| Rule | Limit per rolling 7 days | When hit |
+| --- | --- | --- |
+| Per user (anonymous or not) | `QUOTA_LIMIT` (3) | 429 `QUOTA_EXCEEDED` |
+| Anonymous users per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` |
+| Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
+| Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
+
+- **The network** is the IPv4 address or the IPv6 /64 prefix (an IPv4-mapped address counts as IPv4). The address is
+  the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` from the right (1 on Cloud Run: the one Google's front end appends),
+  or the socket address when the header is absent; never the leftmost entry, which the client controls
+  ([`ClientNetworkResolver`](src/ip-quota/client-network.resolver.ts)). Each lookup logs only the header's entry count.
+- **Storage** ([`IpQuotaService`](src/ip-quota/ip-quota.service.ts)): one `ip_quotas` document per network, keyed by
+  `HMAC-SHA256(key, network)`, the key derived from `BETTER_AUTH_SECRET` with HKDF. It holds
+  `runs: { id, startedAt, jobId, anonymous }[]` and a TTL `expiresAt` 7 days after the last charge. The address itself
+  is never stored or logged. A charge is one conditional pipeline update, as for the user quota; a refund is `$pull`
+  by run id, found through an index on `runs.id`, so the worker needs no key.
+- **Order** ([`AnalysisAdmission`](src/jobs/analysis-admission.service.ts)): `POST /v1/jobs` and `/from-sample` check
+  the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
+  (`chargedRunId`, `chargedIpRunId`); the write that ends a run clears both, so each is refunded at most once.
+- **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web sends a token with every job
+  creation; the API calls Cloudflare's `siteverify` only when a rule asks for it (always for anonymous users) and
+  records `hasPassedChallenge` on the job for analyze. Without `TURNSTILE_SECRET_KEY` a required check never passes.
+  A network that crosses the soft limit between creating and analyzing a job made without the check gets
+  `CHALLENGE_REQUIRED` at analyze, and the user starts again.
+- **Admins** (`isAdmin: true`) skip every network rule.
+
 ## Authentication
 
 [Better Auth](src/auth/auth.instance.ts) on the app's own Mongo connection: email and password, plus Google and GitHub:
@@ -85,6 +118,19 @@ with `input: false`, so sign-up and profile updates can't set it.
 - **Sessions are httpOnly, `SameSite=Lax` cookies.** The web app (`www.useadlens.com`) and the API (`api.useadlens.com`)
   share the parent domain (`COOKIE_DOMAIN`), so the cookie is first-party for both and no token ever sits in
   JavaScript-readable storage. Socket.IO authenticates its handshake with the same cookie.
+- **Anonymous sessions** (Better Auth's `anonymous` plugin): the web signs a visitor in anonymously right before their
+  first analysis, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
+  `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
+  work unchanged. When they sign up or in, `onLinkAccount` moves their jobs (`userId`) and quota runs to the account
+  ([`AccountDataService.adopt`](src/account/account-data.service.ts)), then the plugin deletes the anonymous user.
+  `/verify-email` links only when the anonymous session confirming it is the one that started that sign-up: the
+  address is recorded as `pendingLinkEmail` on the anonymous user document (written straight to the collection, never
+  through a Better Auth field), and a mismatch answers 403 `ACCOUNT_LINK_FAILED` and leaves the history with the
+  anonymous user — otherwise a confirmation link mailed to someone else could hijack a visitor's analyses.
+  `/link-social` is refused for an anonymous session (it could attach a provider and stay anonymous forever), and so
+  is `/delete-anonymous-user` (it deletes through Better Auth's internal adapter and would skip the purge).
+- **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
+  `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
 - **Email verification is required** before the first sign-in; signing in unverified resends the link.
 - **Google and GitHub sign-in** (OAuth, callbacks on this API: `/api/auth/callback/{google,github}`). A provider is
   on when both its client id and secret are set; half a pair stops the API at startup. A social sign-in links to an
@@ -97,8 +143,9 @@ with `input: false`, so sign-up and profile updates can't set it.
   links without running JavaScript can't use the token up. Confirming signs the user in (Better Auth sets the session
   cookie on that response).
 - **Account deletion** (password-confirmed, or within a day of signing in for users without a password) purges the
-  user's jobs and every uploaded object before Better Auth removes the account; the quota runs live on the user
-  document, so Better Auth's own delete clears them.
+  user's jobs and every uploaded object (including videos of jobs adopted from an anonymous session, which stay under
+  that session's prefix) before Better Auth removes the account; the quota runs live on the user document, so Better
+  Auth's own delete clears them.
 - **An email that can't be sent fails the request.** Emails go through Resend from `mail.useadlens.com`. Better Auth
   runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
@@ -115,9 +162,9 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | --------------------------- | --------------------------------------------------------------- | ------------------------------ |
 | `ALL /api/auth/*`           | Better Auth (public)                                            | Better Auth                    |
 | `GET /health`               | Liveness (public)                                               | `{ status, service, time }`    |
-| `POST /v1/jobs`             | Create a pending job and its signed upload target               | `{ job, upload }`              |
-| `POST /v1/jobs/from-sample` | Create a pending job on a published sample ad (no upload)       | `{ job }`                      |
-| `POST /v1/jobs/:id/analyze` | Verify → charge → dispatch                                      | **202** `{ job }`              |
+| `POST /v1/jobs`             | Admission check (optional challengeToken), then a pending job and its signed upload target | `{ job, upload }`              |
+| `POST /v1/jobs/from-sample` | Admission check, then a pending job on a published sample ad (no upload) | `{ job }`                      |
+| `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch                     | **202** `{ job }`              |
 | `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)    | `{ jobs, nextCursor }`         |
 | `GET /v1/jobs/:id`          | One owned job                                                   | `{ job }`                      |
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
@@ -179,7 +226,7 @@ Set `"isPublished": false` and publish again to hide a sample.
 
 ```
 src/        main.ts (API) and worker.ts (analysis worker), one Nest module per feature: jobs, analysis, rules, quota,
-            auth, account, mail, storage, realtime, database, config
+            ip-quota, challenge, auth, account, mail, storage, realtime, database, config
 test/       e2e (Supertest) and auth-flow tests
 scripts/    ruleset publishing, dependency guard
 infra/      gcloud setup script and bucket CORS policy
@@ -213,6 +260,11 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 | `ANALYZE_LOCAL`          | `0`                     | `1`: run each analysis as a local `node dist/worker` child process          |
 | `ANALYZE_MAX_RETRIES`    | `2`                     | Must equal the job's `--max-retries`, so the worker knows its last attempt  |
 | `QUOTA_LIMIT`            | `3`                     | Analyses per rolling 7-day window                                           |
+| `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users per network in a rolling 7-day window           |
+| `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
+| `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
+| `TRUSTED_PROXY_HOPS`     | `1`                     | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                   |
+| `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
 | `GEMINI_MODEL`           | `gemini-3.6-flash`      | Model id                                                                    |
 | `GEMINI_LOCATION`        | `global`                | Vertex serving location                                                     |
 | `WORKER_JOB_ID`          | —                       | Worker only: set per execution by the dispatcher                            |
@@ -223,19 +275,22 @@ the process with a readable error. Locally they come from `.env` (non-secret, co
 ```bash
 gcloud auth application-default login   # once; the account needs Vertex AI User
 npm install
-# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, RESEND_API_KEY, ANALYZE_LOCAL=1, STORAGE_KEY_FILE
+# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, RESEND_API_KEY, ANALYZE_LOCAL=1, STORAGE_KEY_FILE, TURNSTILE_SECRET_KEY
 npm run start:dev                        # keeps dist/ built, which the local worker process runs
 ```
 
 With `ANALYZE_LOCAL=1` each analysis runs `node dist/worker` as a child process, the same entry point Cloud Run runs.
 Vertex reads the real `gs://` object, so a real bucket and ADC are needed for the analysis step.
 
+Locally, use Cloudflare's test secret 1x0000000000000000000000000000000AA (always passes) with the web's test site
+key; 2x0000000000000000000000000000000AA always fails.
+
 ## Tests
 
 ```bash
-npm test          # unit: quota, job lifecycle, pipeline, verification (real MongoDB via mongodb-memory-server)
+npm test          # unit: quota, network quota, job lifecycle, pipeline, verification, client IP (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
-npm run test:auth # after a build: sign-up, verification, reset and deletion against the real Better Auth
+npm run test:auth # after a build: sign-up, verification, reset, deletion and anonymous linking against the real Better Auth
 ```
 
 The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, because the guarantees that matter
@@ -288,6 +343,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **Rolling quota window on the user document instead of a `quotas` collection.** The limit follows config;
   single-document atomicity; runs pruned to the window, so the document stays small; the runs go away with the
   account.
+- **Network limits keyed by a derived HMAC, soft before hard.** The key is derived from `BETTER_AUTH_SECRET`, so no
+  new secret (and Secret Manager version) is needed; rotating that secret resets every network's count. Shared
+  networks (offices, mobile carriers) get a Turnstile check at the soft limit instead of a block. Jobs store only the
+  network run's random id, never the hash, so nothing network-derived outlives the 7-day document.
+- **`X-Forwarded-For` read from the right, not `trust proxy`.** One function with a configured hop count, unit-tested,
+  picks the entry our own front end appended; Express's `trust proxy` isn't set, because nothing else needs `req.ip`.
 - **Attempt-aware retries.** Cloud Run retries any non-zero exit, so the worker reads its attempt number: transient
   failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. Malformed or truncated model
   output counts as transient because generation is stochastic, and `maxOutputTokens` caps what an attempt can cost.
@@ -316,6 +377,14 @@ Why the system is built this way, and what was rejected. Decisions that span the
 
 **Auth and hosting**
 
+- **Anonymous users are real Better Auth users**, created only when a visitor starts an analysis, so every existing
+  path (jobs, quota, history, Socket.IO) works unchanged and crawlers create none. Abandoned anonymous users aren't
+  cleaned up yet.
+- **Linking moves ownership, not objects.** `jobs.userId` is rewritten and the runs are merged, but the GCS objects stay
+  where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
+  verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge
+  deletes adopted uploads before the account's own prefix. The purge must stay in `deleteUser.beforeDelete`: the
+  anonymous plugin deletes a linked anonymous user through the internal adapter, which skips it.
 - **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
   Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
