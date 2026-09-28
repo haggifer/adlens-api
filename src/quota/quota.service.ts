@@ -4,13 +4,9 @@ import { InjectConnection } from '@nestjs/mongoose'
 import { type Quota, QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
 import { type Connection, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
+import { countedRuns } from '../common/counted-runs'
 import type { Env } from '../config/env'
 import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/user.doc'
-
-// The runs that still count: those started after the cutoff.
-const countedRuns = (cutoff: Date) => ({
-    $filter: { input: { $ifNull: ['$runs', []] }, cond: { $gt: ['$$this.startedAt', cutoff] } },
-})
 
 @Injectable()
 export class QuotaService {

@@ -31,6 +31,11 @@ const envSchema = z.object({
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
     QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
+    // Weekly caps per network (an IPv4 address or an IPv6 /64): analyses by anonymous users; analyses by anyone
+    // before a Turnstile check is required; analyses by anyone at all.
+    IP_ANON_LIMIT: z.coerce.number().int().positive().default(3),
+    IP_SOFT_LIMIT: z.coerce.number().int().positive().default(10),
+    IP_HARD_LIMIT: z.coerce.number().int().positive().default(30),
     // Proxies in front of the API that append to X-Forwarded-For: 1 on Cloud Run (Google's front end).
     TRUSTED_PROXY_HOPS: z.coerce.number().int().positive().default(1),
     GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
