@@ -206,6 +206,19 @@ export const createAuth = ({
                     throw new APIError('NOT_FOUND', { message: 'Not found' })
                 }
 
+                // Otherwise an anonymous user could attach a provider and stay anonymous forever, with no email or
+                // password of their own to ever link their history to a real account.
+                if (ctx.path === '/link-social') {
+                    const session = await getSessionFromCtx(ctx)
+
+                    if (session?.user.isAnonymous) {
+                        throw new APIError('FORBIDDEN', {
+                            code: ACCOUNT_LINK_FAILED,
+                            message: 'Sign up or sign in before linking a provider',
+                        })
+                    }
+                }
+
                 if (ctx.path === '/sign-up/email') {
                     const email = String(ctx.body?.email ?? '')
 

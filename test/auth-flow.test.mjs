@@ -1,6 +1,6 @@
-// The email/password and anonymous flows against the real Better Auth (which Jest can't load as ESM), on the built app with an
-// in-memory MongoDB replica set (Better Auth uses transactions). Emails are captured instead of sent; storage is faked.
-// Run after a build: npm run test:auth
+// The email/password and anonymous flows against the real Better Auth (which Jest can't load as ESM), on the built
+// app with an in-memory MongoDB replica set (Better Auth uses transactions). Emails are captured instead of sent;
+// storage is faked. Run after a build: npm run test:auth
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { after, before, test } from 'node:test'
@@ -17,6 +17,7 @@ const deletedPaths = []
 let adoptedUpload
 let linkerSession
 let isMailDown = false
+let isAdoptDown = false
 let mongo
 let app
 let auth
@@ -92,6 +93,7 @@ before(async () => {
     const { Test } = require('@nestjs/testing')
     const { toNodeHandler } = require('better-auth/node')
     const { AppModule } = require('../dist/app.module')
+    const { AccountDataService } = require('../dist/account/account-data.service')
     const { AUTH, withOutbox } = require('../dist/auth/auth.instance')
     const { Mailer } = require('../dist/mail/mailer')
     const { JobEventsService } = require('../dist/realtime/job-events.service')
@@ -120,6 +122,20 @@ before(async () => {
     app = moduleRef.createNestApplication({ bodyParser: false, logger: false })
     app.enableCors({ origin: WEB, credentials: true })
     auth = app.get(AUTH)
+
+    // Lets a test simulate adopt failing (e.g. a transient DB error) without a second, unwired instance: the real
+    // service still runs otherwise, so the legitimate linking tests exercise the real move.
+    const accountData = app.get(AccountDataService)
+    const adopt = accountData.adopt.bind(accountData)
+
+    accountData.adopt = (anonymousUserId, userId) => {
+        if (isAdoptDown) {
+            return Promise.reject(new Error('adopt is down'))
+        }
+
+        return adopt(anonymousUserId, userId)
+    }
+
     const authHandler = toNodeHandler(auth)
     app.getHttpAdapter()
         .getInstance()
@@ -531,4 +547,61 @@ test('a verification link for a different email, opened with an anonymous cookie
     )
     assert.equal(victimJobs.length, 1)
     assert.equal(attackerJobs.length, 0)
+})
+
+test('a failed move leaves the anonymous user and its data in place', async () => {
+    const { ObjectId } = require('mongodb')
+    const email = 'unlucky-link@example.com'
+    const anonymous = await signInAnonymously()
+    const jobPath = `users/${anonymous.user.id}/jobs/own/video`
+
+    await withDb(async (db) => {
+        await db.collection('jobs').insertOne(storedJob(anonymous.user.id, jobPath))
+        await db
+            .collection('user')
+            .updateOne({ _id: new ObjectId(anonymous.user.id) }, { $set: { runs: [run('anonymous-run')] } })
+    })
+
+    await post('/api/auth/sign-up/email', { name: 'Unlucky Link', email, password: 'first-password' }, anonymous.cookie)
+    await settle()
+
+    isAdoptDown = true
+
+    let confirmed
+    try {
+        confirmed = await confirmEmail(email, anonymous.cookie)
+    } finally {
+        isAdoptDown = false
+    }
+    const body = await confirmed.json()
+    const [anonymousAfter, linked] = await withDb((db) =>
+        Promise.all([
+            db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+            db.collection('user').findOne({ email }),
+        ]),
+    )
+    const anonymousJobs = await withDb((db) => db.collection('jobs').find({ userId: anonymous.user.id }).toArray())
+
+    assert.equal(confirmed.status, 500)
+    assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
+    assert.ok(linked, 'the account being linked to still exists')
+    assert.ok(anonymousAfter, "the anonymous user wasn't deleted")
+    assert.deepEqual(
+        anonymousAfter.runs.map((stored) => stored.id),
+        ['anonymous-run'],
+    )
+    assert.equal(anonymousJobs.length, 1)
+})
+
+test('an anonymous session cannot link a social provider', async () => {
+    const anonymous = await signInAnonymously()
+    const res = await post(
+        '/api/auth/link-social',
+        { provider: 'google', callbackURL: `${WEB}/history` },
+        anonymous.cookie,
+    )
+    const body = await res.json()
+
+    assert.equal(res.status, 403)
+    assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
 })
