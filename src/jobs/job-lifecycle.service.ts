@@ -4,6 +4,8 @@ import { type Analysis, JobErrorCode, type JobMedia, JobStatus, RequestErrorCode
 import { type FilterQuery, Model } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { JOB_MODEL, type JobDoc, type StoredJob, type TokenUsage } from '../database/job.doc'
+import { IpQuotaService } from '../ip-quota/ip-quota.service'
+import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
 
 const VERIFY_STALE_MS = 10 * 60 * 1000
@@ -21,6 +23,7 @@ export class JobLifecycle {
     constructor(
         @InjectModel(JOB_MODEL) private readonly model: Model<JobDoc>,
         private readonly quota: QuotaService,
+        private readonly ipQuota: IpQuotaService,
     ) {}
 
     // pending → verifying. null when the job isn't the caller's pending job.
@@ -38,16 +41,36 @@ export class JobLifecycle {
         await this.transition({ _id: jobId, status: JobStatus.Verifying }, { status: JobStatus.Error, errorCode })
     }
 
-    // verifying → queued, after charging one run. If the job moved on meanwhile, the run is given back.
-    async chargeAndQueue(jobId: string, userId: string, media: JobMedia): Promise<StoredJob> {
-        const runId = await this.quota.consume(userId, jobId)
+    // verifying → queued, after charging the network (unless the caller is an admin) and then the user. A charge that
+    // can't be kept is given back: the network's when the user's fails, both when the job moved on meanwhile.
+    async chargeAndQueue(
+        jobId: string,
+        userId: string,
+        media: JobMedia,
+        ipCharge: IpCharge | null = null,
+    ): Promise<StoredJob> {
+        let ipRunId: string | null = null
+
+        if (ipCharge) {
+            ipRunId = await this.ipQuota.charge(ipCharge, jobId)
+        }
+
+        let runId: string
+
+        try {
+            runId = await this.quota.consume(userId, jobId)
+        } catch (err) {
+            await this.refundNetwork(ipRunId)
+            throw err
+        }
+
         const queued = await this.transition(
             { _id: jobId, status: JobStatus.Verifying },
-            { status: JobStatus.Queued, media, chargedRunId: runId },
+            { status: JobStatus.Queued, media, chargedRunId: runId, chargedIpRunId: ipRunId },
         )
 
         if (!queued) {
-            await this.quota.refund(userId, runId)
+            await Promise.all([this.quota.refund(userId, runId), this.refundNetwork(ipRunId)])
             throw new ApiException(
                 HttpStatus.CONFLICT,
                 RequestErrorCode.JobNotPending,
@@ -129,11 +152,11 @@ export class JobLifecycle {
         return this.model.findOneAndUpdate(filter, { $set: set }, { new: true }).lean<StoredJob>()
     }
 
-    // Applies a guarded status change and clears the job's charge in the same write. The pre-image says whether a
-    // charge was held, so exactly one caller refunds it.
+    // Applies a guarded status change and clears the job's charges in the same write. The pre-image says which
+    // charges were held, so exactly one caller refunds them.
     private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<boolean> {
         const before = await this.model
-            .findOneAndUpdate(filter, { $set: { ...set, chargedRunId: null } }, { new: false })
+            .findOneAndUpdate(filter, { $set: { ...set, chargedRunId: null, chargedIpRunId: null } }, { new: false })
             .lean<StoredJob>()
 
         if (!before) {
@@ -144,6 +167,15 @@ export class JobLifecycle {
             await this.quota.refund(before.userId, before.chargedRunId)
         }
 
+        // Jobs charged before the network quota existed have no such field.
+        await this.refundNetwork(before.chargedIpRunId ?? null)
+
         return true
+    }
+
+    private async refundNetwork(runId: string | null): Promise<void> {
+        if (runId) {
+            await this.ipQuota.refund(runId)
+        }
     }
 }

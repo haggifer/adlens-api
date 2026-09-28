@@ -1,7 +1,18 @@
-import { JobErrorCode, type JobMedia, JobStatus, Placement, Platform, VideoMimeType } from 'adlens-shared'
+import {
+    JobErrorCode,
+    type JobMedia,
+    JobStatus,
+    Placement,
+    Platform,
+    RequestErrorCode,
+    VideoMimeType,
+} from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
+import { IP_QUOTA_COLLECTION, IP_QUOTA_MODEL, type IpQuotaDoc, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
+import { IpQuotaService } from '../ip-quota/ip-quota.service'
+import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
@@ -16,6 +27,8 @@ const MEDIA: JobMedia = {
     sizeBytes: 1000,
     contentType: 'video/mp4',
 }
+const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
+const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
 
 describe('JobLifecycle', () => {
     let mongo: MemoryMongo
@@ -24,6 +37,15 @@ describe('JobLifecycle', () => {
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
     const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
+
+    const networkRuns = async () =>
+        (
+            (
+                await mongo.connection
+                    .collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
+                    .findOne({ _id: NETWORK_CHARGE.bucketKey })
+            )?.runs ?? []
+        ).length
 
     const createJob = async (status = JobStatus.Pending): Promise<string> => {
         const job = await jobs.create({
@@ -44,11 +66,11 @@ describe('JobLifecycle', () => {
 
     const findJob = (jobId: string) => jobs.findById(jobId).lean<StoredJob>()
 
-    const queueJob = async (): Promise<string> => {
+    const queueJob = async (ipCharge: IpCharge | null = null): Promise<string> => {
         const jobId = await createJob()
 
         await lifecycle.claimForVerification(USER, jobId)
-        await lifecycle.chargeAndQueue(jobId, USER, MEDIA)
+        await lifecycle.chargeAndQueue(jobId, USER, MEDIA, ipCharge)
 
         return jobId
     }
@@ -56,7 +78,12 @@ describe('JobLifecycle', () => {
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
-        lifecycle = new JobLifecycle(jobs, new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })))
+        await mongo.connection.model(IP_QUOTA_MODEL, IpQuotaSchema).init()
+        lifecycle = new JobLifecycle(
+            jobs,
+            new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })),
+            new IpQuotaService(mongo.connection, configStub(IP_LIMITS)),
+        )
     })
 
     beforeEach(async () => {
@@ -64,7 +91,11 @@ describe('JobLifecycle', () => {
     })
 
     afterEach(async () => {
-        await Promise.all([jobs.deleteMany({}), users().deleteMany({})])
+        await Promise.all([
+            jobs.deleteMany({}),
+            users().deleteMany({}),
+            mongo.connection.collection(IP_QUOTA_COLLECTION).deleteMany({}),
+        ])
     })
 
     afterAll(async () => {
@@ -156,6 +187,42 @@ describe('JobLifecycle', () => {
             errorCode: JobErrorCode.AnalysisTimedOut,
         })
         expect((await findJob(stuckVerifying))?.status).toBe(JobStatus.Pending)
+        expect(await used()).toBe(0)
+    })
+
+    it('charges the network before the user and records both runs', async () => {
+        const jobId = await queueJob(NETWORK_CHARGE)
+        const job = await findJob(jobId)
+
+        expect(job?.chargedIpRunId).toEqual(expect.any(String))
+        expect(await networkRuns()).toBe(1)
+        expect(await used()).toBe(1)
+    })
+
+    it('gives the network run back when the user has no analyses left', async () => {
+        for (let i = 0; i < 3; i++) {
+            await queueJob(NETWORK_CHARGE)
+        }
+
+        const jobId = await createJob()
+
+        await lifecycle.claimForVerification(USER, jobId)
+        await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
+            response: { errorCode: RequestErrorCode.QuotaExceeded },
+        })
+        expect(await networkRuns()).toBe(3)
+    })
+
+    it('refunds the network run with the user run, exactly once', async () => {
+        const jobId = await queueJob(NETWORK_CHARGE)
+
+        await Promise.all([
+            lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
+            lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
+        ])
+
+        expect((await findJob(jobId))?.chargedIpRunId).toBeNull()
+        expect(await networkRuns()).toBe(0)
         expect(await used()).toBe(0)
     })
 })

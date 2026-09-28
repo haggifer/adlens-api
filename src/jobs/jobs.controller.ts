@@ -11,7 +11,10 @@ import {
 } from 'adlens-shared'
 import { SessionGuard } from '../auth/session.guard'
 import { CurrentUser } from '../common/current-user.decorator'
+import { RequestIpSource } from '../common/ip-source.decorator'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
+import type { IpSource } from '../ip-quota/client-ip'
+import { AnalysisAdmission } from './analysis-admission.service'
 import { JobAnalysisService } from './job-analysis.service'
 import { JobsService, type ListJobsQuery, listJobsQuerySchema } from './jobs.service'
 
@@ -21,28 +24,39 @@ export class JobsController {
     constructor(
         private readonly jobs: JobsService,
         private readonly analysis: JobAnalysisService,
+        private readonly admission: AnalysisAdmission,
     ) {}
 
     @Post()
-    create(
+    async create(
         @CurrentUser() userId: string,
+        @RequestIpSource() ipSource: IpSource,
         @Body(new ZodValidationPipe(createJobInputSchema)) input: CreateJobPayload,
     ): Promise<CreateJobResponse> {
-        return this.jobs.create(userId, input)
+        const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken)
+
+        return this.jobs.create(userId, input, hasPassedChallenge)
     }
 
     @Post('from-sample')
     async createFromSample(
         @CurrentUser() userId: string,
+        @RequestIpSource() ipSource: IpSource,
         @Body(new ZodValidationPipe(createSampleJobInputSchema)) input: CreateSampleJobPayload,
     ): Promise<JobResponse> {
-        return { job: await this.jobs.createFromSample(userId, input) }
+        const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken)
+
+        return { job: await this.jobs.createFromSample(userId, input, hasPassedChallenge) }
     }
 
     @Post(':id/analyze')
     @HttpCode(HttpStatus.ACCEPTED)
-    async analyze(@CurrentUser() userId: string, @Param('id') id: string): Promise<JobResponse> {
-        return { job: await this.analysis.start(userId, id) }
+    async analyze(
+        @CurrentUser() userId: string,
+        @Param('id') id: string,
+        @RequestIpSource() ipSource: IpSource,
+    ): Promise<JobResponse> {
+        return { job: await this.analysis.start(userId, id, ipSource) }
     }
 
     @Get()

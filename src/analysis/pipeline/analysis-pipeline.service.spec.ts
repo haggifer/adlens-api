@@ -2,6 +2,7 @@ import { JobErrorCode, JobStatus, Market, Platform, RulePlatform, VideoMimeType 
 import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../../database/job.doc'
 import { USER_COLLECTION } from '../../database/user.doc'
+import { IpQuotaService } from '../../ip-quota/ip-quota.service'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
@@ -68,7 +69,14 @@ describe('AnalysisPipeline', () => {
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
-        lifecycle = new JobLifecycle(jobs, new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })))
+        lifecycle = new JobLifecycle(
+            jobs,
+            new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })),
+            new IpQuotaService(
+                mongo.connection,
+                configStub({ IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }),
+            ),
+        )
     })
 
     beforeEach(async () => {

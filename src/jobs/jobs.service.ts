@@ -47,7 +47,11 @@ export class JobsService {
         private readonly samples: SamplesService,
     ) {}
 
-    async create(userId: string, { settings, file }: CreateJobPayload): Promise<CreateJobResponse> {
+    async create(
+        userId: string,
+        { settings, file }: CreateJobPayload,
+        hasPassedChallenge: boolean,
+    ): Promise<CreateJobResponse> {
         const id = new Types.ObjectId()
         const path = jobVideoPath(userId, id.toString())
         const created = await this.model.create({
@@ -57,6 +61,8 @@ export class JobsService {
             settings,
             file: { ...file, bucket: this.storage.bucketName, path },
             chargedRunId: null,
+            chargedIpRunId: null,
+            hasPassedChallenge,
         })
         const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 
@@ -64,7 +70,11 @@ export class JobsService {
     }
 
     // A pending job on a published sample: its video is already stored and measured, so nothing is uploaded.
-    async createFromSample(userId: string, { sampleId, settings }: CreateSampleJobPayload): Promise<Job> {
+    async createFromSample(
+        userId: string,
+        { sampleId, settings }: CreateSampleJobPayload,
+        hasPassedChallenge: boolean,
+    ): Promise<Job> {
         const sample = await this.samples.findPublished(sampleId)
         const created = await this.model.create({
             userId,
@@ -74,6 +84,8 @@ export class JobsService {
             media: sample.media,
             sampleId: sample._id.toString(),
             chargedRunId: null,
+            chargedIpRunId: null,
+            hasPassedChallenge,
         })
 
         return toPublicJob(created.toObject<StoredJob>())

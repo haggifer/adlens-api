@@ -8,6 +8,9 @@ import { countedRuns } from '../common/counted-runs'
 import type { Env } from '../config/env'
 import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/user.doc'
 
+export const quotaExceeded = () =>
+    new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.QuotaExceeded, 'Analysis limit reached')
+
 @Injectable()
 export class QuotaService {
     private readonly limit: number
@@ -38,11 +41,7 @@ export class QuotaService {
         )
 
         if (!charged) {
-            throw new ApiException(
-                HttpStatus.TOO_MANY_REQUESTS,
-                RequestErrorCode.QuotaExceeded,
-                'Analysis limit reached',
-            )
+            throw quotaExceeded()
         }
 
         return run.id

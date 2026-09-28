@@ -16,5 +16,6 @@ export default async function globalSetup(): Promise<void> {
         STORAGE_BUCKET: 'test-bucket',
         QUOTA_LIMIT: '3',
         CONTACT_EMAIL: 'team@adlens.test',
+        BETTER_AUTH_SECRET: 'e2e-test-secret-e2e-test-secret-e2e-test',
     })
 }

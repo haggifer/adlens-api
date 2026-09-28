@@ -34,6 +34,10 @@ export const jobDocSchema = z.object({
     attempts: z.number().int().nonnegative().default(0),
     // The quota run this job was charged for; null when nothing is charged (never charged, or refunded).
     chargedRunId: z.string().nullable(),
+    // The network's run (IpQuotaService) this job was charged for; null when none is held (admins are never charged).
+    chargedIpRunId: z.string().nullable(),
+    // Set at creation when a Turnstile check passed; analyze relies on it for the network rules.
+    hasPassedChallenge: z.boolean().default(false),
     usage: tokenUsageSchema.optional(),
     // Set when the job analyzes a published sample; its file then points at the sample's object, never a user upload.
     sampleId: z.string().optional(),

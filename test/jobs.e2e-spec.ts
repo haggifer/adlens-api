@@ -9,11 +9,14 @@ import { AnalysisDispatcher } from '../src/analysis/dispatch/analysis-dispatcher
 import { AppModule } from '../src/app.module'
 import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
+import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { CONTACT_MESSAGE_MODEL, type ContactMessageDoc } from '../src/database/contact-message.doc'
 import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { USER_COLLECTION } from '../src/database/user.doc'
+import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
+import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { JobEventsService } from '../src/realtime/job-events.service'
@@ -33,6 +36,8 @@ describe('Jobs API (e2e)', () => {
     const dispatch = jest.fn(async () => 'executions/exec-1')
     const deleteObject = jest.fn(async (_path: string) => undefined)
     const sendMail = jest.fn(async (_message: MailMessage) => undefined)
+    // 'pass' passes; any other token fails. Nothing reaches Cloudflare.
+    const verifyChallenge = jest.fn(async (token: string, _remoteIp: string | null) => token === 'pass')
 
     const as = (userId: string) => ({ 'x-test-user': userId })
     const createJob = async (): Promise<string> => {
@@ -71,6 +76,8 @@ describe('Jobs API (e2e)', () => {
             .useValue({ dispatch })
             .overrideProvider(Mailer)
             .useValue({ send: sendMail })
+            .overrideProvider(ChallengeVerifier)
+            .useValue({ verify: verifyChallenge })
             .overrideProvider(JobEventsService)
             .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
             .compile()
@@ -97,6 +104,7 @@ describe('Jobs API (e2e)', () => {
         dispatch.mockClear()
         deleteObject.mockClear()
         sendMail.mockClear()
+        verifyChallenge.mockClear()
     })
 
     afterAll(async () => {
@@ -478,6 +486,135 @@ describe('Jobs API (e2e)', () => {
 
             expect(res.body.errorCode).toBe(RequestErrorCode.RateLimited)
             expect(sendMail).not.toHaveBeenCalled()
+        })
+    })
+
+    describe('analysis without an account and the network limits', () => {
+        const ANON = new Types.ObjectId().toString()
+        const MEMBER = new Types.ObjectId().toString()
+        const ADMIN = new Types.ObjectId().toString()
+        const LIMITED = new Types.ObjectId().toString()
+
+        // The client's own entry comes first; the rightmost one is what Google's front end appends.
+        const from = (network: string) => ({ 'x-forwarded-for': `198.51.100.99, ${network}` })
+
+        const createFrom = (userId: string, network: string, body: Record<string, unknown> = {}) =>
+            request(app.getHttpServer())
+                .post('/v1/jobs')
+                .set({ ...as(userId), ...from(network) })
+                .send({ settings: SETTINGS, file: FILE, ...body })
+
+        const analyzeFrom = (userId: string, network: string, jobId: string) =>
+            request(app.getHttpServer())
+                .post(`/v1/jobs/${jobId}/analyze`)
+                .set({ ...as(userId), ...from(network) })
+
+        const networkKey = (network: string) =>
+            app.get(ClientNetworkResolver).resolve({ forwardedFor: network, socketAddress: undefined }).bucketKey
+
+        const usage = (network: string) => app.get(IpQuotaService).usage(networkKey(network))
+
+        const seedNetwork = async (network: string, runs: number, isAnonymous = false) => {
+            const bucketKey = networkKey(network)
+
+            for (let i = 0; i < runs; i++) {
+                await app.get(IpQuotaService).charge({ bucketKey, isAnonymous, hasPassedChallenge: true }, `seed-${i}`)
+            }
+        }
+
+        beforeAll(async () => {
+            await app
+                .get<Connection>(getConnectionToken())
+                .collection(USER_COLLECTION)
+                .insertMany([
+                    {
+                        _id: new Types.ObjectId(ANON),
+                        email: `${ANON}@anonymous.placeholder.invalid`,
+                        isAnonymous: true,
+                    },
+                    { _id: new Types.ObjectId(MEMBER), email: 'member@example.com' },
+                    { _id: new Types.ObjectId(ADMIN), email: 'admin@example.com', isAdmin: true },
+                    {
+                        _id: new Types.ObjectId(LIMITED),
+                        email: 'limited@example.com',
+                        runs: [0, 1, 2].map((i) => ({ id: `run-${i}`, startedAt: new Date(), jobId: `job-${i}` })),
+                    },
+                ])
+        })
+
+        it('lets an anonymous user analyze once the challenge passes, checking it with their address', async () => {
+            const created = await createFrom(ANON, '203.0.113.1', { challengeToken: 'pass' }).expect(201)
+
+            await analyzeFrom(ANON, '203.0.113.1', created.body.job.id).expect(202)
+
+            expect(verifyChallenge).toHaveBeenCalledWith('pass', '203.0.113.1')
+            expect(await usage('203.0.113.1')).toEqual({ total: 1, anonymous: 1 })
+        })
+
+        it('asks an anonymous user for the challenge and refuses a failed one', async () => {
+            const missing = await createFrom(ANON, '203.0.113.2').expect(403)
+            const failed = await createFrom(ANON, '203.0.113.2', { challengeToken: 'fail' }).expect(403)
+
+            expect(missing.body.errorCode).toBe(RequestErrorCode.ChallengeRequired)
+            expect(failed.body.errorCode).toBe(RequestErrorCode.ChallengeFailed)
+        })
+
+        it('checks a sample job before looking the sample up', async () => {
+            const res = await request(app.getHttpServer())
+                .post('/v1/jobs/from-sample')
+                .set({ ...as(ANON), ...from('203.0.113.2') })
+                .send({ sampleId: '64b000000000000000000000', settings: SETTINGS })
+                .expect(403)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.ChallengeRequired)
+        })
+
+        it('asks for sign-up once the network used its anonymous analyses, but lets members in', async () => {
+            await seedNetwork('203.0.113.3', 3, true)
+
+            const anonymous = await createFrom(ANON, '203.0.113.3', { challengeToken: 'pass' }).expect(429)
+
+            await createFrom(MEMBER, '203.0.113.3').expect(201)
+            expect(anonymous.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+        })
+
+        it('asks everyone for the challenge once the network passes the soft limit', async () => {
+            await seedNetwork('203.0.113.4', 10)
+
+            const unchecked = await createFrom(MEMBER, '203.0.113.4').expect(403)
+            const checked = await createFrom(MEMBER, '203.0.113.4', { challengeToken: 'pass' }).expect(201)
+
+            await analyzeFrom(MEMBER, '203.0.113.4', checked.body.job.id).expect(202)
+
+            expect(unchecked.body.errorCode).toBe(RequestErrorCode.ChallengeRequired)
+            expect((await usage('203.0.113.4')).total).toBe(11)
+        })
+
+        it('stops a network at the hard limit, except for admins', async () => {
+            await seedNetwork('203.0.113.5', 30)
+
+            const member = await createFrom(MEMBER, '203.0.113.5').expect(429)
+            const created = await createFrom(ADMIN, '203.0.113.5').expect(201)
+
+            await analyzeFrom(ADMIN, '203.0.113.5', created.body.job.id).expect(202)
+
+            expect(member.body.errorCode).toBe(RequestErrorCode.NetworkQuotaExceeded)
+            expect((await usage('203.0.113.5')).total).toBe(30)
+        })
+
+        it('refuses a new job once the user has no analyses left', async () => {
+            const res = await createFrom(LIMITED, '203.0.113.6').expect(429)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.QuotaExceeded)
+        })
+
+        it('gives the network run back when the worker cannot be started', async () => {
+            const created = await createFrom(MEMBER, '203.0.113.7').expect(201)
+
+            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
+            await analyzeFrom(MEMBER, '203.0.113.7', created.body.job.id).expect(503)
+
+            expect(await usage('203.0.113.7')).toEqual({ total: 0, anonymous: 0 })
         })
     })
 })

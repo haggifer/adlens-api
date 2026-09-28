@@ -3,8 +3,10 @@ import { JobErrorCode, type Job, type JobMedia, RequestErrorCode } from 'adlens-
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
 import type { StoredJob } from '../database/job.doc'
+import type { IpSource } from '../ip-quota/client-ip'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
+import { AnalysisAdmission } from './analysis-admission.service'
 import { JobLifecycle } from './job-lifecycle.service'
 import { toPublicJob } from './job.mapper'
 import { JobsService } from './jobs.service'
@@ -19,8 +21,9 @@ const REJECTION_MESSAGES: Record<JobErrorCode, string> = {
     [JobErrorCode.AnalysisTimedOut]: 'The analysis timed out',
 }
 
-// POST /v1/jobs/:id/analyze. Claims the pending job, verifies the upload, charges one run and starts the worker.
-// Each step that can't complete puts the job back where the user can retry it, with any charge refunded.
+// POST /v1/jobs/:id/analyze. Claims the pending job, verifies the upload, charges
+// the network and the user, and starts the worker. Each step that can't complete puts the job back where the user
+// can retry it, with any charge refunded.
 @Injectable()
 export class JobAnalysisService {
     private readonly logger = new Logger(JobAnalysisService.name)
@@ -32,9 +35,10 @@ export class JobAnalysisService {
         private readonly storage: StorageService,
         private readonly dispatcher: AnalysisDispatcher,
         private readonly samples: SamplesService,
+        private readonly admission: AnalysisAdmission,
     ) {}
 
-    async start(userId: string, jobId: string): Promise<Job> {
+    async start(userId: string, jobId: string, ipSource: IpSource): Promise<Job> {
         const claimed = await this.lifecycle.claimForVerification(userId, jobId)
 
         if (!claimed) {
@@ -47,7 +51,10 @@ export class JobAnalysisService {
         let queued: StoredJob
 
         try {
-            queued = await this.lifecycle.chargeAndQueue(jobId, userId, media)
+            // Jobs created before the field existed have none: they get no pass.
+            const ipCharge = await this.admission.ipChargeFor(userId, ipSource, Boolean(claimed.hasPassedChallenge))
+
+            queued = await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
         } catch (err) {
             await this.lifecycle.releaseVerification(jobId)
             throw err
