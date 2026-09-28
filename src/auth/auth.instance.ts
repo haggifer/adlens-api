@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common'
+import { MIN_PASSWORD_LENGTH } from 'adlens-shared'
 import { betterAuth } from 'better-auth'
 import { mongodbAdapter } from 'better-auth/adapters/mongodb'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
@@ -101,7 +102,7 @@ export const createAuth = ({
         emailAndPassword: {
             enabled: true,
             requireEmailVerification: true,
-            minPasswordLength: 8,
+            minPasswordLength: MIN_PASSWORD_LENGTH,
             resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_S,
             revokeSessionsOnPasswordReset: true,
             sendResetPassword: async ({ user, token }) =>
