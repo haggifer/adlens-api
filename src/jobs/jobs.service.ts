@@ -13,7 +13,7 @@ import {
 import { isValidObjectId, Model, Types } from 'mongoose'
 import { z } from 'zod'
 import { ApiException } from '../common/api-exception'
-import { jobVideoPath, userPrefix } from '../common/paths'
+import { jobVideoPath } from '../common/paths'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
@@ -116,7 +116,8 @@ export class JobsService {
     }
 
     // Deletes an analysis and, for an upload, its video. A run's quota charge stays spent. The video goes first, so a
-    // failed storage call leaves the job in place to retry; a sample's shared video is never deleted.
+    // failed storage call leaves the job in place to retry; a sample's shared video is never deleted. The path decides,
+    // not the owner: an adopted job's video stays under the anonymous user's prefix it was uploaded under.
     async remove(userId: string, jobId: string): Promise<void> {
         await this.lifecycle.expireStale(userId)
 
@@ -126,7 +127,7 @@ export class JobsService {
             throw inProgress()
         }
 
-        if (!job.sampleId && job.file.path.startsWith(userPrefix(userId))) {
+        if (!job.sampleId) {
             await this.storage.delete(job.file.path)
         }
 

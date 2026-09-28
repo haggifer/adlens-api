@@ -135,4 +135,18 @@ describe('QuotaService', () => {
         await expect(raised.consume(userId, 'job-extra', NOW)).resolves.toEqual(expect.any(String))
         expect(await raised.get(userId, NOW)).toMatchObject({ used: LIMIT + 1, limit: LIMIT + 1 })
     })
+
+    it("moves an anonymous user's runs onto an account once, even when the move is retried", async () => {
+        const anonymousId = await addUser({ isAnonymous: true })
+
+        await quota.consume(userId, 'own', NOW)
+        await quota.consume(anonymousId, 'anonymous', NOW)
+        await quota.transfer(anonymousId, userId)
+        await quota.transfer(anonymousId, userId)
+
+        expect((await storedRuns(userId)).map((run: { jobId: string }) => run.jobId).sort()).toEqual([
+            'anonymous',
+            'own',
+        ])
+    })
 })

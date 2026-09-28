@@ -398,6 +398,16 @@ describe('Jobs API (e2e)', () => {
             await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(404)
         })
 
+        it("deletes an adopted analysis's video from the anonymous user's prefix it was uploaded under", async () => {
+            const jobId = await createAs(DELETER)
+            const path = `users/${new Types.ObjectId().toString()}/jobs/${jobId}/video`
+
+            await jobs.updateOne({ _id: jobId }, { $set: { 'file.path': path } })
+            await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(204)
+
+            expect(deleteObject).toHaveBeenCalledWith(path)
+        })
+
         it("refuses to delete another user's analysis", async () => {
             const jobId = await createAs(DELETER)
             const res = await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(STRANGER)).expect(404)

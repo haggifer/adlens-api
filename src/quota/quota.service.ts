@@ -52,6 +52,19 @@ export class QuotaService {
         await this.users.updateOne({ _id: new Types.ObjectId(userId) }, { $pull: { runs: { id: runId } } })
     }
 
+    // Moves an anonymous user's runs onto the account they signed up or in with, so signing up never resets the
+    // quota. $addToSet keeps a retried move from counting a run twice.
+    async transfer(fromUserId: string, toUserId: string): Promise<void> {
+        const from = await this.users.findOne({ _id: new Types.ObjectId(fromUserId) }, { projection: { runs: 1 } })
+        const runs = from?.runs ?? []
+
+        if (!runs.length) {
+            return
+        }
+
+        await this.users.updateOne({ _id: new Types.ObjectId(toUserId) }, { $addToSet: { runs: { $each: runs } } })
+    }
+
     async get(userId: string, now = new Date()): Promise<Quota> {
         const cutoff = now.getTime() - QUOTA_WINDOW_MS
         const user = await this.users.findOne(
