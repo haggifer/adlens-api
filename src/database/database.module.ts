@@ -4,13 +4,11 @@ import { MongooseModule } from '@nestjs/mongoose'
 import type { Env } from '../config/env'
 import { CONTACT_MESSAGE_MODEL, ContactMessageSchema } from './contact-message.doc'
 import { JOB_MODEL, JobSchema } from './job.doc'
-import { QUOTA_MODEL, QuotaSchema } from './quota.doc'
 import { RULESET_MODEL, RulesetSchema } from './ruleset.doc'
 import { SAMPLE_MODEL, SampleSchema } from './sample.doc'
 
 const models = MongooseModule.forFeature([
     { name: JOB_MODEL, schema: JobSchema },
-    { name: QUOTA_MODEL, schema: QuotaSchema },
     { name: RULESET_MODEL, schema: RulesetSchema },
     { name: SAMPLE_MODEL, schema: SampleSchema },
     { name: CONTACT_MESSAGE_MODEL, schema: ContactMessageSchema },

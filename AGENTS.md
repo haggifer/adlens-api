@@ -21,7 +21,7 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 
 - A job is created `pending`; after that, `JobLifecycle` is the only code that changes its status, and every transition
   is a conditional update on the expected current status. Don't write `status` anywhere else.
-- A quota charge is refunded at most once, by whoever clears `chargedWindowStart` in the write that ends the run. Keep
+- A quota charge is refunded at most once, by whoever clears `chargedRunId` in the write that ends the run. Keep
   the charge, the final status and that field in one update.
 - Clients only ever receive the public job shape from `jobs/job.mapper.ts`; owner, storage path, execution and
   accounting fields stay server-side.
