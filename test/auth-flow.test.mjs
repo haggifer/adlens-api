@@ -16,6 +16,7 @@ const purgedPrefixes = []
 let isMailDown = false
 let mongo
 let app
+let auth
 let session
 let freshSession
 
@@ -74,7 +75,8 @@ before(async () => {
 
     app = moduleRef.createNestApplication({ bodyParser: false, logger: false })
     app.enableCors({ origin: WEB, credentials: true })
-    const authHandler = toNodeHandler(app.get(AUTH))
+    auth = app.get(AUTH)
+    const authHandler = toNodeHandler(auth)
     app.getHttpAdapter()
         .getInstance()
         .all('/api/auth/*splat', (req, res) => withOutbox(() => authHandler(req, res)))
@@ -246,4 +248,34 @@ test('social sign-in refuses to return to a site other than the web app', async 
 
     assert.equal(status, 403)
     assert.equal(body.url, undefined)
+})
+
+test("a Google or GitHub account is stored without the provider's tokens", async () => {
+    const { MongoClient } = require('mongodb')
+    const context = await auth.$context
+    const user = await context.internalAdapter.createUser({
+        email: 'tokens@example.com',
+        name: 'T',
+        emailVerified: true,
+    })
+
+    await context.internalAdapter.linkAccount({
+        userId: user.id,
+        providerId: 'google',
+        accountId: 'google-account-1',
+        accessToken: 'provider-access-token',
+        refreshToken: 'provider-refresh-token',
+        idToken: 'provider-id-token',
+        accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+    })
+
+    const client = await MongoClient.connect(mongo.getUri())
+    const stored = await client.db().collection('account').findOne({ accountId: 'google-account-1' })
+
+    await client.close()
+    assert.equal(stored.providerId, 'google')
+    assert.equal(stored.accessToken ?? null, null)
+    assert.equal(stored.refreshToken ?? null, null)
+    assert.equal(stored.idToken ?? null, null)
+    assert.equal(stored.accessTokenExpiresAt ?? null, null)
 })

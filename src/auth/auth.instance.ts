@@ -12,6 +12,15 @@ export const AUTH = 'BETTER_AUTH'
 
 const RESET_TOKEN_TTL_S = 60 * 60
 
+// Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
+const NO_PROVIDER_TOKENS = {
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+}
+
 // The client maps this Better Auth error code to its own copy.
 export const EMAIL_NOT_SENT = 'EMAIL_NOT_SENT'
 
@@ -115,6 +124,16 @@ export const createAuth = ({
             deleteUser: {
                 enabled: true,
                 beforeDelete: async (user) => onDeleteUser(user.id),
+            },
+        },
+        // AdLens only needs to know who signed in and never calls Google or GitHub for the user, so their tokens
+        // aren't kept: cleared when an account is created, and not refreshed on later sign-ins.
+        account: { updateAccountOnSignIn: false },
+        databaseHooks: {
+            account: {
+                create: {
+                    before: async (account) => ({ data: { ...account, ...NO_PROVIDER_TOKENS } }),
+                },
             },
         },
         hooks: {

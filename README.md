@@ -87,6 +87,7 @@ with `input: false`, so sign-up and profile updates can't set it.
   on when both its client id and secret are set; half a pair stops the API at startup. A social sign-in links to an
   existing user with the same email only when the provider reports that email as verified **and** the user's own
   email is verified, so an unconfirmed sign-up can't be taken over. Google always shows its account picker.
+  The providers' access, refresh and ID tokens are never stored: AdLens only needs to know who signed in.
 - **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
 - **Emailed links open the web app** (`/confirm-email`, `/reset-password`), never the API: users only see the site's
   domain, and the confirmation page calls `verify-email` from the browser once it loads, so mail scanners that fetch
