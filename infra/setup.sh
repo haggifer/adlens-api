@@ -337,15 +337,23 @@ gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
     --member="serviceAccount:$RUNTIME_SA" --role="roles/run.developer"
 
 echo "== deploy cleanup job (daily; runs dist/cleanup, no retries: the next day's run catches up) =="
-gcloud run jobs deploy "$CLEANUP_JOB" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA"     --command="node" --args="dist/cleanup" --tasks=1 --max-retries=0 --task-timeout=10m     --cpu=1 --memory=512Mi     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest"     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,SECRETS_FILE=$SECRETS_PATH"
+gcloud run jobs deploy "$CLEANUP_JOB" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
+    --command="node" --args="dist/cleanup" --tasks=1 --max-retries=0 --task-timeout=10m \
+    --cpu=1 --memory=512Mi \
+    --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,SECRETS_FILE=$SECRETS_PATH"
 # Cloud Scheduler starts the job as the runtime SA, which needs only run.invoker on this one job.
-gcloud run jobs add-iam-policy-binding "$CLEANUP_JOB" --region="$REGION"     --member="serviceAccount:$RUNTIME_SA" --role="roles/run.invoker"
+gcloud run jobs add-iam-policy-binding "$CLEANUP_JOB" --region="$REGION" \
+    --member="serviceAccount:$RUNTIME_SA" --role="roles/run.invoker"
 if gcloud scheduler jobs describe "$CLEANUP_JOB" --location="$REGION" >/dev/null 2>&1; then
     SCHEDULER_VERB=update
 else
     SCHEDULER_VERB=create
 fi
-gcloud scheduler jobs "$SCHEDULER_VERB" http "$CLEANUP_JOB" --location="$REGION"     --schedule="$CLEANUP_SCHEDULE" --time-zone="Etc/UTC"     --uri="https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/$CLEANUP_JOB:run"     --http-method=POST --oauth-service-account-email="$RUNTIME_SA"
+gcloud scheduler jobs "$SCHEDULER_VERB" http "$CLEANUP_JOB" --location="$REGION" \
+    --schedule="$CLEANUP_SCHEDULE" --time-zone="Etc/UTC" \
+    --uri="https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/$CLEANUP_JOB:run" \
+    --http-method=POST --oauth-service-account-email="$RUNTIME_SA"
 
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
