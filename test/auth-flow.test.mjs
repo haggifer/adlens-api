@@ -380,6 +380,49 @@ test('an anonymous sign-in gets a session for a user with a placeholder address,
     assert.equal(outbox.length, sentBefore)
 })
 
+test('an anonymous sign-in marks when its user was last seen, and no account is ever marked', async () => {
+    const { ObjectId } = require('mongodb')
+    const startedAt = new Date()
+    const anonymous = await signInAnonymously()
+    const [user, markedAccount] = await withDb((db) =>
+        Promise.all([
+            db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+            db.collection('user').findOne({ isAnonymous: { $ne: true }, lastSeenAt: { $exists: true } }),
+        ]),
+    )
+
+    assert.ok(user.lastSeenAt instanceof Date)
+    assert.ok(user.lastSeenAt >= startedAt)
+    assert.equal(markedAccount, null)
+})
+
+test('refreshing an anonymous session marks its user as seen again', async () => {
+    const { ObjectId } = require('mongodb')
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const longAgo = new Date(Date.now() - 5 * DAY_MS)
+    const anonymous = await signInAnonymously()
+    const userId = new ObjectId(anonymous.user.id)
+
+    // A session last refreshed two days ago: Better Auth refreshes one older than a day on the next session check.
+    await withDb((db) =>
+        Promise.all([
+            db.collection('user').updateOne({ _id: userId }, { $set: { lastSeenAt: longAgo } }),
+            db
+                .collection('session')
+                .updateMany(
+                    { userId: { $in: [userId, anonymous.user.id] } },
+                    { $set: { expiresAt: new Date(Date.now() + 5 * DAY_MS) } },
+                ),
+        ]),
+    )
+
+    const res = await fetch(`${API}/api/auth/get-session`, { headers: headers(anonymous.cookie) })
+    const user = await withDb((db) => db.collection('user').findOne({ _id: userId }))
+
+    assert.equal(res.status, 200)
+    assert.ok(user.lastSeenAt > longAgo)
+})
+
 test('an anonymous user never gets email, even when asking for a confirmation link', async () => {
     const anonymous = await signInAnonymously()
     const sentBefore = outbox.length

@@ -111,6 +111,26 @@ export const createAuth = ({
     // Not a Better Auth field (no endpoint can set or return it): the email an anonymous session signed up with,
     // so onLinkAccount can check a /verify-email confirmation against it before linking.
     const pendingLinks = db.collection<{ pendingLinkEmail?: string | null }>(USER_COLLECTION)
+    const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
+
+    // AnonymousCleanupService deletes an anonymous user a week after this. Sign-out deletes the session, so the time
+    // must live on the user. A failed write only logs: the cleanup never deletes a user whose session is still live.
+    const markSeen = async (session: { userId?: unknown } | null): Promise<void> => {
+        const userId = String(session?.userId ?? '')
+
+        if (!ObjectId.isValid(userId)) {
+            return
+        }
+
+        try {
+            await anonymousUsers.updateOne(
+                { _id: new ObjectId(userId), isAnonymous: true },
+                { $set: { lastSeenAt: new Date() } },
+            )
+        } catch (err) {
+            logger.error(`could not mark user ${userId} as seen: ${err instanceof Error ? err.message : err}`)
+        }
+    }
 
     return betterAuth({
         database: mongodbAdapter(db, { client }),
@@ -164,7 +184,10 @@ export const createAuth = ({
             session: {
                 create: {
                     before: async (session) => ({ data: { ...session, ipAddress: null } }),
+                    after: markSeen,
                 },
+                // Also runs after an updateMany, with a count instead of a session; markSeen ignores that.
+                update: { after: async (session) => markSeen(typeof session === 'object' ? session : null) },
             },
             account: {
                 create: {
