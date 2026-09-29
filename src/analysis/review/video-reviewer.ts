@@ -5,6 +5,8 @@ import type { ModelFinding, RuleProjection } from '../../rules'
 export interface VideoReviewRequest {
     videoUri: string
     mimeType: string
+    // Caps the times the model may give.
+    durationS: number
     rules: RuleProjection[]
     settings: AnalysisSettings
 }

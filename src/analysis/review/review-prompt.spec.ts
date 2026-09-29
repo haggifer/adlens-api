@@ -1,5 +1,5 @@
 import { Market, Platform } from 'adlens-shared'
-import { buildReviewPrompt, parseReviewOutput, REVIEW_OUTPUT_JSON_SCHEMA } from './review-prompt'
+import { buildReviewOutputJsonSchema, buildReviewPrompt, parseReviewOutput } from './review-prompt'
 
 const SETTINGS = { platforms: [], placements: [], markets: [] }
 
@@ -9,6 +9,13 @@ describe('buildReviewPrompt', () => {
 
         expect(prompt).toContain('one per sentence')
         expect(prompt).not.toContain('verbatim transcript')
+    })
+
+    it('asks for whole seconds, and startS 0 for an issue that concerns the whole video', () => {
+        const prompt = buildReviewPrompt(SETTINGS, [])
+
+        expect(prompt).toContain('in whole seconds')
+        expect(prompt).toContain('use startS 0 and omit endS')
     })
 
     it('tells the model that no platform or market chosen means all of them', () => {
@@ -27,13 +34,27 @@ describe('buildReviewPrompt', () => {
     })
 })
 
-describe('REVIEW_OUTPUT_JSON_SCHEMA', () => {
-    it('asks for the transcript as segments with a whole-second start', () => {
-        const { transcript } = (REVIEW_OUTPUT_JSON_SCHEMA as { properties: Record<string, unknown> }).properties
+interface JsonSchema {
+    properties: Record<string, { items: { properties: Record<string, unknown> } }>
+}
 
-        expect(transcript).toMatchObject({
+describe('buildReviewOutputJsonSchema', () => {
+    const SECOND_OF_A_29_4_S_VIDEO = { type: 'integer', minimum: 0, maximum: 30 }
+    const { properties } = buildReviewOutputJsonSchema(29.4) as unknown as JsonSchema
+
+    it('asks for the transcript as segments with a whole-second start', () => {
+        expect(properties.transcript).toMatchObject({
             type: 'array',
-            items: { properties: { startS: { type: 'integer' }, text: { type: 'string' } } },
+            items: { properties: { startS: SECOND_OF_A_29_4_S_VIDEO, text: { type: 'string' } } },
+        })
+    })
+
+    // Free decimals ran away (`0.000…`, thousands of digits) until the reply hit the token limit: 5 of 6 runs of
+    // gemini-3.8-flash on 2026-09-29.
+    it("asks for finding times in whole seconds, capped at the video's length", () => {
+        expect(properties.findings.items.properties).toMatchObject({
+            startS: SECOND_OF_A_29_4_S_VIDEO,
+            endS: SECOND_OF_A_29_4_S_VIDEO,
         })
     })
 })
@@ -53,6 +74,15 @@ describe('parseReviewOutput', () => {
 
     it('reads no segments as no speech', () => {
         expect(parseReviewOutput(JSON.stringify({ transcript: [], findings: [] })).transcript).toBe('')
+    })
+
+    it('rejects a decimal finding time', () => {
+        const text = JSON.stringify({
+            transcript: [],
+            findings: [{ id: 'r', verdict: 'fail', evidence: 'e', startS: 0.5 }],
+        })
+
+        expect(() => parseReviewOutput(text)).toThrow()
     })
 
     it('rejects a transcript in the old single-string shape', () => {

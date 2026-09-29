@@ -11,10 +11,10 @@ import { ConfigService } from '@nestjs/config'
 import type { Env } from '../../config/env'
 import { RetryableError } from '../pipeline/retryable-error'
 import {
+    buildReviewOutputJsonSchema,
     buildReviewPrompt,
     parseReviewOutput,
     PROMPT_VERSION,
-    REVIEW_OUTPUT_JSON_SCHEMA,
     type ReviewOutput,
 } from './review-prompt'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from './video-reviewer'
@@ -55,7 +55,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
         })
     }
 
-    async review({ videoUri, mimeType, rules, settings }: VideoReviewRequest): Promise<VideoReview> {
+    async review({ videoUri, mimeType, durationS, rules, settings }: VideoReviewRequest): Promise<VideoReview> {
         let response: GenerateContentResponse
 
         try {
@@ -67,7 +67,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
                 ]),
                 config: {
                     responseMimeType: 'application/json',
-                    responseJsonSchema: REVIEW_OUTPUT_JSON_SCHEMA,
+                    responseJsonSchema: buildReviewOutputJsonSchema(durationS),
                     maxOutputTokens: MAX_OUTPUT_TOKENS,
                 },
             })

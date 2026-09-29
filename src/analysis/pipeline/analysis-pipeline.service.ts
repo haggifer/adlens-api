@@ -64,6 +64,7 @@ export class AnalysisPipeline {
         const review = await this.reviewer.review({
             videoUri: gcsUri(job.file.bucket, job.file.path),
             mimeType: job.file.contentType,
+            durationS: job.media.durationS,
             rules: projectForModel(selected.content),
             settings: job.settings,
         })

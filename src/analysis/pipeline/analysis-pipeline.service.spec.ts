@@ -120,6 +120,14 @@ describe('AnalysisPipeline', () => {
         expect(await used()).toBe(1)
     })
 
+    it("gives the reviewer the video's duration, so timestamps can't run past it", async () => {
+        const jobId = await queueJob()
+
+        await pipeline.run(jobId, { isLast: false })
+
+        expect(reviewer.review).toHaveBeenCalledWith(expect.objectContaining({ durationS: 15 }))
+    })
+
     it('leaves a transient failure for Cloud Run to retry while attempts remain', async () => {
         const jobId = await queueJob()
 
