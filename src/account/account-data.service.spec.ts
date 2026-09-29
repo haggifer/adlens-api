@@ -10,6 +10,7 @@ import { AccountDataService } from './account-data.service'
 
 const ANONYMOUS = new Types.ObjectId().toString()
 const MEMBER = new Types.ObjectId().toString()
+const BYSTANDER = new Types.ObjectId().toString()
 
 const fileAt = (path: string) => ({ name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 1000, bucket: 'b', path })
 
@@ -73,6 +74,7 @@ describe('AccountDataService', () => {
 
     it("moves an anonymous user's jobs and runs to their account, and deletes no file", async () => {
         const jobId = await createJob(ANONYMOUS)
+        const bystanderJobId = await createJob(BYSTANDER)
 
         await accountData.adopt(ANONYMOUS, MEMBER)
         await accountData.adopt(ANONYMOUS, MEMBER)
@@ -83,11 +85,14 @@ describe('AccountDataService', () => {
         expect(member?.runs.map((stored: { id: string }) => stored.id).sort()).toEqual(['anonymous', 'own'])
         expect(job?.userId).toBe(MEMBER)
         expect(job?.file.path).toBe(`users/${ANONYMOUS}/jobs/own/video`)
+        expect((await jobs.findById(bystanderJobId).lean<StoredJob>())?.userId).toBe(BYSTANDER)
         expect(storage.delete).not.toHaveBeenCalled()
         expect(storage.deletePrefix).not.toHaveBeenCalled()
     })
 
-    it("deletes adopted uploads outside the account's prefix, never a sample video", async () => {
+    it("deletes adopted uploads outside the account's prefix, never a sample video or another user's data", async () => {
+        const bystanderJobId = await createJob(BYSTANDER)
+
         await createJob(MEMBER, { file: fileAt(`users/${ANONYMOUS}/jobs/adopted/video`) })
         await createJob(MEMBER)
         await createJob(MEMBER, { sampleId: 's1', file: fileAt('samples/running-shoes.mp4') })
@@ -95,7 +100,8 @@ describe('AccountDataService', () => {
         await accountData.purge(MEMBER)
 
         expect(storage.delete.mock.calls).toEqual([[`users/${ANONYMOUS}/jobs/adopted/video`]])
-        expect(storage.deletePrefix).toHaveBeenCalledWith(`users/${MEMBER}/`)
+        expect(storage.deletePrefix.mock.calls).toEqual([[`users/${MEMBER}/`]])
         expect(await jobs.countDocuments({ userId: MEMBER })).toBe(0)
+        expect(await jobs.exists({ _id: bystanderJobId })).not.toBeNull()
     })
 })
