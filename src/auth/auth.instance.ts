@@ -6,6 +6,7 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/a
 import { anonymous } from 'better-auth/plugins/anonymous'
 import { type Db, type MongoClient, ObjectId } from 'mongodb'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { format } from 'node:util'
 import { USER_COLLECTION } from '../database/user.doc'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
@@ -52,6 +53,27 @@ export interface AuthOptions {
 }
 
 const logger = new Logger('Auth')
+
+type BetterAuthLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+// Better Auth prints its own coloured lines by default; through Nest's logger they get a level on Cloud Logging too.
+const logBetterAuth = (level: BetterAuthLogLevel, message: string, ...args: unknown[]): void => {
+    const text = format(message, ...args)
+
+    switch (level) {
+        case 'error':
+            logger.error(text)
+            return
+        case 'warn':
+            logger.warn(text)
+            return
+        case 'debug':
+            logger.debug(text)
+            return
+        default:
+            logger.log(text)
+    }
+}
 
 // Better Auth calls its email callbacks through runInBackgroundOrAwait, which catches and only logs their errors, so a
 // failed send would still answer success. The callbacks therefore only queue the message in the request's outbox, and
@@ -137,6 +159,7 @@ export const createAuth = ({
         secret,
         baseURL,
         basePath: '/api/auth',
+        logger: { log: logBetterAuth },
         trustedOrigins: [webOrigin],
         advanced: {
             // Better Auth skips its origin and callback-URL checks when NODE_ENV is test; keep them on so the tests

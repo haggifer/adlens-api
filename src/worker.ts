@@ -3,7 +3,9 @@ import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
+import { createLogger } from './common/cloud-logger'
 import type { Env } from './config/env'
+import { readLogFormat } from './config/log-format'
 import { WorkerModule } from './worker.module'
 
 const EXIT_DONE = 0
@@ -14,7 +16,9 @@ const EXIT_RETRY = 1
 // job, exits 0 because the job document already records it.
 const run = async (): Promise<number> => {
     const logger = new Logger('Worker')
-    const app = await NestFactory.createApplicationContext(WorkerModule)
+    const app = await NestFactory.createApplicationContext(WorkerModule, {
+        logger: createLogger(readLogFormat(process.env)),
+    })
     const config = app.get<ConfigService<Env, true>>(ConfigService)
     const jobId = config.get('WORKER_JOB_ID', { infer: true })
     const attempt = config.get('CLOUD_RUN_TASK_ATTEMPT', { infer: true })

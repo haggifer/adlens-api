@@ -330,7 +330,7 @@ gcloud run jobs deploy "$ANALYZE_JOB" --image="$IMAGE_REF" --region="$REGION" --
     --command="node" --args="dist/worker" --tasks=1 --max-retries=2 --task-timeout=15m \
     --cpu=2 --memory=2Gi \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,GEMINI_LOCATION=global,ANALYZE_MAX_RETRIES=2,SECRETS_FILE=$SECRETS_PATH"
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,GEMINI_LOCATION=global,ANALYZE_MAX_RETRIES=2,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 # The API executes this job as the runtime SA. run.developer on the job includes run.jobs.run; narrow
 # to a custom role with only run.jobs.run + run.executions.get if you prefer (verify with a dry run).
 gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
@@ -341,7 +341,7 @@ gcloud run jobs deploy "$CLEANUP_JOB" --image="$IMAGE_REF" --region="$REGION" --
     --command="node" --args="dist/cleanup" --tasks=1 --max-retries=0 --task-timeout=10m \
     --cpu=1 --memory=512Mi \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,SECRETS_FILE=$SECRETS_PATH"
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 # Cloud Scheduler starts the job as the runtime SA, which needs only run.invoker on this one job.
 gcloud run jobs add-iam-policy-binding "$CLEANUP_JOB" --region="$REGION" \
     --member="serviceAccount:$RUNTIME_SA" --role="roles/run.invoker"
@@ -359,7 +359,7 @@ echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH"
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 
 echo "== prune old API_SECRETS versions (the free tier counts disabled versions too) =="
 # CI and this script always roll forward from :latest, so nothing needs an old version — ENABLED or DISABLED. Keep

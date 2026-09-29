@@ -35,6 +35,10 @@ repos.
   videos of uploads left `pending` for a week ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)):
   every object's path is made from its user and job ids, so the jobs find them all. The job document stays, and
   analyzing it later answers `UPLOAD_INCOMPLETE`. A sample's shared video is never deleted.
+- **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
+  [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
+  `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
+  go through the same logger. Locally the default is Nest's readable text.
 - **Realtime**: a MongoDB Change Stream on `jobs` pushes every update to the owner's Socket.IO room. The stream is
   reopened from its last resume token after errors.
 - **Contract**: every request body, response and error has a Zod schema in `adlens-shared`. The API returns the
@@ -288,6 +292,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `GITHUB_CLIENT_SECRET`   | —                       | GitHub OAuth client secret                                                  |
 | `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                      |
 | `PORT`                   | `8080`                  | API listen port                                                             |
+| `LOG_FORMAT`             | `text`                  | `json` on Cloud Run: one Cloud Logging entry per line, with `severity`      |
 | `STORAGE_KEY_FILE`       | —                       | Local only: SA key used to sign V4 URLs (user ADC can't sign)               |
 | `GCP_REGION`             | `europe-west1`          | Region of the analysis Cloud Run Job                                        |
 | `ANALYZE_JOB_NAME`       | `adlens-analyze`        | The Cloud Run Job the API executes                                          |

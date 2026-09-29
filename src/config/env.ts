@@ -1,5 +1,6 @@
 import { ConfigModule } from '@nestjs/config'
 import { z } from 'zod'
+import { logFormatSchema } from './log-format'
 import { readSecretsFile } from './secrets-file'
 
 const flagSchema = z
@@ -11,6 +12,7 @@ const flagSchema = z
 // process-specific secrets (BETTER_AUTH_SECRET) are asserted by the module that needs them.
 const envSchema = z.object({
     PORT: z.coerce.number().int().positive().default(8080),
+    LOG_FORMAT: logFormatSchema,
     // Path to a bundle of secrets mounted as JSON (Secret Manager's API_SECRETS in production); unset locally.
     SECRETS_FILE: z.string().optional(),
     MONGODB_URI: z.string().min(1),

@@ -7,12 +7,17 @@ import helmet from 'helmet'
 import { AppModule } from './app.module'
 import { AUTH, type AuthInstance, withOutbox } from './auth/auth.instance'
 import { ApiExceptionFilter } from './common/api-exception.filter'
+import { createLogger } from './common/cloud-logger'
 import type { Env } from './config/env'
+import { readLogFormat } from './config/log-format'
 import { RealtimeIoAdapter } from './realtime/realtime-io.adapter'
 
 const bootstrap = async () => {
     // bodyParser: false so the Better Auth handler can read the raw request before JSON parsing.
-    const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false })
+    const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+        bodyParser: false,
+        logger: createLogger(readLogFormat(process.env)),
+    })
     const config = app.get<ConfigService<Env, true>>(ConfigService)
     const auth = app.get<AuthInstance>(AUTH)
     const webOrigin = config.get('WEB_ORIGIN', { infer: true })
