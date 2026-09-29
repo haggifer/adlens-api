@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common'
 import {
+    type Analysis,
     JobErrorCode,
     type JobMedia,
     JobStatus,
@@ -20,6 +21,8 @@ import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { JobLifecycle } from './job-lifecycle.service'
 
 const USER = new Types.ObjectId().toString()
+const OTHER_USER = new Types.ObjectId().toString()
+const QUOTA_LIMIT = 3
 const MEDIA: JobMedia = {
     durationS: 12,
     width: 1080,
@@ -28,8 +31,23 @@ const MEDIA: JobMedia = {
     sizeBytes: 1000,
     contentType: 'video/mp4',
 }
+const ANALYSIS: Analysis = {
+    model: 'fake-model',
+    promptVersion: 'test',
+    rulesetVersion: '1.0.0',
+    transcript: 'Buy now',
+    findings: [],
+    metadataChecks: [],
+    advisories: [],
+    completedAt: '2026-09-29T10:00:00.000Z',
+}
+const USAGE = { promptTokens: 1, outputTokens: 1, totalTokens: 2 }
 const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
 const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
+// JobLifecycle's own thresholds: a verification or an analysis idle for longer than these was abandoned.
+const VERIFY_STALE_MS = 10 * 60 * 1000
+const ANALYSIS_STALE_MS = 60 * 60 * 1000
+const NOW = new Date('2026-09-29T10:00:00Z')
 
 describe('JobLifecycle', () => {
     let mongo: MemoryMongo
@@ -39,20 +57,20 @@ describe('JobLifecycle', () => {
     let ipQuota: IpQuotaService
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
-    const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
 
-    const networkRuns = async () =>
-        (
-            (
-                await mongo.connection
-                    .collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
-                    .findOne({ _id: NETWORK_CHARGE.bucketKey })
-            )?.runs ?? []
-        ).length
+    const usedRuns = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
 
-    const createJob = async (status = JobStatus.Pending): Promise<string> => {
+    const networkRuns = async () => {
+        const bucket = await mongo.connection
+            .collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
+            .findOne({ _id: NETWORK_CHARGE.bucketKey })
+
+        return (bucket?.runs ?? []).length
+    }
+
+    const createJob = async (status = JobStatus.Pending, userId = USER): Promise<string> => {
         const job = await jobs.create({
-            userId: USER,
+            userId,
             status,
             settings: {
                 platforms: [Platform.Meta],
@@ -62,6 +80,7 @@ describe('JobLifecycle', () => {
             },
             file: { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 1000, bucket: 'b', path: 'p' },
             chargedRunId: null,
+            chargedIpRunId: null,
         })
 
         return job._id.toString()
@@ -69,26 +88,46 @@ describe('JobLifecycle', () => {
 
     const findJob = (jobId: string) => jobs.findById(jobId).lean<StoredJob>()
 
-    const queueJob = async (ipCharge: IpCharge | null = null): Promise<string> => {
+    const claimJob = async (): Promise<string> => {
         const jobId = await createJob()
 
         await lifecycle.claimForVerification(USER, jobId)
+
+        return jobId
+    }
+
+    const queueJob = async (ipCharge: IpCharge | null = null): Promise<string> => {
+        const jobId = await claimJob()
+
         await lifecycle.chargeAndQueue(jobId, USER, MEDIA, ipCharge)
 
         return jobId
     }
 
+    const useAllUserRuns = async () => {
+        for (let i = 0; i < QUOTA_LIMIT; i++) {
+            await queueJob(NETWORK_CHARGE)
+        }
+    }
+
+    // Bypasses Mongoose's timestamps, so the job looks as if it was last touched at that moment.
+    const lastTouchedAt = (jobId: string, at: Date) =>
+        jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { updatedAt: at } })
+
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
         await mongo.connection.model(IP_QUOTA_MODEL, IpQuotaSchema).init()
-        quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
+        quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT }))
         ipQuota = new IpQuotaService(mongo.connection, configStub(IP_LIMITS))
         lifecycle = new JobLifecycle(jobs, quota, ipQuota)
     })
 
     beforeEach(async () => {
-        await users().insertOne({ _id: new Types.ObjectId(USER), email: 'user@example.com' })
+        await users().insertMany([
+            { _id: new Types.ObjectId(USER), email: 'user@example.com' },
+            { _id: new Types.ObjectId(OTHER_USER), email: 'other@example.com' },
+        ])
     })
 
     afterEach(async () => {
@@ -104,153 +143,268 @@ describe('JobLifecycle', () => {
         await mongo.stop()
     })
 
-    it('lets exactly one of two concurrent callers claim a pending job', async () => {
-        const jobId = await createJob()
-        const claims = await Promise.all([
-            lifecycle.claimForVerification(USER, jobId),
-            lifecycle.claimForVerification(USER, jobId),
-        ])
+    describe('verification', () => {
+        it('lets exactly one of two concurrent callers claim a pending job', async () => {
+            const jobId = await createJob()
+            const claims = await Promise.all([
+                lifecycle.claimForVerification(USER, jobId),
+                lifecycle.claimForVerification(USER, jobId),
+            ])
 
-        expect(claims.filter(Boolean)).toHaveLength(1)
-        expect((await findJob(jobId))?.status).toBe(JobStatus.Verifying)
-    })
-
-    it("doesn't let another user claim the job", async () => {
-        const jobId = await createJob()
-
-        expect(await lifecycle.claimForVerification('someone-else', jobId)).toBeNull()
-    })
-
-    it('charges one run and records the measured media when queueing', async () => {
-        const jobId = await queueJob()
-        const job = await findJob(jobId)
-
-        expect(job?.status).toBe(JobStatus.Queued)
-        expect(job?.media).toEqual(MEDIA)
-        expect(job?.chargedRunId).toEqual(expect.any(String))
-        expect(await used()).toBe(1)
-    })
-
-    it('refunds a failed run exactly once, even when failure is reported twice', async () => {
-        const jobId = await queueJob()
-        const results = await Promise.all([
-            lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
-            lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
-        ])
-        const job = await findJob(jobId)
-
-        expect(results.filter(Boolean)).toHaveLength(1)
-        expect(job?.status).toBe(JobStatus.Error)
-        expect(job?.errorCode).toBe(JobErrorCode.AnalysisFailed)
-        expect(job?.chargedRunId).toBeNull()
-        expect(await used()).toBe(0)
-    })
-
-    it('puts a job back to pending with the charge refunded when dispatch fails', async () => {
-        const jobId = await queueJob()
-
-        await lifecycle.revertDispatch(jobId)
-
-        expect((await findJob(jobId))?.status).toBe(JobStatus.Pending)
-        expect(await used()).toBe(0)
-    })
-
-    it('starts attempts only for in-flight jobs and counts them', async () => {
-        const jobId = await queueJob()
-
-        expect((await lifecycle.startAttempt(jobId))?.attempts).toBe(1)
-        expect((await lifecycle.startAttempt(jobId))?.attempts).toBe(2)
-
-        await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')
-
-        expect(await lifecycle.startAttempt(jobId)).toBeNull()
-        expect(await lifecycle.startAttempt(new Types.ObjectId().toString())).toBeNull()
-    })
-
-    it('keeps a result only while the job is still being analyzed', async () => {
-        const jobId = await queueJob()
-
-        expect(await lifecycle.complete(jobId, {} as never, { promptTokens: 1, outputTokens: 1, totalTokens: 2 })).toBe(
-            false,
-        )
-    })
-
-    it('expires abandoned jobs and refunds their charge', async () => {
-        const abandoned = await queueJob()
-        const stuckVerifying = await createJob(JobStatus.Verifying)
-        const past = new Date(Date.now() - 2 * 60 * 60 * 1000)
-
-        await lifecycle.startAttempt(abandoned)
-        await jobs.collection.updateMany({}, { $set: { updatedAt: past } })
-        await lifecycle.expireStale(USER)
-
-        expect(await findJob(abandoned)).toMatchObject({
-            status: JobStatus.Error,
-            errorCode: JobErrorCode.AnalysisTimedOut,
+            expect(claims.filter(Boolean)).toHaveLength(1)
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Verifying)
         })
-        expect((await findJob(stuckVerifying))?.status).toBe(JobStatus.Pending)
-        expect(await used()).toBe(0)
-    })
 
-    it('charges the network before the user and records both runs', async () => {
-        const jobId = await queueJob(NETWORK_CHARGE)
-        const job = await findJob(jobId)
+        it("doesn't let another user claim the job", async () => {
+            const jobId = await createJob()
 
-        expect(job?.chargedIpRunId).toEqual(expect.any(String))
-        expect(await networkRuns()).toBe(1)
-        expect(await used()).toBe(1)
-    })
-
-    it('gives the network run back when the user has no analyses left', async () => {
-        for (let i = 0; i < 3; i++) {
-            await queueJob(NETWORK_CHARGE)
-        }
-
-        const jobId = await createJob()
-
-        await lifecycle.claimForVerification(USER, jobId)
-        await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
-            response: { errorCode: RequestErrorCode.QuotaExceeded },
+            expect(await lifecycle.claimForVerification(OTHER_USER, jobId)).toBeNull()
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Pending)
         })
-        expect(await networkRuns()).toBe(3)
-    })
 
-    it('refunds the network run with the user run, exactly once', async () => {
-        const jobId = await queueJob(NETWORK_CHARGE)
+        it('puts a job under verification back to pending, and leaves a job that moved on alone', async () => {
+            const verifying = await claimJob()
+            const queued = await queueJob()
 
-        await Promise.all([
-            lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
-            lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
-        ])
+            await lifecycle.releaseVerification(verifying)
+            await lifecycle.releaseVerification(queued)
 
-        expect((await findJob(jobId))?.chargedIpRunId).toBeNull()
-        expect(await networkRuns()).toBe(0)
-        expect(await used()).toBe(0)
-    })
-
-    it('still refunds the network run when refunding the user run fails', async () => {
-        const jobId = await queueJob(NETWORK_CHARGE)
-
-        jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
-
-        await expect(lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')).rejects.toThrow('user refund failed')
-        expect(await networkRuns()).toBe(0)
-    })
-
-    it('reports why the user could not be charged, even when giving the network run back fails', async () => {
-        for (let i = 0; i < 3; i++) {
-            await queueJob(NETWORK_CHARGE)
-        }
-
-        const jobId = await createJob()
-        const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-
-        jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
-        await lifecycle.claimForVerification(USER, jobId)
-
-        await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
-            response: { errorCode: RequestErrorCode.QuotaExceeded },
+            expect((await findJob(verifying))?.status).toBe(JobStatus.Pending)
+            expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
         })
-        expect(logError).toHaveBeenCalledWith(expect.stringContaining('network refund failed'))
+
+        it('ends a rejected upload in error with its reason, and leaves a job that moved on alone', async () => {
+            const verifying = await claimJob()
+            const queued = await queueJob()
+
+            await lifecycle.rejectVerification(verifying, JobErrorCode.VideoTooLong)
+            await lifecycle.rejectVerification(queued, JobErrorCode.VideoTooLong)
+
+            expect(await findJob(verifying)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.VideoTooLong,
+            })
+            expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
+        })
+    })
+
+    describe('charging and queueing', () => {
+        it('charges the user and the network once, and records the measured media and both runs', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Queued,
+                media: MEDIA,
+                chargedRunId: expect.any(String),
+                chargedIpRunId: expect.any(String),
+            })
+            expect(await usedRuns()).toBe(1)
+            expect(await networkRuns()).toBe(1)
+        })
+
+        it('charges no network when there is no network charge (an admin), and records that none is held', async () => {
+            const jobId = await queueJob(null)
+
+            expect((await findJob(jobId))?.chargedIpRunId).toBeNull()
+            expect(await networkRuns()).toBe(0)
+            expect(await usedRuns()).toBe(1)
+        })
+
+        it('gives the network run back when the user has no analyses left', async () => {
+            await useAllUserRuns()
+
+            const jobId = await claimJob()
+
+            await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
+                response: { errorCode: RequestErrorCode.QuotaExceeded },
+            })
+            expect(await networkRuns()).toBe(QUOTA_LIMIT)
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Verifying)
+        })
+
+        it('reports why the user could not be charged, even when giving the network run back fails', async () => {
+            await useAllUserRuns()
+
+            const jobId = await claimJob()
+            const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+
+            jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
+
+            await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
+                response: { errorCode: RequestErrorCode.QuotaExceeded },
+            })
+            expect(logError).toHaveBeenCalledWith(expect.stringContaining('network refund failed'))
+        })
+
+        it('refunds both the user run and the network run when the job left verification meanwhile', async () => {
+            const jobId = await claimJob()
+
+            // What expireStale does to a verification it takes for abandoned, racing the charge.
+            await lifecycle.releaseVerification(jobId)
+
+            await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
+                response: { errorCode: RequestErrorCode.JobNotPending },
+            })
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Pending,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+    })
+
+    describe('ending a run', () => {
+        it('puts a job back to pending with both charges refunded when dispatch fails', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            await lifecycle.revertDispatch(jobId)
+
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Pending,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('starts attempts only for in-flight jobs and counts them', async () => {
+            const jobId = await queueJob()
+
+            expect((await lifecycle.startAttempt(jobId))?.attempts).toBe(1)
+            expect((await lifecycle.startAttempt(jobId))?.attempts).toBe(2)
+
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')
+
+            expect(await lifecycle.startAttempt(jobId)).toBeNull()
+            expect(await lifecycle.startAttempt(new Types.ObjectId().toString())).toBeNull()
+        })
+
+        it('stores the result of a job being analyzed and keeps its charges', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            await lifecycle.startAttempt(jobId)
+
+            expect(await lifecycle.complete(jobId, ANALYSIS, USAGE)).toBe(true)
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Analyzed,
+                analysis: ANALYSIS,
+                usage: USAGE,
+                chargedRunId: expect.any(String),
+                chargedIpRunId: expect.any(String),
+            })
+            expect(await usedRuns()).toBe(1)
+            expect(await networkRuns()).toBe(1)
+        })
+
+        it('drops the result of a job that is not being analyzed, e.g. one that expired meanwhile', async () => {
+            const queued = await queueJob()
+            const expired = await queueJob()
+
+            await lifecycle.startAttempt(expired)
+            await lifecycle.fail(expired, JobErrorCode.AnalysisTimedOut, 'expired')
+
+            expect(await lifecycle.complete(queued, ANALYSIS, USAGE)).toBe(false)
+            expect(await lifecycle.complete(expired, ANALYSIS, USAGE)).toBe(false)
+            const job = await findJob(expired)
+
+            expect(job?.status).toBe(JobStatus.Error)
+            expect(job).not.toHaveProperty('analysis')
+        })
+
+        it('refunds both runs of a failed job exactly once, even when failure is reported twice', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+            const results = await Promise.all([
+                lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
+                lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom'),
+            ])
+
+            expect(results.filter(Boolean)).toHaveLength(1)
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.AnalysisFailed,
+                errorDetail: 'boom',
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it("doesn't fail a job that already has a result, nor refund it", async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            await lifecycle.startAttempt(jobId)
+            await lifecycle.complete(jobId, ANALYSIS, USAGE)
+
+            expect(await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'late')).toBe(false)
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Analyzed)
+            expect(await usedRuns()).toBe(1)
+            expect(await networkRuns()).toBe(1)
+        })
+
+        it('still refunds the network run when refunding the user run fails', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+
+            await expect(lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')).rejects.toThrow(
+                'user refund failed',
+            )
+            expect(await networkRuns()).toBe(0)
+        })
+    })
+
+    describe('expiring abandoned jobs', () => {
+        it('releases a verification and fails an analysis, refunded, once each is idle past its limit', async () => {
+            const verifying = await claimJob()
+            const analyzing = await queueJob(NETWORK_CHARGE)
+
+            await lifecycle.startAttempt(analyzing)
+            await lastTouchedAt(verifying, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
+            await lastTouchedAt(analyzing, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect((await findJob(verifying))?.status).toBe(JobStatus.Pending)
+            expect(await findJob(analyzing)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.AnalysisTimedOut,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('keeps jobs idle for exactly their limit, and gives an analysis longer than a verification', async () => {
+            const verifying = await claimJob()
+            const queued = await queueJob()
+            const analyzing = await queueJob()
+
+            await lifecycle.startAttempt(analyzing)
+            await lastTouchedAt(verifying, new Date(NOW.getTime() - VERIFY_STALE_MS))
+            await lastTouchedAt(queued, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
+            await lastTouchedAt(analyzing, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect((await findJob(verifying))?.status).toBe(JobStatus.Verifying)
+            expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
+            expect((await findJob(analyzing))?.status).toBe(JobStatus.Analyzing)
+            expect(await usedRuns()).toBe(2)
+        })
+
+        it("only expires the given user's jobs", async () => {
+            const othersJob = await createJob(JobStatus.Verifying, OTHER_USER)
+
+            await lastTouchedAt(othersJob, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect((await findJob(othersJob))?.status).toBe(JobStatus.Verifying)
+        })
     })
 })
