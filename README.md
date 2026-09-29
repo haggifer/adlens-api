@@ -299,7 +299,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
 | `TRUSTED_PROXY_HOPS`     | `1`                     | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                   |
 | `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
-| `GEMINI_MODEL`           | `gemini-3.6-flash`      | Model id                                                                    |
+| `GEMINI_MODEL`           | `gemini-3.8-flash`      | Model id                                                                    |
 | `GEMINI_LOCATION`        | `global`                | Vertex serving location                                                     |
 | `WORKER_JOB_ID`          | —                       | Worker only: set per execution by the dispatcher                            |
 | `CLOUD_RUN_TASK_ATTEMPT` | `0`                     | Worker only: set by Cloud Run on each attempt                               |

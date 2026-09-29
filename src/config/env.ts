@@ -1,5 +1,6 @@
 import { ConfigModule } from '@nestjs/config'
 import { z } from 'zod'
+import { logFormatSchema } from './log-format'
 import { readSecretsFile } from './secrets-file'
 
 const flagSchema = z
@@ -11,6 +12,7 @@ const flagSchema = z
 // process-specific secrets (BETTER_AUTH_SECRET) are asserted by the module that needs them.
 const envSchema = z.object({
     PORT: z.coerce.number().int().positive().default(8080),
+    LOG_FORMAT: logFormatSchema,
     // Path to a bundle of secrets mounted as JSON (Secret Manager's API_SECRETS in production); unset locally.
     SECRETS_FILE: z.string().optional(),
     MONGODB_URI: z.string().min(1),
@@ -43,7 +45,7 @@ const envSchema = z.object({
     TURNSTILE_SECRET_KEY: z.string().optional(),
     // Proxies in front of the API that append to X-Forwarded-For: 1 on Cloud Run (Google's front end).
     TRUSTED_PROXY_HOPS: z.coerce.number().int().positive().default(1),
-    GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
+    GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
     GEMINI_LOCATION: z.string().default('global'),
     ANALYZE_LOCAL: flagSchema,
     ANALYZE_JOB_NAME: z.string().default('adlens-analyze'),
