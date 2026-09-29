@@ -27,6 +27,14 @@ describe('TurnstileVerifier', () => {
         })
     })
 
+    it("doesn't send an address it doesn't have", async () => {
+        const fetchFn = fakeFetch(async () => respond(200, { success: true }))
+
+        await new TurnstileVerifier(SECRET, fetchFn).verify(TOKEN, null)
+
+        expect(new URLSearchParams(String(fetchFn.mock.calls[0][1]?.body)).has('remoteip')).toBe(false)
+    })
+
     it('fails when Cloudflare rejects the token', async () => {
         const fetchFn = fakeFetch(async () => respond(200, { success: false, 'error-codes': ['timeout-or-duplicate'] }))
 
