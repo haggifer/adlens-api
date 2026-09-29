@@ -98,6 +98,20 @@ describe('QuotaService', () => {
         await expect(quota.consume(userId, 'job-over', afterFirstExpires)).rejects.toBeInstanceOf(ApiException)
     })
 
+    it('counts a run until exactly one window after it started, in both the charge and the report', async () => {
+        for (let i = 0; i < LIMIT; i++) {
+            await quota.consume(userId, `job-${i}`, NOW)
+        }
+
+        const lastCountedMoment = new Date(NOW.getTime() + QUOTA_WINDOW_MS - 1)
+        const windowEnd = new Date(NOW.getTime() + QUOTA_WINDOW_MS)
+
+        expect((await quota.get(userId, lastCountedMoment)).used).toBe(LIMIT)
+        await expect(quota.consume(userId, 'job-early', lastCountedMoment)).rejects.toBeInstanceOf(ApiException)
+        expect((await quota.get(userId, windowEnd)).used).toBe(0)
+        await expect(quota.consume(userId, 'job-on-time', windowEnd)).resolves.toEqual(expect.any(String))
+    })
+
     it('drops runs that no longer count when charging', async () => {
         await quota.consume(userId, 'old', NOW)
         await quota.consume(userId, 'new', new Date(NOW.getTime() + QUOTA_WINDOW_MS + 1))
@@ -123,6 +137,15 @@ describe('QuotaService', () => {
         await quota.refund(userId, 'unknown-run')
 
         expect((await storedRuns(userId)).map((run: { id: string }) => run.id)).toEqual([kept])
+    })
+
+    it("never refunds a run through another user's id", async () => {
+        const otherId = await addUser()
+        const runId = await quota.consume(userId, 'job-1', NOW)
+
+        await quota.refund(otherId, runId)
+
+        expect((await storedRuns(userId)).map((run: { id: string }) => run.id)).toEqual([runId])
     })
 
     it('takes the limit from the current config, not from stored data', async () => {
