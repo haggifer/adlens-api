@@ -52,11 +52,19 @@ jobs:
                   service_account: adlens-deploy@adlens-ca57f.iam.gserviceaccount.com
             - uses: google-github-actions/setup-gcloud@v3
             - run: gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
+            - uses: docker/setup-buildx-action@v3
+            # The layer cache keeps unchanged layers (the dependency install) byte-identical between builds, so the
+            # registry stores them once instead of once per push.
             - name: Build and push the image
-              run: |
-                  docker build --tag "$IMAGE:$GITHUB_SHA" .
-                  docker push "$IMAGE:$GITHUB_SHA"
-                  echo "IMAGE_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_ENV"
+              id: build
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  push: true
+                  tags: ${{ env.IMAGE }}:${{ github.sha }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+            - run: echo "IMAGE_REF=$IMAGE@${{ steps.build.outputs.digest }}" >> "$GITHUB_ENV"
             # The worker first, so the API never launches a job on an older image than its own.
             - name: Deploy the analysis worker job
               run: gcloud run jobs update adlens-analyze --region "$REGION" --image "$IMAGE_REF"

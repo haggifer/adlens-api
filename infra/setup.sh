@@ -294,6 +294,10 @@ echo "== image repository =="
 gcloud artifacts repositories describe "$IMAGE_REPO" --location="$REGION" >/dev/null 2>&1 || \
     gcloud artifacts repositories create "$IMAGE_REPO" --repository-format=docker --location="$REGION" \
         --description="AdLens container images"
+# Every CI deploy pushes a new image and nothing else deletes one. Keep the 5 newest (the live one and recent rollback
+# targets); delete any other once it is 14 days old. A keep rule wins over a delete rule.
+gcloud artifacts repositories set-cleanup-policies "$IMAGE_REPO" --location="$REGION" \
+    --policy="$(dirname "$0")/artifact-cleanup-policy.json" --no-dry-run
 
 echo "== GitHub Actions deployer (Workload Identity Federation, no service account key) =="
 gcloud iam service-accounts describe "$DEPLOY_SA" >/dev/null 2>&1 || \
