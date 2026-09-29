@@ -103,6 +103,7 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
 | Anonymous users per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` |
 | Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
 | Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
+| Refunded failures after Gemini answered, per network | `IP_FAILURE_REFUND_LIMIT` (3) | the failed run stays counted, for the user and the network |
 
 - **The network** is the IPv4 address or the IPv6 /64 prefix (an IPv4-mapped address counts as IPv4). The address is
   the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` from the right (1 on Cloud Run: the one Google's front end appends),
@@ -116,6 +117,13 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
 - **Order** ([`AnalysisAdmission`](src/jobs/analysis-admission.service.ts)): `POST /v1/jobs` and `/from-sample` check
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
   (`chargedRunId`, `chargedIpRunId`); the write that ends a run clears both, so each is refunded at most once.
+- **Failed analyses**: a failure before Gemini answers (provider errors, timeouts, a stuck worker) is always
+  refunded. Once Gemini has answered, the call is billed even when the answer can't be used (cut off, blocked or
+  malformed), so such a failure is refunded only while the network has refunds of those left
+  (`IpQuotaService.refundFailure`, one conditional update that records the refund's time in `refundedFailures`);
+  otherwise both runs stay counted. Without the cap, a video that always fails could be re-run for free until the
+  Vertex spend cap stopped every analysis. A cut-off or blocked answer isn't retried, a malformed one once
+  (`ModelAnswerError`), and every attempt's tokens are added to the job's `usage`.
 - **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web shows the check to everyone and
   sends its token with a job creation when it has one. A visitor without an account can't start before the check
   passes; a member who starts before it's solved sends none. The API calls Cloudflare's `siteverify` only when a rule
@@ -307,6 +315,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users per network in a rolling 7-day window           |
 | `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
+| `IP_FAILURE_REFUND_LIMIT`| `3`                     | Refunds per network of analyses that failed after Gemini answered           |
 | `TRUSTED_PROXY_HOPS`     | `1`                     | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                   |
 | `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
 | `GEMINI_MODEL`           | `gemini-3.8-flash`      | Model id                                                                    |

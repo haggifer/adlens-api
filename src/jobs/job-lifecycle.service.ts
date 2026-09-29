@@ -14,6 +14,17 @@ const ANALYSIS_STALE_MS = 60 * 60 * 1000
 
 const IN_FLIGHT = [JobStatus.Queued, JobStatus.Analyzing]
 
+const incUsage = ({ promptTokens, outputTokens, totalTokens }: TokenUsage) => ({
+    'usage.promptTokens': promptTokens,
+    'usage.outputTokens': outputTokens,
+    'usage.totalTokens': totalTokens,
+})
+
+export interface FailOptions {
+    // Gemini answered, so the attempt was billed: the refund then counts against the network's allowance of them.
+    isAfterModelAnswer?: boolean
+}
+
 // The single owner of a job's status. Every transition is one conditional update on the expected current status, so
 // racing callers can't both win, and a job's quota charge is released in the same write that ends its run.
 @Injectable()
@@ -109,21 +120,34 @@ export class JobLifecycle {
             .lean<StoredJob>()
     }
 
-    // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale).
+    // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale). The usage is
+    // added to what earlier, failed attempts recorded, so the job holds everything its analysis was billed for.
     async complete(jobId: string, analysis: Analysis, usage: TokenUsage): Promise<boolean> {
-        const done = await this.transition(
+        const done = await this.model.findOneAndUpdate(
             { _id: jobId, status: JobStatus.Analyzing },
-            { status: JobStatus.Analyzed, analysis, usage },
+            { $set: { status: JobStatus.Analyzed, analysis }, $inc: incUsage(usage) },
+            { new: true },
         )
 
         return done !== null
     }
 
+    // The tokens of an attempt whose answer couldn't be used: billed all the same.
+    async addUsage(jobId: string, usage: TokenUsage): Promise<void> {
+        await this.model.updateOne({ _id: jobId }, { $inc: incUsage(usage) })
+    }
+
     // queued / analyzing → error, refunding the charge at most once.
-    async fail(jobId: string, errorCode: JobErrorCode, detail: string): Promise<boolean> {
+    async fail(
+        jobId: string,
+        errorCode: JobErrorCode,
+        detail: string,
+        { isAfterModelAnswer = false }: FailOptions = {},
+    ): Promise<boolean> {
         return this.settle(
             { _id: jobId, status: { $in: IN_FLIGHT } },
             { status: JobStatus.Error, errorCode, errorDetail: detail },
+            isAfterModelAnswer,
         )
     }
 
@@ -162,13 +186,28 @@ export class JobLifecycle {
 
     // Applies a guarded status change and clears the job's charges in the same write. The pre-image says which
     // charges were held, so exactly one caller refunds them.
-    private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<boolean> {
+    private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>, isRefundCapped = false): Promise<boolean> {
         const before = await this.model
             .findOneAndUpdate(filter, { $set: { ...set, chargedRunId: null, chargedIpRunId: null } }, { new: false })
             .lean<StoredJob>()
 
         if (!before) {
             return false
+        }
+
+        // The network decides: past its allowance of refunded failures, both runs stay counted, which bounds what a
+        // video that always fails can cost. A job with no network run (an admin's) is refunded as before.
+        if (isRefundCapped && before.chargedIpRunId) {
+            const jobId = before._id.toString()
+            const isRefunded = await this.ipQuota.refundFailure(before.chargedIpRunId)
+
+            if (!isRefunded) {
+                this.logger.warn(`job ${jobId} failed after the network used its refunded failures; it stays counted`)
+                return true
+            }
+
+            await this.refundUser(before.userId, before.chargedRunId)
+            return true
         }
 
         // Both refunds run to the end even when one fails, so a failure can't skip the other. Jobs charged before the

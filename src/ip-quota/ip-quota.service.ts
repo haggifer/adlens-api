@@ -14,11 +14,16 @@ const countedAnonymousRuns = (cutoff: Date) => ({
     $filter: { input: countedRuns(cutoff), cond: { $eq: ['$$this.anonymous', true] } },
 })
 
+const recentRefundedFailures = (cutoff: Date) => ({
+    $filter: { input: { $ifNull: ['$refundedFailures', []] }, cond: { $gt: ['$$this', cutoff] } },
+})
+
 // The network side of the quota, with QuotaService's technique on one document per network. The limits come from
 // config and are never stored.
 @Injectable()
 export class IpQuotaService {
     readonly limits: IpLimits
+    private readonly failureRefundLimit: number
 
     constructor(
         @InjectConnection() private readonly connection: Connection,
@@ -29,6 +34,7 @@ export class IpQuotaService {
             soft: config.get('IP_SOFT_LIMIT', { infer: true }),
             hard: config.get('IP_HARD_LIMIT', { infer: true }),
         }
+        this.failureRefundLimit = config.get('IP_FAILURE_REFUND_LIMIT', { infer: true })
     }
 
     private get buckets() {
@@ -73,6 +79,29 @@ export class IpQuotaService {
     // A run that has already left the window is no longer stored, so refunding it changes nothing.
     async refund(runId: string): Promise<void> {
         await this.buckets.updateOne({ 'runs.id': runId }, { $pull: { runs: { id: runId } } })
+    }
+
+    // Refunds the run of an analysis that failed after Gemini answered, unless the network already had its allowance
+    // of such refunds this window; then the run stays counted. One conditional update, so concurrent failures can't
+    // both take the last refund. false when nothing was refunded.
+    async refundFailure(runId: string, now = new Date()): Promise<boolean> {
+        const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
+        const refunded = await this.buckets.updateOne(
+            {
+                'runs.id': runId,
+                $expr: { $lt: [{ $size: recentRefundedFailures(cutoff) }, this.failureRefundLimit] },
+            },
+            [
+                {
+                    $set: {
+                        runs: { $filter: { input: '$runs', cond: { $ne: ['$$this.id', runId] } } },
+                        refundedFailures: { $concatArrays: [recentRefundedFailures(cutoff), [now]] },
+                    },
+                },
+            ],
+        )
+
+        return refunded.modifiedCount > 0
     }
 
     private admits({ isAnonymous, hasPassedChallenge }: IpCharge, cutoff: Date): object[] {

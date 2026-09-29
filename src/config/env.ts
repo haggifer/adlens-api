@@ -41,6 +41,9 @@ const envSchema = z.object({
     IP_ANON_LIMIT: z.coerce.number().int().positive().default(3),
     IP_SOFT_LIMIT: z.coerce.number().int().positive().default(10),
     IP_HARD_LIMIT: z.coerce.number().int().positive().default(30),
+    // Analyses that fail after Gemini answered are refunded, but at most this many per network per week: each one
+    // was billed, so unlimited refunds would let a failing video be re-run for free.
+    IP_FAILURE_REFUND_LIMIT: z.coerce.number().int().nonnegative().default(3),
     // Cloudflare Turnstile. Unset, a required check can never pass.
     TURNSTILE_SECRET_KEY: z.string().optional(),
     // Proxies in front of the API that append to X-Forwarded-For: 1 on Cloud Run (Google's front end).

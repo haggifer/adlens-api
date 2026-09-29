@@ -9,6 +9,8 @@ export const IP_QUOTA_COLLECTION = 'ip_quotas'
 export const ipQuotaDocSchema = z.object({
     _id: z.string(),
     runs: z.array(z.object({ id: z.string(), startedAt: z.date(), jobId: z.string(), anonymous: z.boolean() })),
+    // When each failed analysis of the last window was refunded (IpQuotaService.refundFailure).
+    refundedFailures: z.array(z.date()).optional(),
     expiresAt: z.date(),
 })
 

@@ -1,8 +1,10 @@
 import { JobErrorCode, JobStatus, Market, Platform, RulePlatform, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
+import { IP_QUOTA_COLLECTION, type IpQuotaDoc } from '../../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../../database/job.doc'
 import { USER_COLLECTION } from '../../database/user.doc'
 import { IpQuotaService } from '../../ip-quota/ip-quota.service'
+import type { IpCharge } from '../../ip-quota/ip-rules'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
@@ -11,10 +13,16 @@ import { configStub } from '../../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../../testing/memory-mongo'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
 import { AnalysisPipeline } from './analysis-pipeline.service'
+import { ModelAnswerError } from './model-answer-error'
 import { RetryableError } from './retryable-error'
 
 const USER = new Types.ObjectId().toString()
 const USAGE = { promptTokens: 20000, outputTokens: 800, totalTokens: 20800 }
+const NETWORK: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
+
+const cutOff = () => new ModelAnswerError('The model output was cut off at the token limit', USAGE)
+
+const malformed = () => new ModelAnswerError('The model returned malformed output', USAGE, true)
 
 class FakeReviewer extends VideoReviewer {
     next: () => Promise<VideoReview> = async () => ({
@@ -40,8 +48,10 @@ describe('AnalysisPipeline', () => {
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
     const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
+    const networks = () => mongo.connection.collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
+    const usedByNetwork = async () => ((await networks().findOne({ _id: NETWORK.bucketKey }))?.runs ?? []).length
 
-    const queueJob = async (): Promise<string> => {
+    const queueJob = async (ipCharge: IpCharge | null = null): Promise<string> => {
         const job = await jobs.create({
             userId: USER,
             status: JobStatus.Pending,
@@ -52,14 +62,19 @@ describe('AnalysisPipeline', () => {
         const jobId = job._id.toString()
 
         await lifecycle.claimForVerification(USER, jobId)
-        await lifecycle.chargeAndQueue(jobId, USER, {
-            durationS: 15,
-            width: 1080,
-            height: 1920,
-            hasAudio: true,
-            sizeBytes: 1000,
-            contentType: VideoMimeType.Mp4,
-        })
+        await lifecycle.chargeAndQueue(
+            jobId,
+            USER,
+            {
+                durationS: 15,
+                width: 1080,
+                height: 1920,
+                hasAudio: true,
+                sizeBytes: 1000,
+                contentType: VideoMimeType.Mp4,
+            },
+            ipCharge,
+        )
 
         return jobId
     }
@@ -74,7 +89,7 @@ describe('AnalysisPipeline', () => {
             new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })),
             new IpQuotaService(
                 mongo.connection,
-                configStub({ IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }),
+                configStub({ IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30, IP_FAILURE_REFUND_LIMIT: 1 }),
             ),
         )
     })
@@ -86,7 +101,7 @@ describe('AnalysisPipeline', () => {
     })
 
     afterEach(async () => {
-        await Promise.all([jobs.deleteMany({}), users().deleteMany({})])
+        await Promise.all([jobs.deleteMany({}), users().deleteMany({}), networks().deleteMany({})])
     })
 
     afterAll(async () => {
@@ -156,6 +171,63 @@ describe('AnalysisPipeline', () => {
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect((await findJob(jobId))?.status).toBe(JobStatus.Error)
         expect(await used()).toBe(0)
+    })
+
+    it('fails a cut-off answer at once instead of paying for the same answer again, and refunds it', async () => {
+        const jobId = await queueJob(NETWORK)
+
+        reviewer.next = () => Promise.reject(cutOff())
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: USAGE })
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
+    })
+
+    it('retries a malformed answer once, then fails it, counting the tokens of both attempts', async () => {
+        const jobId = await queueJob()
+
+        reviewer.next = () => Promise.reject(malformed())
+
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(ModelAnswerError)
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect(reviewer.review).toHaveBeenCalledTimes(2)
+        expect((await findJob(jobId))?.usage).toEqual({
+            promptTokens: 2 * USAGE.promptTokens,
+            outputTokens: 2 * USAGE.outputTokens,
+            totalTokens: 2 * USAGE.totalTokens,
+        })
+    })
+
+    it("adds a failed attempt's tokens to those of the attempt that succeeds", async () => {
+        const jobId = await queueJob()
+
+        reviewer.next = () => Promise.reject(malformed())
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(ModelAnswerError)
+        reviewer.next = new FakeReviewer().next
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
+        expect((await findJob(jobId))?.usage?.totalTokens).toBe(2 * USAGE.totalTokens)
+    })
+
+    it('keeps a failed answer counted once the network used up its refunded failures', async () => {
+        reviewer.next = () => Promise.reject(cutOff())
+
+        await pipeline.run(await queueJob(NETWORK), { isLast: false })
+        await pipeline.run(await queueJob(NETWORK), { isLast: false })
+
+        expect(await used()).toBe(1)
+        expect(await usedByNetwork()).toBe(1)
+    })
+
+    it('still refunds a failure the provider caused, whatever the network used up', async () => {
+        reviewer.next = () => Promise.reject(cutOff())
+        await pipeline.run(await queueJob(NETWORK), { isLast: false })
+        reviewer.next = () => Promise.reject(new RetryableError('provider overloaded'))
+
+        expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
     })
 
     it("doesn't store a result for a job that expired while it was analyzed", async () => {
