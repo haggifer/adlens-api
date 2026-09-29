@@ -104,9 +104,11 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
 - **Order** ([`AnalysisAdmission`](src/jobs/analysis-admission.service.ts)): `POST /v1/jobs` and `/from-sample` check
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
   (`chargedRunId`, `chargedIpRunId`); the write that ends a run clears both, so each is refunded at most once.
-- **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web sends a token with every job
-  creation; the API calls Cloudflare's `siteverify` only when a rule asks for it (always for anonymous users) and
-  records `hasPassedChallenge` on the job for analyze. Without `TURNSTILE_SECRET_KEY` a required check never passes.
+- **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web shows the check to everyone and
+  sends its token with a job creation when it has one. A visitor without an account can't start before the check
+  passes; a member who starts before it's solved sends none. The API calls Cloudflare's `siteverify` only when a rule
+  asks for it (always for anonymous users), ignores a token no rule needs, and records `hasPassedChallenge` on the job
+  for analyze. Without `TURNSTILE_SECRET_KEY` a required check never passes.
   A network that crosses the soft limit between creating and analyzing a job made without the check gets
   `CHALLENGE_REQUIRED` at analyze, and the user starts again.
 - **Admins** (`isAdmin: true`) skip every network rule.
@@ -150,7 +152,15 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
   forever. The cost is that a password-reset request for an existing address takes a Resend round trip longer than one
-  for an unknown address. Rate limits are stored in MongoDB so they hold across instances.
+  for an unknown address.
+- **Better Auth's rate limits** (its defaults, plus 10 anonymous sign-ins an hour per client) are counted in MongoDB,
+  so they hold across instances, by [`createRateLimitStorage`](src/auth/rate-limit-storage.ts): one `rate_limits`
+  document per client and path, keyed by `HMAC-SHA256(key, "<ip>|<path>")` with its own HKDF key from
+  `BETTER_AUTH_SECRET`, and deleted by a TTL index when its window ends. Better Auth resolves that address itself
+  (only from a single-entry `X-Forwarded-For`; requests it can't read share one bucket), not through
+  `ClientNetworkResolver`. It only rate-limits when `NODE_ENV` is `production`.
+- **Sessions don't store the address.** Better Auth records it on every session; a
+  `databaseHooks.session.create.before` hook sets `ipAddress` to null and keeps the user agent.
 
 ## API
 
@@ -290,7 +300,7 @@ key; 2x0000000000000000000000000000000AA always fails.
 ```bash
 npm test          # unit: quota, network quota, job lifecycle, pipeline, verification, client IP (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
-npm run test:auth # after a build: sign-up, verification, reset, deletion and anonymous linking against the real Better Auth
+npm run test:auth # after a build: sign-up, verification, reset, deletion, anonymous linking and rate limits against the real Better Auth
 ```
 
 The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, because the guarantees that matter

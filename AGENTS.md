@@ -26,6 +26,9 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
   network key or an address on a job.
 - The client's address comes only from `ClientNetworkResolver` (`X-Forwarded-For` read `TRUSTED_PROXY_HOPS` from the
   right). Never store or log an address; networks are stored as an HMAC.
+- Better Auth resolves the address itself for its rate limits and sessions. Keep its counters in
+  `createRateLimitStorage` (HMAC keys, TTL-deleted), never `rateLimit.storage: 'database'` (raw `<ip>|<path>` keys,
+  never deleted), and keep the `session.create.before` hook that sets `ipAddress` to null.
 - An account's purge runs in Better Auth's `user.deleteUser.beforeDelete`, never in `databaseHooks.user.delete`: the
   anonymous plugin deletes a linked anonymous user through the internal adapter after its jobs moved to the account,
   and their videos still sit under the anonymous user's prefix.
@@ -57,6 +60,8 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 - Jest can't load Better Auth's ESM build, so the e2e suite stubs it; real auth behaviour is covered by `test:auth`.
 - Better Auth needs MongoDB transactions, so `test:auth` runs on an in-memory replica set; the unit and e2e tests use
   a standalone in-memory server.
+- Better Auth only rate-limits when `NODE_ENV` is `production`; `test:auth` switches it on for single tests through
+  `auth.$context` (`withRateLimits`).
 - With `ANALYZE_LOCAL=1` the API spawns `node dist/worker`, so `dist/` must be built.
 - The e2e suite sets `BETTER_AUTH_SECRET` in `test/global-setup.ts`: the network key is derived from it. It fakes the
   Turnstile verifier (`'pass'` passes), and `X-Forwarded-For` picks each test's network.
