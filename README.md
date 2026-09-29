@@ -40,7 +40,10 @@ repos.
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
   go through the same logger. Locally the default is Nest's readable text.
 - **Realtime**: a MongoDB Change Stream on `jobs` pushes every update to the owner's Socket.IO room. The stream is
-  reopened from its last resume token after errors.
+  reopened from its last resume token after errors. Cloud Run bills an instance for as long as a socket to it is open,
+  so [`JobsGateway`](src/realtime/jobs.gateway.ts) accepts a socket (WebSocket only, at most 3 per user per instance)
+  only while its user has a job verifying, queued or analyzing, and closes the user's sockets right after the update
+  that ends their last one.
 - **Contract**: every request body, response and error has a Zod schema in `adlens-shared`. The API returns the
   public job shape only; owner, storage paths, execution names and accounting stay server-side.
 

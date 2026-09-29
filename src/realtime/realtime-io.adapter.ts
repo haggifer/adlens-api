@@ -12,6 +12,11 @@ export class RealtimeIoAdapter extends IoAdapter {
     }
 
     createIOServer(port: number, options?: ServerOptions) {
-        return super.createIOServer(port, { ...options, cors: { origin: this.webOrigin, credentials: true } })
+        // WebSocket only, like the web client: long-polling would keep an HTTP request open on Cloud Run between polls.
+        return super.createIOServer(port, {
+            ...options,
+            transports: ['websocket'],
+            cors: { origin: this.webOrigin, credentials: true },
+        })
     }
 }

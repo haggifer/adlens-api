@@ -53,7 +53,11 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
             const job = (change as { fullDocument?: StoredJob }).fullDocument
 
             if (job?.userId) {
-                this.gateway.emitJobUpdated(job.userId, toPublicJob(job))
+                this.gateway.publishJobUpdate(job.userId, toPublicJob(job)).catch((err: unknown) => {
+                    this.logger.error(
+                        `could not publish job ${job._id.toString()}: ${err instanceof Error ? err.message : err}`,
+                    )
+                })
             }
         })
         this.stream.on('error', (err: Error) => {

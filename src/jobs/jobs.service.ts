@@ -18,6 +18,7 @@ import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
 import { JobLifecycle } from './job-lifecycle.service'
+import { IN_PROGRESS_STATUSES } from './job-status'
 import { toPublicJob } from './job.mapper'
 
 export const listJobsQuerySchema = z.object({
@@ -29,9 +30,6 @@ export const listJobsQuerySchema = z.object({
 })
 
 export type ListJobsQuery = z.output<typeof listJobsQuerySchema>
-
-// A job in these states is being worked on and can't be deleted until it finishes (or is expired as stale).
-const IN_PROGRESS = [JobStatus.Verifying, JobStatus.Queued, JobStatus.Analyzing]
 
 const inProgress = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobInProgress, 'The analysis is still running')
@@ -123,7 +121,7 @@ export class JobsService {
 
         const job = await this.findOwned(userId, jobId)
 
-        if (IN_PROGRESS.includes(job.status)) {
+        if (IN_PROGRESS_STATUSES.includes(job.status)) {
             throw inProgress()
         }
 
@@ -131,7 +129,11 @@ export class JobsService {
             await this.storage.delete(job.file.path)
         }
 
-        const { deletedCount } = await this.model.deleteOne({ _id: job._id, userId, status: { $nin: IN_PROGRESS } })
+        const { deletedCount } = await this.model.deleteOne({
+            _id: job._id,
+            userId,
+            status: { $nin: IN_PROGRESS_STATUSES },
+        })
 
         if (!deletedCount) {
             throw inProgress()
