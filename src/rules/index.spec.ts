@@ -1,6 +1,6 @@
-import { type AnalysisSettings, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
+import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
 import { loadBundledRuleSet } from '../testing/bundled-ruleset'
-import { selectRules } from './index'
+import { evaluateMetadataRules, selectRules } from './index'
 import { type Rule, RULE_PLATFORMS } from './schema'
 
 const ruleSet = loadBundledRuleSet()
@@ -67,5 +67,63 @@ describe('selectRules', () => {
 
         expect(selectedIds(settingsFor({ platforms: [Platform.YouTube] })).has(googleOnly.id)).toBe(true)
         expect(selectedIds(settingsFor({ platforms: [Platform.Meta] })).has(googleOnly.id)).toBe(false)
+    })
+})
+
+describe('evaluateMetadataRules', () => {
+    // Amazon Sponsored Brands video: 6 to 45 seconds, 16:9, at least 720px high, at most 500MB.
+    const MEDIA: JobMedia = {
+        durationS: 20,
+        width: 1920,
+        height: 1080,
+        hasAudio: true,
+        sizeBytes: 100_000_000,
+        contentType: 'video/mp4',
+    }
+    const BYTES_PER_MB = 1000 * 1000
+
+    const checkOf = (ruleId: string, media: Partial<JobMedia>) => {
+        const rule = ruleSet.rules.find((candidate) => candidate.id === ruleId)!
+        const [check] = evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media })
+
+        return check
+    }
+
+    const verdictOf = (ruleId: string, media: Partial<JobMedia>) => checkOf(ruleId, media).verdict
+
+    it('passes a duration at its limits and fails one past them', () => {
+        expect(verdictOf('amazon.creative_spec.video_max_length', { durationS: 45 })).toBe('pass')
+        expect(verdictOf('amazon.creative_spec.video_max_length', { durationS: 45.1 })).toBe('fail')
+        expect(verdictOf('amazon.creative_spec.video_min_length', { durationS: 6 })).toBe('pass')
+        expect(verdictOf('amazon.creative_spec.video_min_length', { durationS: 5.9 })).toBe('fail')
+    })
+
+    it('checks the height against the minimum, and says so when the height is unknown', () => {
+        expect(verdictOf('amazon.creative_spec.video_resolution_min', { height: 720 })).toBe('pass')
+        expect(verdictOf('amazon.creative_spec.video_resolution_min', { height: 719 })).toBe('fail')
+        expect(verdictOf('amazon.creative_spec.video_resolution_min', { height: undefined })).toBe('unknown')
+    })
+
+    it('measures the file size in decimal megabytes', () => {
+        expect(verdictOf('amazon.creative_spec.video_filesize_max', { sizeBytes: 500 * BYTES_PER_MB })).toBe('pass')
+        expect(verdictOf('amazon.creative_spec.video_filesize_max', { sizeBytes: 500 * BYTES_PER_MB + 1 })).toBe('fail')
+    })
+
+    it('accepts an aspect ratio within the tolerance only, and says so when the dimensions are unknown', () => {
+        const rule = 'amazon.creative_spec.video_aspect_ratio'
+
+        expect(verdictOf(rule, { width: 1920, height: 1080 })).toBe('pass')
+        expect(verdictOf(rule, { width: 1432, height: 800 })).toBe('pass')
+        expect(verdictOf(rule, { width: 1440, height: 800 })).toBe('fail')
+        expect(verdictOf(rule, { width: 1080, height: 1920 })).toBe('fail')
+        expect(verdictOf(rule, { width: undefined, height: 1080 })).toBe('unknown')
+    })
+
+    it('cites the rule, with its source resolved to a link', () => {
+        expect(checkOf('amazon.creative_spec.video_max_length', {})).toMatchObject({
+            id: 'amazon.creative_spec.video_max_length',
+            quote: 'Between 6 and 45 seconds (20 secs or less highly recommended)',
+            ref: expect.stringMatching(/^https:\/\/advertising\.amazon\.com\/resources\/ad-specs\//),
+        })
     })
 })
