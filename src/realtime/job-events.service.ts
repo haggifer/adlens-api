@@ -7,8 +7,15 @@ import { JobsGateway } from './jobs.gateway'
 
 const RESTART_DELAY_MS = 5 * 1000
 
+// MongoDB can never resume from the token after these: 260 InvalidResumeToken, 280 ChangeStreamFatalError, 286
+// ChangeStreamHistoryLost (the oplog rolled past it). Reopening with it would fail every few seconds forever.
+const UNRESUMABLE_CODES = new Set([260, 280, 286])
+
+const isUnresumable = (err: Error): boolean => UNRESUMABLE_CODES.has((err as { code?: unknown }).code as number)
+
 // One Change Stream per API instance on the jobs collection: every update is pushed to the owner's socket room. When
-// the stream errors (network blip, failover), it is reopened from the last seen resume token, so no update is lost.
+// the stream errors (network blip, failover), it is reopened from the last seen resume token, so no update is lost;
+// when that token can never be resumed, from now, and a socket that missed an update refetches the job on reconnect.
 @Injectable()
 export class JobEventsService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(JobEventsService.name)
@@ -61,7 +68,13 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
             }
         })
         this.stream.on('error', (err: Error) => {
-            this.logger.error(`change stream error, reopening: ${err.message}`)
+            if (isUnresumable(err)) {
+                this.resumeToken = undefined
+                this.logger.error(`change stream can't resume, reopening from now: ${err.message}`)
+            } else {
+                this.logger.error(`change stream error, reopening: ${err.message}`)
+            }
+
             void this.restart()
         })
     }
