@@ -1,7 +1,7 @@
 import type { INestApplication } from '@nestjs/common'
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
-import { JobErrorCode, JobStatus, RequestErrorCode, VideoMimeType } from 'adlens-shared'
+import { JobErrorCode, JobStatus, MAX_DURATION_S, RequestErrorCode, VideoMimeType } from 'adlens-shared'
 import { type Connection, type Model, Types } from 'mongoose'
 import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
@@ -26,12 +26,14 @@ const OWNER = new Types.ObjectId().toString()
 const STRANGER = new Types.ObjectId().toString()
 const SAMPLER = new Types.ObjectId().toString()
 const DELETER = new Types.ObjectId().toString()
+const PAGER = new Types.ObjectId().toString()
 const FILE = { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 5_000_000 }
 const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
 
 describe('Jobs API (e2e)', () => {
     let app: INestApplication
-    let storedObject: ObjectInfo | null
+    // null: the upload hasn't arrived; an Error: storage can't be reached.
+    let storedObject: ObjectInfo | null | Error
     let probe: ProbeResult
     const dispatch = jest.fn(async () => 'executions/exec-1')
     const deleteObject = jest.fn(async (_path: string) => undefined)
@@ -67,7 +69,13 @@ describe('Jobs API (e2e)', () => {
                     url: 'https://storage.googleapis.com/signed-read',
                     expiresAt: new Date(),
                 }),
-                getObjectInfo: async () => storedObject,
+                getObjectInfo: async () => {
+                    if (storedObject instanceof Error) {
+                        throw storedObject
+                    }
+
+                    return storedObject
+                },
                 delete: deleteObject,
             })
             .overrideProvider(MediaProber)
@@ -91,7 +99,7 @@ describe('Jobs API (e2e)', () => {
             .get<Connection>(getConnectionToken())
             .collection(USER_COLLECTION)
             .insertMany(
-                [OWNER, STRANGER, SAMPLER, DELETER].map((id) => ({
+                [OWNER, STRANGER, SAMPLER, DELETER, PAGER].map((id) => ({
                     _id: new Types.ObjectId(id),
                     email: `${id}@example.com`,
                 })),
@@ -173,17 +181,44 @@ describe('Jobs API (e2e)', () => {
         expect(job.body.job.status).toBe(JobStatus.Pending)
     })
 
-    it('rejects a video over the duration limit without charging', async () => {
+    it("doesn't let another user start the job", async () => {
+        const jobId = await createJob()
+        const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(STRANGER)).expect(404)
+        const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER)).expect(200)
+
+        expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        expect(job.body.job.status).toBe(JobStatus.Pending)
+        expect(dispatch).not.toHaveBeenCalled()
+    })
+
+    it('rejects a video over the duration limit without charging, and deletes the upload', async () => {
         const jobId = await createJob()
         const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
 
-        probe = { ...probe, durationS: 61 }
+        probe = { ...probe, durationS: MAX_DURATION_S + 1 }
 
         const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(422)
         const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
+        const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER))
 
         expect(res.body.errorCode).toBe(JobErrorCode.VideoTooLong)
+        expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoTooLong })
+        expect(deleteObject.mock.calls).toEqual([[`users/${OWNER}/jobs/${jobId}/video`]])
         expect(after.body.quota.used).toBe(before.body.quota.used)
+        expect(dispatch).not.toHaveBeenCalled()
+    })
+
+    it('keeps the job pending and the upload in place when storage cannot be reached', async () => {
+        const jobId = await createJob()
+
+        storedObject = new Error('GCS 503')
+
+        const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
+        const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER))
+
+        expect(res.body.errorCode).toBe(RequestErrorCode.Unavailable)
+        expect(job.body.job.status).toBe(JobStatus.Pending)
+        expect(deleteObject).not.toHaveBeenCalled()
     })
 
     it('refunds and reopens the job when the worker cannot be started', async () => {
@@ -201,16 +236,28 @@ describe('Jobs API (e2e)', () => {
         expect(job.body.job.status).toBe(JobStatus.Pending)
     })
 
-    it('pages the job list newest first', async () => {
-        const res = await request(app.getHttpServer()).get('/v1/jobs?limit=2').set(as(OWNER)).expect(200)
-        const next = await request(app.getHttpServer())
-            .get(`/v1/jobs?limit=2&cursor=${res.body.nextCursor}`)
-            .set(as(OWNER))
+    it("pages the user's own job list newest first", async () => {
+        const created: string[] = []
+
+        for (let i = 0; i < 3; i++) {
+            const res = await request(app.getHttpServer())
+                .post('/v1/jobs')
+                .set(as(PAGER))
+                .send({ settings: SETTINGS, file: FILE })
+                .expect(201)
+
+            created.push(res.body.job.id)
+        }
+
+        const first = await request(app.getHttpServer()).get('/v1/jobs?limit=2').set(as(PAGER)).expect(200)
+        const second = await request(app.getHttpServer())
+            .get(`/v1/jobs?limit=2&cursor=${first.body.nextCursor}`)
+            .set(as(PAGER))
             .expect(200)
 
-        expect(res.body.jobs).toHaveLength(2)
-        expect(res.body.nextCursor).toEqual(expect.any(String))
-        expect(next.body.jobs[0].id < res.body.jobs[1].id).toBe(true)
+        expect(first.body.jobs.map((job: { id: string }) => job.id)).toEqual([created[2], created[1]])
+        expect(second.body.jobs.map((job: { id: string }) => job.id)).toEqual([created[0]])
+        expect(second.body.nextCursor).toBeNull()
     })
 
     describe('sample ads', () => {
