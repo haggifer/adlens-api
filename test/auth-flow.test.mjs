@@ -769,4 +769,16 @@ test("every flow above ran with Better Auth's collections indexed, unique emails
     for (const { index } of AUTH_INDEXES) {
         assert.ok(names.includes(index.name), index.name)
     }
+
+    // A TTL index deletes nothing if expiresAt was ever stored as a string or number: MongoDB only expires BSON dates.
+    const nonDateExpiry = (collection) =>
+        withDb((db) => db.collection(collection).countDocuments({ expiresAt: { $not: { $type: 'date' } } }))
+
+    assert.strictEqual(await nonDateExpiry('session'), 0)
+
+    const verificationCount = await withDb((db) => db.collection('verification').countDocuments())
+
+    if (verificationCount > 0) {
+        assert.strictEqual(await nonDateExpiry('verification'), 0)
+    }
 })
