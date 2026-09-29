@@ -26,6 +26,16 @@ describe('ClientNetworkResolver', () => {
         expect(network.bucketKey).not.toContain('203.0.113.7')
     })
 
+    it('limits requests without a readable address together, apart from any real network', () => {
+        const unreadable = resolver.resolve({ forwardedFor: 'not-an-address', socketAddress: undefined })
+        const missing = resolver.resolve({ forwardedFor: undefined, socketAddress: undefined })
+        const real = resolver.resolve({ forwardedFor: '203.0.113.7', socketAddress: undefined })
+
+        expect(missing.ip).toBeNull()
+        expect(missing.bucketKey).toBe(unreadable.bucketKey)
+        expect(real.bucketKey).not.toBe(unreadable.bucketKey)
+    })
+
     it('refuses to start without the secret the key is derived from', () => {
         expect(() => new ClientNetworkResolver(configStub({ TRUSTED_PROXY_HOPS: 1 }))).toThrow('BETTER_AUTH_SECRET')
     })
