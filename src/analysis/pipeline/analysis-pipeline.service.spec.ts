@@ -150,6 +150,25 @@ describe('AnalysisPipeline', () => {
         expect(await used()).toBe(0)
     })
 
+    it("doesn't store a result for a job that expired while it was analyzed", async () => {
+        const jobId = await queueJob()
+        const review = reviewer.next
+
+        reviewer.next = async () => {
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisTimedOut, 'expired')
+
+            return review()
+        }
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
+
+        const job = await findJob(jobId)
+
+        expect(job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisTimedOut })
+        expect(job).not.toHaveProperty('analysis')
+        expect(await used()).toBe(0)
+    })
+
     it('skips a job that is already final', async () => {
         const jobId = await queueJob()
 
