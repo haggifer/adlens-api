@@ -25,7 +25,7 @@ export class RulesetService {
         const doc = await this.model.findOne().sort({ publishedAt: -1 }).lean<RulesetDoc>()
 
         if (!doc) {
-            throw new Error('No ruleset has been published (npm run rules:publish)')
+            throw new Error('No ruleset has been published (npm run rules:publish -- <file>)')
         }
 
         return ruleSetSchema.parse(doc.ruleset)

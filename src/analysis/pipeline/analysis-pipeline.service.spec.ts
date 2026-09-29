@@ -6,7 +6,7 @@ import { IpQuotaService } from '../../ip-quota/ip-quota.service'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
-import { loadBundledRuleSet } from '../../testing/bundled-ruleset'
+import { TEST_RULESET } from '../../testing/test-ruleset'
 import { configStub } from '../../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../../testing/memory-mongo'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
@@ -34,7 +34,7 @@ describe('AnalysisPipeline', () => {
     let lifecycle: JobLifecycle
     let reviewer: FakeReviewer
     let pipeline: AnalysisPipeline
-    const ruleSet = loadBundledRuleSet()
+    const ruleSet = TEST_RULESET
     const ruleset = { current: async () => ruleSet } as unknown as RulesetService
     const contentRule = ruleSet.rules.find((r) => r.modality === 'visual' && r.platform.includes(RulePlatform.Meta))!
 

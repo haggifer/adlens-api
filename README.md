@@ -209,8 +209,9 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 
 ## Ad-policy rules
 
-Rules are data. The authored ruleset lives in [`src/rules/rules.json`](src/rules/rules.json) and is published to MongoDB
-as an **immutable version** with `npm run rules:publish` (validated by the same Zod schema the worker parses it with; a
+Rules are data. The ruleset is authored **outside this repo**, as a JSON file in the shape of
+[`ruleSetSchema`](src/rules/schema.ts), and published to MongoDB as an **immutable version** with
+`npm run rules:publish -- <path/to/rules.json>` (validated by the same Zod schema the worker parses it with; a
 version that already exists is refused). The worker serves the newest published version via
 [`RulesetService`](src/rules/ruleset.service.ts), so a rules update needs no redeploy, and every analysis records the
 `rulesetVersion` it ran with.
@@ -219,7 +220,8 @@ Selection ([`src/rules/index.ts`](src/rules/index.ts)) targets the job's setting
 in Google Ads policy), its **markets** (global rules always apply; UK/EU/US rules only in their market) and, for
 format-specific rules such as the 6-second bumper cap, its **placements**. No platform chosen means every platform, and
 no market chosen means every market, so an ad is never checked against nothing; placement specs still apply only to
-their chosen placement. A test proves every rule is reachable from some combination of settings. Selected rules are then routed by `modality`:
+their chosen placement, and the schema requires a rule's placements to belong to its platforms, so every video rule is
+selected by some settings. Selected rules are then routed by `modality`:
 
 - `metadata` → checked in code against the measured media facts (duration, dimensions, real object size);
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
@@ -434,9 +436,11 @@ Why the system is built this way, and what was rejected. Decisions that span the
   schemas. The stored job is composed here from those blocks plus server-only fields (owner, storage path, execution,
   accounting), so they never reach a client. It is published by CI and pinned exactly, because a `file:` link only
   works on one machine.
-- **Rulesets are immutable, versioned data in MongoDB.** `npm run rules:publish` validates with the worker's own
-  schema and refuses an existing version, so a rules change needs no deploy and every analysis records its
-  `rulesetVersion`. A script was chosen over an admin endpoint, which would need an admin identity model.
+- **Rulesets are immutable, versioned data in MongoDB.** `npm run rules:publish -- <file>` validates with the worker's
+  own schema and refuses an existing version, so a rules change needs no deploy and every analysis records its
+  `rulesetVersion`. A script was chosen over an admin endpoint, which would need an admin identity model. The ruleset
+  file isn't kept in this repo: rules are content, maintained outside it, and tests use a small fixture
+  (`src/testing/test-ruleset.ts`) copied from real rules.
 - **Rules target placements and markets, not just platforms.** Format caps such as the 6-second bumper apply only to
   their placement, and UK/EU/US rules only in their market; a test proves every rule is reachable.
 

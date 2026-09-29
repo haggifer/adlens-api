@@ -1,16 +1,16 @@
 import type { Model } from 'mongoose'
 import { RULESET_MODEL, type RulesetDoc, RulesetSchema } from '../database/ruleset.doc'
-import { loadBundledRuleSet } from '../testing/bundled-ruleset'
+import { TEST_RULESET } from '../testing/test-ruleset'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { RulesetService } from './ruleset.service'
 
-const BUNDLED = loadBundledRuleSet()
+const BUNDLED = TEST_RULESET
 
 describe('RulesetService', () => {
     let mongo: MemoryMongo
     let model: Model<RulesetDoc>
 
-    // Made-up versions, so no test depends on the version in rules.json.
+    // Made-up versions, so no test depends on the fixture's version.
     const publish = (version: string, publishedAt: Date) =>
         model.create({ version, ruleset: { ...BUNDLED, meta: { ...BUNDLED.meta, version } }, publishedAt })
 

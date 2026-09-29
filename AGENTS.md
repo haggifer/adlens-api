@@ -13,7 +13,7 @@ npx tsc --noEmit -p tsconfig.json
 npm test                 # unit tests (real MongoDB via mongodb-memory-server)
 npm run test:e2e         # Supertest against the app with fake storage, prober, dispatcher and auth
 npm run test:auth        # after `npm run build`: real Better Auth flows under Node's test runner
-npm run rules:publish    # publish src/rules/rules.json as a new immutable ruleset version
+npm run rules:publish -- <rules.json>   # publish a ruleset file (kept outside the repo) as a new immutable version
 npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a sample ad
 ```
 

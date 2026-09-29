@@ -1,9 +1,8 @@
 import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
-import { loadBundledRuleSet } from '../testing/bundled-ruleset'
+import { TEST_RULESET } from '../testing/test-ruleset'
 import { evaluateMetadataRules, selectRules } from './index'
-import { type Rule, RULE_PLATFORMS } from './schema'
 
-const ruleSet = loadBundledRuleSet()
+const ruleSet = TEST_RULESET
 
 const settingsFor = (overrides: Partial<AnalysisSettings>): AnalysisSettings => ({
     platforms: [],
@@ -18,29 +17,7 @@ const selectedIds = (settings: AnalysisSettings): Set<string> => {
     return new Set([...content, ...metadata, ...advisory].map((rule) => rule.id))
 }
 
-// The narrowest settings under which a rule should apply.
-const settingsTargeting = (rule: Rule): AnalysisSettings => {
-    const platforms = Object.values(Platform).filter((platform) =>
-        RULE_PLATFORMS[platform].some((rulePlatform) => rule.platform.includes(rulePlatform)),
-    )
-
-    return settingsFor({
-        platforms: rule.platform.includes(RulePlatform.All) ? [Platform.Meta] : platforms,
-        placements: rule.placements ?? [],
-        markets: rule.region === 'global' ? [] : [rule.region as Market],
-    })
-}
-
 describe('selectRules', () => {
-    it('can reach every video rule from some combination of settings', () => {
-        const unreachable = ruleSet.rules
-            .filter((rule) => rule.appliesTo !== 'image')
-            .filter((rule) => !selectedIds(settingsTargeting(rule)).has(rule.id))
-            .map((rule) => rule.id)
-
-        expect(unreachable).toEqual([])
-    })
-
     it('checks every platform’s rules when no platform is chosen', () => {
         const noPlatform = selectedIds(settingsFor({}))
         const everyPlatform = selectedIds(settingsFor({ platforms: Object.values(Platform) }))

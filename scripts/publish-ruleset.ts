@@ -4,8 +4,6 @@ import { resolve } from 'node:path'
 import { RULESET_MODEL, RulesetSchema } from '../src/database/ruleset.doc'
 import { ruleSetSchema } from '../src/rules/schema'
 
-const DEFAULT_FILE = 'src/rules/rules.json'
-
 const loadEnvFile = (path: string): void => {
     try {
         process.loadEnvFile(path)
@@ -15,13 +13,20 @@ const loadEnvFile = (path: string): void => {
 }
 
 // Publishes a ruleset as a new immutable version, validated with the same schema the worker parses it with. A version
-// that already exists is refused, so published rules never change underneath past analyses.
-// Usage: npm run rules:publish [-- path/to/rules.json]
+// that already exists is refused, so published rules never change underneath past analyses. The ruleset is authored
+// outside this repo, so its path is required.
+// Usage: npm run rules:publish -- path/to/rules.json
 const run = async (): Promise<void> => {
+    const [path] = process.argv.slice(2)
+
+    if (!path) {
+        throw new Error('Usage: npm run rules:publish -- path/to/rules.json')
+    }
+
     loadEnvFile('.env.local')
     loadEnvFile('.env')
 
-    const file = resolve(process.argv[2] ?? DEFAULT_FILE)
+    const file = resolve(path)
     const ruleset = ruleSetSchema.parse(JSON.parse(readFileSync(file, 'utf8')))
     const uri = process.env.MONGODB_URI
 

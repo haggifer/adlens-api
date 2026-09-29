@@ -21,7 +21,7 @@ export const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
     [Platform.Amazon]: [RulePlatform.Amazon],
 }
 
-// One rule, as authored in rules.json and as stored in every published ruleset version.
+// One rule, as authored in a ruleset file and as stored in every published ruleset version.
 export const ruleSchema = z
     .object({
         id: z.string().regex(/^[a-z0-9]+(\.[a-z0-9_]+)+$/),
