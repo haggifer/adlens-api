@@ -605,3 +605,46 @@ test('an anonymous session cannot link a social provider', async () => {
     assert.equal(res.status, 403)
     assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
 })
+
+const signInAnonymouslyFrom = (address) =>
+    fetch(`${API}/api/auth/sign-in/anonymous`, {
+        method: 'POST',
+        headers: { ...headers(), 'x-forwarded-for': address, 'user-agent': 'auth-flow-test' },
+        body: '{}',
+    })
+
+test('a session never stores the client address, but keeps the user agent', async () => {
+    const res = await signInAnonymouslyFrom('203.0.113.50')
+    const body = await res.json()
+    const sessions = await withDb((db) => db.collection('session').find().toArray())
+    const created = sessions.find((stored) => String(stored.userId) === body.user.id)
+
+    assert.equal(res.status, 200)
+    assert.equal(created?.userAgent, 'auth-flow-test')
+    assert.ok(sessions.every((stored) => stored.ipAddress === null))
+})
+
+// Better Auth only rate-limits when NODE_ENV is production; this runs a test body with the real config and storage.
+const withRateLimits = async (use) => {
+    const context = await auth.$context
+
+    context.rateLimit.enabled = true
+
+    try {
+        return await use()
+    } finally {
+        context.rateLimit.enabled = false
+    }
+}
+
+test('rate limits store only a keyed hash, never the client address', async () => {
+    const res = await withRateLimits(() => signInAnonymouslyFrom('203.0.113.70'))
+    const [counters, legacyRows] = await withDb((db) =>
+        Promise.all([db.collection('rate_limits').find().toArray(), db.collection('rateLimit').find().toArray()]),
+    )
+
+    assert.equal(res.status, 200)
+    assert.ok(counters.length > 0)
+    assert.ok(!JSON.stringify(counters).includes('203.0.113'))
+    assert.equal(legacyRows.length, 0)
+})

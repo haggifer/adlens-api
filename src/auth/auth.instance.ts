@@ -10,6 +10,7 @@ import { USER_COLLECTION } from '../database/user.doc'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
 import { isDisposableEmail } from './disposable-email'
+import { createRateLimitStorage } from './rate-limit-storage'
 import type { SocialProviderOptions } from './social-providers'
 
 export const AUTH = 'BETTER_AUTH'
@@ -119,7 +120,7 @@ export const createAuth = ({
             disableOriginCheck: false,
             ...(cookieDomain && { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }),
         },
-        rateLimit: { storage: 'database' },
+        rateLimit: { customStorage: createRateLimitStorage(db, secret) },
         emailAndPassword: {
             enabled: true,
             requireEmailVerification: true,
@@ -152,6 +153,12 @@ export const createAuth = ({
         // aren't kept: cleared when an account is created, and not refreshed on later sign-ins.
         account: { updateAccountOnSignIn: false },
         databaseHooks: {
+            // Better Auth records the client address on every session; AdLens never stores an address.
+            session: {
+                create: {
+                    before: async (session) => ({ data: { ...session, ipAddress: null } }),
+                },
+            },
             account: {
                 create: {
                     before: async (account) => ({ data: { ...account, ...NO_PROVIDER_TOKENS } }),

@@ -1,4 +1,4 @@
-import { deriveIpKey, hashBucket } from './ip-key'
+import { deriveIpKey, deriveRateLimitKey, hashBucket } from './ip-key'
 
 describe('the network key', () => {
     it('is derived from the secret, stable, and not the secret itself', () => {
@@ -18,5 +18,12 @@ describe('the network key', () => {
 
     it('never contains the address it hashes', () => {
         expect(hashBucket(deriveIpKey('secret-a'), '203.0.113.7')).not.toContain('203.0.113')
+    })
+})
+
+describe('the rate-limit key', () => {
+    it('is derived from the same secret under its own label, so it differs from the network key', () => {
+        expect(deriveRateLimitKey('secret-a')).toHaveLength(32)
+        expect(deriveRateLimitKey('secret-a').equals(deriveIpKey('secret-a'))).toBe(false)
     })
 })
