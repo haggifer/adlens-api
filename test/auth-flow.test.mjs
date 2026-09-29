@@ -1,7 +1,7 @@
 // The email/password and anonymous flows against the real Better Auth (which Jest can't load as ESM), on the built
 // app with an in-memory MongoDB replica set (Better Auth uses transactions). Emails are captured instead of sent, and
 // they are captured before the response (auth.instance.ts sends them in an after hook), so no test waits for one.
-// Storage is faked. The tests share one app and run in order.
+// Storage, Turnstile and the worker dispatcher are faked. The tests share one app and run in order.
 // Run after a build: npm run test:auth
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -12,6 +12,7 @@ const PORT = 8123
 const API = `http://localhost:${PORT}`
 const WEB = 'http://localhost:3000'
 const EMAIL = 'flow@example.com'
+const CHALLENGE_PASS = 'pass'
 
 const outbox = []
 const purgedPrefixes = []
@@ -25,6 +26,7 @@ let app
 let auth
 let session
 let freshSession
+let lifecycle
 
 const headers = (cookie) => ({ 'content-type': 'application/json', origin: WEB, ...(cookie ? { cookie } : {}) })
 const cookieOf = (res) =>
@@ -99,6 +101,9 @@ before(async () => {
     const { Mailer } = require('../dist/mail/mailer')
     const { JobEventsService } = require('../dist/realtime/job-events.service')
     const { StorageService } = require('../dist/storage/storage.service')
+    const { ChallengeVerifier } = require('../dist/challenge/challenge-verifier')
+    const { AnalysisDispatcher } = require('../dist/analysis/dispatch/analysis-dispatcher')
+    const { JobLifecycle } = require('../dist/jobs/job-lifecycle.service')
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
         .overrideProvider(Mailer)
         .useValue({
@@ -118,11 +123,18 @@ before(async () => {
         })
         .overrideProvider(JobEventsService)
         .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
+        // Only the token 'pass' passes; nothing reaches Cloudflare.
+        .overrideProvider(ChallengeVerifier)
+        .useValue({ verify: async (token) => token === CHALLENGE_PASS })
+        // Starts no worker; the tests finish a job through JobLifecycle, as the worker would.
+        .overrideProvider(AnalysisDispatcher)
+        .useValue({ dispatch: async () => null })
         .compile()
 
     app = moduleRef.createNestApplication({ bodyParser: false, logger: false })
     app.enableCors({ origin: WEB, credentials: true })
     auth = app.get(AUTH)
+    lifecycle = app.get(JobLifecycle)
 
     // Lets a test simulate adopt failing (e.g. a transient DB error) without a second, unwired instance: the real
     // service still runs otherwise, so the legitimate linking tests exercise the real move.
@@ -571,6 +583,100 @@ test('a failed move leaves the anonymous user and its data in place', async () =
     assert.equal(anonymousJobs.length, 1)
 })
 
+const SAMPLE_SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
+
+const publishSample = () =>
+    withDb(async (db) => {
+        const { insertedId } = await db.collection('samples').insertOne({
+            slug: 'flow-sample',
+            title: 'Flow sample',
+            description: 'A published sample',
+            file: {
+                name: 'flow-sample.mp4',
+                contentType: 'video/mp4',
+                size: 1000,
+                bucket: 'test-bucket',
+                path: 'samples/flow-sample.mp4',
+            },
+            media: {
+                durationS: 15,
+                width: 1080,
+                height: 1920,
+                hasAudio: true,
+                sizeBytes: 1000,
+                contentType: 'video/mp4',
+            },
+            settings: SAMPLE_SETTINGS,
+            order: 0,
+            isPublished: true,
+        })
+
+        return insertedId.toString()
+    })
+
+test('an anonymous sample analysis moves to the account confirmed in the same session, and a later failure refunds its runs', async () => {
+    const { ObjectId } = require('mongodb')
+    const { JobErrorCode } = require('adlens-shared')
+    const email = 'sampler@example.com'
+    const sampleId = await publishSample()
+    const anonymous = await signInAnonymously()
+    const fromNetwork = { ...headers(anonymous.cookie), 'x-forwarded-for': '203.0.113.80' }
+    const created = await fetch(`${API}/v1/jobs/from-sample`, {
+        method: 'POST',
+        headers: fromNetwork,
+        body: JSON.stringify({ sampleId, settings: SAMPLE_SETTINGS, challengeToken: CHALLENGE_PASS }),
+    })
+    const { job } = await created.json()
+    const analyzed = await fetch(`${API}/v1/jobs/${job.id}/analyze`, { method: 'POST', headers: fromNetwork })
+    const charged = await withDb((db) => db.collection('jobs').findOne({ _id: new ObjectId(job.id) }))
+
+    await post('/api/auth/sign-up/email', { name: 'Sampler', email, password: 'first-password' }, anonymous.cookie)
+
+    const confirmed = await confirmEmail(email, anonymous.cookie)
+    const accountSession = cookieOf(confirmed)
+    const readState = () =>
+        withDb((db) =>
+            Promise.all([
+                db.collection('user').findOne({ email }),
+                db.collection('jobs').findOne({ _id: new ObjectId(job.id) }),
+                db.collection('ip_quotas').findOne({ 'runs.jobId': job.id }),
+                db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+            ]),
+        )
+    const readQuota = async () =>
+        (await (await fetch(`${API}/v1/me/quota`, { headers: headers(accountSession) })).json()).quota
+    const [account, adopted, network, anonymousAfter] = await readState()
+
+    assert.equal(created.status, 201)
+    assert.equal(analyzed.status, 202)
+    assert.equal(confirmed.status, 200)
+    assert.equal(anonymousAfter, null)
+    assert.equal(adopted.userId, account._id.toString())
+    assert.deepEqual(
+        account.runs.map((stored) => stored.id),
+        [charged.chargedRunId],
+    )
+    assert.deepEqual(
+        network.runs.map(({ id, anonymous: isAnonymous }) => ({ id, isAnonymous })),
+        [{ id: charged.chargedIpRunId, isAnonymous: true }],
+    )
+    assert.equal((await readQuota()).used, 1)
+
+    // What the worker does when the analysis fails for good.
+    await lifecycle.startAttempt(job.id)
+    assert.equal(await lifecycle.fail(job.id, JobErrorCode.AnalysisFailed, 'provider error'), true)
+
+    const [accountAfter, failed] = await readState()
+    const networkAfter = await withDb((db) => db.collection('ip_quotas').findOne({ _id: network._id }))
+
+    assert.equal(failed.status, 'error')
+    assert.equal(failed.chargedRunId, null)
+    assert.equal(failed.chargedIpRunId, null)
+    assert.deepEqual(accountAfter.runs, [])
+    assert.deepEqual(networkAfter.runs, [])
+    assert.equal((await readQuota()).used, 0)
+})
+
 test('an anonymous session cannot link a social provider', async () => {
     const anonymous = await signInAnonymously()
     const res = await post(
@@ -627,20 +733,25 @@ test('rate limits store only a keyed hash, never the client address', async () =
     assert.equal(legacyRows.length, 0)
 })
 
+const ANONYMOUS_SIGN_INS_PER_HOUR = 10
+const HOUR_S = 60 * 60
+
 test('anonymous sign-in is limited to 10 an hour per client', async () => {
-    const statuses = await withRateLimits(async () => {
+    const { statuses, retryAfter } = await withRateLimits(async () => {
         const seen = []
+        let refused
 
-        for (let i = 0; i < 11; i++) {
-            const res = await signInAnonymouslyFrom('203.0.113.60')
-
-            seen.push(res.status)
+        for (let i = 0; i <= ANONYMOUS_SIGN_INS_PER_HOUR; i++) {
+            refused = await signInAnonymouslyFrom('203.0.113.60')
+            seen.push(refused.status)
         }
 
         const otherClient = await signInAnonymouslyFrom('203.0.113.61')
 
-        return [...seen, otherClient.status]
+        return { statuses: [...seen, otherClient.status], retryAfter: Number(refused.headers.get('x-retry-after')) }
     })
 
-    assert.deepEqual(statuses, [...Array(10).fill(200), 429, 200])
+    assert.deepEqual(statuses, [...Array(ANONYMOUS_SIGN_INS_PER_HOUR).fill(200), 429, 200])
+    // An hour, not Better Auth's 10-second window for sign-in paths.
+    assert.ok(retryAfter > HOUR_S - 60 && retryAfter <= HOUR_S, `retry after ${retryAfter}s`)
 })
