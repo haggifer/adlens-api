@@ -648,3 +648,21 @@ test('rate limits store only a keyed hash, never the client address', async () =
     assert.ok(!JSON.stringify(counters).includes('203.0.113'))
     assert.equal(legacyRows.length, 0)
 })
+
+test('anonymous sign-in is limited to 10 an hour per client', async () => {
+    const statuses = await withRateLimits(async () => {
+        const seen = []
+
+        for (let i = 0; i < 11; i++) {
+            const res = await signInAnonymouslyFrom('203.0.113.60')
+
+            seen.push(res.status)
+        }
+
+        const otherClient = await signInAnonymouslyFrom('203.0.113.61')
+
+        return [...seen, otherClient.status]
+    })
+
+    assert.deepEqual(statuses, [...Array(10).fill(200), 429, 200])
+})

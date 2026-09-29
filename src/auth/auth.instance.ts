@@ -17,6 +17,10 @@ export const AUTH = 'BETTER_AUTH'
 
 const RESET_TOKEN_TTL_S = 60 * 60
 
+// Bounds how many anonymous users one client can create by calling the API directly; the web only signs in
+// anonymously right before a first analysis.
+const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
+
 // Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
 const NO_PROVIDER_TOKENS = {
     accessToken: null,
@@ -120,7 +124,10 @@ export const createAuth = ({
             disableOriginCheck: false,
             ...(cookieDomain && { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }),
         },
-        rateLimit: { customStorage: createRateLimitStorage(db, secret) },
+        rateLimit: {
+            customStorage: createRateLimitStorage(db, secret),
+            customRules: { '/sign-in/anonymous': ANONYMOUS_SIGN_IN_LIMIT },
+        },
         emailAndPassword: {
             enabled: true,
             requireEmailVerification: true,
