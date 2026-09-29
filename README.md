@@ -161,6 +161,14 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   `ClientNetworkResolver`. It only rate-limits when `NODE_ENV` is `production`.
 - **Sessions don't store the address.** Better Auth records it on every session; a
   `databaseHooks.session.create.before` hook sets `ipAddress` to null and keeps the user agent.
+- **Better Auth's collections are indexed at startup.** Its Mongo adapter only creates indexes a plugin schema
+  declares, and none does, so `user`, `session`, `account` and `verification` would have only `_id` and every session
+  check would scan `session`. [`AuthIndexes`](src/auth/auth-indexes.ts) creates, on every API start, the indexes
+  behind the adapter's lookups: `session.token` (unique), `session.userId`, `user.email` (unique), `account.userId`,
+  `account.{providerId, accountId}` (social sign-in) and `verification.identifier`, plus TTL indexes on
+  `session.expiresAt` and `verification.expiresAt`, because Better Auth deletes an expired session only when its
+  cookie comes back. They use Better Auth's own index names (`<table>_<fields>_<idx|uidx>`, `_ttl` for the TTLs). The
+  worker doesn't create them: it never reads these collections through Better Auth.
 
 ## API
 
@@ -302,7 +310,7 @@ key; 2x0000000000000000000000000000000AA always fails.
 ## Tests
 
 ```bash
-npm test          # unit: quota, network quota, job lifecycle, pipeline, verification, client IP (real MongoDB via mongodb-memory-server)
+npm test          # unit: quota, network quota, job lifecycle, pipeline, verification, client IP, Better Auth indexes (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
 npm run test:auth # after a build: sign-up, verification, reset, deletion, anonymous linking and rate limits against the real Better Auth
 ```
@@ -421,6 +429,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge
   deletes adopted uploads before the account's own prefix. The purge must stay in `deleteUser.beforeDelete`: the
   anonymous plugin deletes a linked anonymous user through the internal adapter, which skips it.
+- **A Better Auth index that can't be built is logged, not fatal.** Without it the API works as it did before, only
+  slower and keeping expired rows; failing the start would stop every new instance, and Cloud Run starts one on every
+  cold start, so one bad row (a duplicate email) would take the API down until the data was fixed. Each index is
+  created on its own, and the log names the index and MongoDB's error code, never the message, which quotes the
+  duplicate value. Declaring the indexes through a Better Auth plugin schema was rejected: its adapter can't create
+  a TTL, and it creates indexes before each write, so a failed unique index would fail every sign-up and sign-in.
 - **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
   Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to

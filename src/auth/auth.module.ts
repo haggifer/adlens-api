@@ -8,6 +8,7 @@ import { AccountModule } from '../account/account.module'
 import type { Env } from '../config/env'
 import { MailModule } from '../mail/mail.module'
 import { Mailer } from '../mail/mailer'
+import { AuthIndexes } from './auth-indexes'
 import { AUTH, createAuth } from './auth.instance'
 import { AuthService } from './auth.service'
 import { SessionGuard } from './session.guard'
@@ -52,6 +53,7 @@ import { toSocialProviders } from './social-providers'
                 })
             },
         },
+        AuthIndexes,
         AuthService,
         SessionGuard,
     ],

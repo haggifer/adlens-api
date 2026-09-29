@@ -755,3 +755,18 @@ test('anonymous sign-in is limited to 10 an hour per client', async () => {
     // An hour, not Better Auth's 10-second window for sign-in paths.
     assert.ok(retryAfter > HOUR_S - 60 && retryAfter <= HOUR_S, `retry after ${retryAfter}s`)
 })
+
+test("every flow above ran with Better Auth's collections indexed, unique emails and session tokens included", async () => {
+    const { AUTH_INDEXES } = require('../dist/auth/auth-indexes')
+    const names = await withDb(async (db) => {
+        const lists = await Promise.all(
+            ['session', 'user', 'account', 'verification'].map((name) => db.collection(name).indexes()),
+        )
+
+        return lists.flat().map((index) => index.name)
+    })
+
+    for (const { index } of AUTH_INDEXES) {
+        assert.ok(names.includes(index.name), index.name)
+    }
+})

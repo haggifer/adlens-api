@@ -7,6 +7,7 @@ import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
 import { AnalysisDispatcher } from '../src/analysis/dispatch/analysis-dispatcher'
 import { AppModule } from '../src/app.module'
+import { AUTH_INDEXES } from '../src/auth/auth-indexes'
 import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
 import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
@@ -123,6 +124,16 @@ describe('Jobs API (e2e)', () => {
         const res = await request(app.getHttpServer()).get('/v1/jobs').expect(401)
 
         expect(res.body.errorCode).toBe(RequestErrorCode.Unauthenticated)
+    })
+
+    it('indexes Better Auth’s collections when the app starts', async () => {
+        const connection = app.get<Connection>(getConnectionToken())
+
+        for (const { collection, index } of AUTH_INDEXES) {
+            const indexes = await connection.collection(collection).indexes()
+
+            expect(indexes.map((existing) => existing.name)).toContain(index.name)
+        }
     })
 
     it('rejects bodies outside the contract', async () => {

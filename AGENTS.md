@@ -29,6 +29,9 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 - Better Auth resolves the address itself for its rate limits and sessions. Keep its counters in
   `createRateLimitStorage` (HMAC keys, TTL-deleted), never `rateLimit.storage: 'database'` (raw `<ip>|<path>` keys,
   never deleted), and keep the `session.create.before` hook that sets `ipAddress` to null.
+- Better Auth's collections get their indexes only from `AUTH_INDEXES` in `src/auth/auth-indexes.ts` (its adapter
+  creates none), created on API start and logged, never fatal, on failure. Keep Better Auth's index names, and never
+  log a MongoDB error message there: a duplicate-key message quotes the value, an email address.
 - An account's purge runs in Better Auth's `user.deleteUser.beforeDelete`, never in `databaseHooks.user.delete`: the
   anonymous plugin deletes a linked anonymous user through the internal adapter after its jobs moved to the account,
   and their videos still sit under the anonymous user's prefix.
@@ -67,3 +70,5 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 - With `ANALYZE_LOCAL=1` the API spawns `node dist/worker`, so `dist/` must be built.
 - The e2e suite sets `BETTER_AUTH_SECRET` in `test/global-setup.ts`: the network key is derived from it. It fakes the
   Turnstile verifier (`'pass'` passes), and `X-Forwarded-For` picks each test's network.
+- A Better Auth index that fails to build only logs `could not create the Better Auth index <name>` at startup. After
+  a deploy that adds one, check the logs, or `getIndexes()` in Atlas.
