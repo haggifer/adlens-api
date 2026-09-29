@@ -1,6 +1,8 @@
 // The email/password and anonymous flows against the real Better Auth (which Jest can't load as ESM), on the built
-// app with an in-memory MongoDB replica set (Better Auth uses transactions). Emails are captured instead of sent;
-// storage is faked. Run after a build: npm run test:auth
+// app with an in-memory MongoDB replica set (Better Auth uses transactions). Emails are captured instead of sent, and
+// they are captured before the response (auth.instance.ts sends them in an after hook), so no test waits for one.
+// Storage is faked. The tests share one app and run in order.
+// Run after a build: npm run test:auth
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { after, before, test } from 'node:test'
@@ -33,7 +35,6 @@ const cookieOf = (res) =>
 const post = (path, body, cookie) =>
     fetch(API + path, { method: 'POST', headers: headers(cookie), body: JSON.stringify(body), redirect: 'manual' })
 const linkIn = (message) => new URL(message.text.match(/https?:\/\/\S+/)[0])
-const settle = () => new Promise((resolve) => setTimeout(resolve, 300))
 const lastMailTo = (email) => outbox.findLast((message) => message.to === email)
 const run = (id) => ({ id, startedAt: new Date(), jobId: `job-${id}` })
 
@@ -156,7 +157,6 @@ test('sign-up sends a verification email and creates no session yet', async () =
         password: 'first-password',
     })
 
-    await settle()
     assert.equal(res.status, 200)
     assert.ok(!cookieOf(res).includes('session_token'))
     assert.equal(outbox.length, 1)
@@ -193,7 +193,6 @@ test('a password reset works through the emailed link and revokes existing sessi
     outbox.length = 0
 
     await post('/api/auth/request-password-reset', { email: EMAIL })
-    await settle()
 
     const link = linkIn(outbox[0])
     const reset = await post('/api/auth/reset-password', {
@@ -211,32 +210,21 @@ test('a password reset works through the emailed link and revokes existing sessi
 })
 
 test("update-user can't set isAdmin or grant quota runs", async () => {
-    // isAdmin is declared with `input: false`, so Better Auth rejects the whole request (400
-    // FIELD_NOT_ALLOWED) rather than silently dropping it; `runs` isn't a Better Auth field at all,
-    // so it's never written either way. The name change in the same body is proof the write didn't
-    // partially apply.
-    const { MongoClient } = require('mongodb')
-
+    // Better Auth refuses the whole body because isAdmin has `input: false`; the name change in the same body shows
+    // nothing was partly written. `runs` isn't a Better Auth field, so it could never be written through it.
     const res = await post(
         '/api/auth/update-user',
         { name: 'Flow Updated', isAdmin: true, runs: [{ id: 'x', startedAt: new Date().toISOString(), jobId: 'x' }] },
         freshSession,
     )
     const body = await res.json()
+    const user = await withDb((db) => db.collection('user').findOne({ email: EMAIL }))
 
-    const client = await MongoClient.connect(mongo.getUri())
-
-    try {
-        const user = await client.db().collection('user').findOne({ email: EMAIL })
-
-        assert.equal(res.status, 400)
-        assert.equal(body.code, 'FIELD_NOT_ALLOWED')
-        assert.notEqual(user?.name, 'Flow Updated')
-        assert.notEqual(user?.isAdmin, true)
-        assert.equal(user?.runs, undefined)
-    } finally {
-        await client.close()
-    }
+    assert.equal(res.status, 400)
+    assert.equal(body.code, 'FIELD_NOT_ALLOWED')
+    assert.notEqual(user.name, 'Flow Updated')
+    assert.notEqual(user.isAdmin, true)
+    assert.equal(user.runs, undefined)
 })
 
 test("deleting the account purges the user's stored files and blocks sign-in", async () => {
@@ -287,20 +275,19 @@ test('a password reset request fails with EMAIL_NOT_SENT when the email cannot b
 })
 
 test('no one can make themselves an admin at sign-up', async () => {
-    const { MongoClient } = require('mongodb')
     const email = 'wannabe-admin@example.com'
+    const res = await post('/api/auth/sign-up/email', {
+        name: 'Wannabe',
+        email,
+        password: 'first-password',
+        isAdmin: true,
+    })
+    const user = await withDb((db) => db.collection('user').findOne({ email }))
 
-    await post('/api/auth/sign-up/email', { name: 'Wannabe', email, password: 'first-password', isAdmin: true })
-
-    const client = await MongoClient.connect(mongo.getUri())
-
-    try {
-        const user = await client.db().collection('user').findOne({ email })
-
-        assert.notEqual(user?.isAdmin, true)
-    } finally {
-        await client.close()
-    }
+    // Sign-up drops the field rather than refusing the request, so the user exists and must not be an admin.
+    assert.equal(res.status, 200)
+    assert.ok(user)
+    assert.equal(user.isAdmin, false)
 })
 
 const startSocialSignIn = async (provider, callbackURL) => {
@@ -340,7 +327,6 @@ test('social sign-in refuses to return to a site other than the web app', async 
 })
 
 test("a Google or GitHub account is stored without the provider's tokens", async () => {
-    const { MongoClient } = require('mongodb')
     const context = await auth.$context
     const user = await context.internalAdapter.createUser({
         email: 'tokens@example.com',
@@ -358,10 +344,8 @@ test("a Google or GitHub account is stored without the provider's tokens", async
         accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000),
     })
 
-    const client = await MongoClient.connect(mongo.getUri())
-    const stored = await client.db().collection('account').findOne({ accountId: 'google-account-1' })
+    const stored = await withDb((db) => db.collection('account').findOne({ accountId: 'google-account-1' }))
 
-    await client.close()
     assert.equal(stored.providerId, 'google')
     assert.equal(stored.accessToken ?? null, null)
     assert.equal(stored.refreshToken ?? null, null)
@@ -389,7 +373,6 @@ test('an anonymous user never gets email, even when asking for a confirmation li
     const sentBefore = outbox.length
     const res = await post('/api/auth/send-verification-email', { email: anonymous.user.email }, anonymous.cookie)
 
-    await settle()
     assert.equal(res.status, 200)
     assert.equal(outbox.length, sentBefore)
 })
@@ -439,8 +422,6 @@ test('confirming a sign-up in the same browser moves the anonymous history to th
         anonymous.cookie,
     )
 
-    await settle()
-
     const beforeConfirming = await withDb((db) =>
         db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
     )
@@ -484,7 +465,6 @@ test('signing in from an anonymous session merges its runs into the existing acc
     const email = 'returning@example.com'
 
     await post('/api/auth/sign-up/email', { name: 'Returning', email, password: 'first-password' })
-    await settle()
     await confirmEmail(email)
 
     const anonymous = await signInAnonymously()
@@ -525,7 +505,6 @@ test('a verification link for a different email, opened with an anonymous cookie
     // The attacker signs up with their own address, then mails that confirmation link to the victim instead of
     // opening it themselves. The victim opens it while still holding their own anonymous session cookie.
     await post('/api/auth/sign-up/email', { name: 'Attacker', email: attackerEmail, password: 'first-password' })
-    await settle()
 
     const opened = await confirmEmail(attackerEmail, victim.cookie)
     const body = await opened.json()
@@ -563,7 +542,6 @@ test('a failed move leaves the anonymous user and its data in place', async () =
     })
 
     await post('/api/auth/sign-up/email', { name: 'Unlucky Link', email, password: 'first-password' }, anonymous.cookie)
-    await settle()
 
     isAdoptDown = true
 
