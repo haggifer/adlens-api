@@ -1,69 +1,84 @@
 {
     "meta": {
         "rulesetId": "adlens-rules",
-        "version": "1.1.0",
-        "generatedAt": "2026-09-23"
+        "version": "1.2.0",
+        "generatedAt": "2026-09-29"
     },
     "sources": {
         "META_AD_STANDARDS": {
             "baseUrl": "https://transparency.meta.com/en-us/policies/ad-standards",
             "label": "Meta Advertising Standards",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "GOOGLE_ADS_POLICY": {
             "baseUrl": "https://support.google.com/adspolicy",
             "label": "Google Ads Policies",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "YOUTUBE_ADS_POLICY": {
             "baseUrl": "https://support.google.com/youtube",
             "label": "YouTube Advertising Policies",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "TIKTOK_AD_POLICY": {
             "baseUrl": "https://ads.tiktok.com/help/article",
             "label": "TikTok Advertising Policies",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "SNAPCHAT": {
             "baseUrl": "https://snap.com/en-US/ad-policies",
             "label": "Snapchat Advertising Policies",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "PINTEREST": {
             "baseUrl": "https://policy.pinterest.com/en/advertising-guidelines",
             "label": "Pinterest Advertising Guidelines",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "LINKEDIN": {
             "baseUrl": "https://www.linkedin.com/legal/ads-policy",
             "label": "LinkedIn Advertising Policies",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "AMAZON": {
             "baseUrl": "https://advertising.amazon.com",
             "label": "Amazon Ads Policies & Creative Specs",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "FTC": {
             "baseUrl": "https://www.ftc.gov",
             "label": "US FTC Advertising & Endorsement Guidance",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "ASA": {
             "baseUrl": "https://www.asa.org.uk",
             "label": "ASA / CAP Code (UK)",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "EASA": {
             "baseUrl": "https://www.easa-alliance.org",
             "label": "European Advertising Standards Alliance",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
         },
         "GOOGLE_ABCD": {
             "baseUrl": "https://support.google.com/google-ads/answer/14783551",
             "label": "Google ABCD Framework for Effective Video",
-            "fetchedAt": "2026-09-11"
+            "fetchedAt": "2026-09-29"
+        },
+        "GOOGLE_ADS_HELP": {
+            "baseUrl": "https://support.google.com/google-ads",
+            "label": "Google Ads Help",
+            "fetchedAt": "2026-09-29"
+        },
+        "LINKEDIN_HELP": {
+            "baseUrl": "https://www.linkedin.com/help/lms/answer",
+            "label": "LinkedIn Ads Help: policy details",
+            "fetchedAt": "2026-09-29"
+        },
+        "EUR_LEX": {
+            "baseUrl": "https://eur-lex.europa.eu",
+            "label": "EUR-Lex (EU law)",
+            "fetchedAt": "2026-09-29"
         }
     },
     "rules": [
@@ -299,10 +314,10 @@
             "topic": "prohibited:weapons",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Do not advertise weapons as a product.",
+            "check": "Do not advertise weapons, their parts or accessories (e.g. guns, knives), or products resembling realistic weapons.",
             "severity": "blocker",
-            "quote": "Weapons (as product)",
-            "ref": "{{AMAZON}}/resources/ad-policy/quick-reference#:~:text=Weapons%20%28as%20product%29"
+            "quote": "Weapons, including parts or accessories, such as: Guns, knives, and associated accessories (some knives are permitted, review Outdoor recreational weapons).",
+            "ref": "{{AMAZON}}/help/GZS8A5XCFQJTS88N#:~:text=Weapons%2C%20including%20parts%20or%20accessories"
         },
         {
             "id": "amazon.restricted.alcohol",
@@ -311,12 +326,12 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "restricted:alcohol",
-            "modality": "visual",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not advertise alcohol as a product in US, India, UAE, or China; elsewhere follow guidelines.",
+            "check": "If the ad promotes alcohol (or a non-alcoholic drink sharing an alcohol brand), flag if it shows dangerous behaviour while drinking or irresponsible or excessive consumption, or features models who are or appear to be under 25.",
             "severity": "blocker",
-            "quote": "Prohibited in US, India, UAE, and China; all other locations permitted within guidelines.",
-            "ref": "{{AMAZON}}/resources/ad-policy/quick-reference#:~:text=Prohibited%20in%20US%2C%20India%2C%20UAE%2C%20and%20China"
+            "quote": "Ads must not feature or promote dangerous behavior while drinking, or irresponsible or excessive consumption.",
+            "ref": "{{AMAZON}}/help/G2MMCHZDCTW37V39#:~:text=Ads%20must%20not%20feature%20or%20promote%20dangerous%20behavior"
         },
         {
             "id": "amazon.prohibited.profanity",
@@ -325,26 +340,26 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "prohibited:profanity",
-            "modality": "text",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not use foul, vulgar, or obscene language.",
+            "check": "Do not use uncensored profanity, uncensored sexually explicit language, or gratuitously offensive language in speech or on-screen text.",
             "severity": "blocker",
-            "quote": "Foul, vulgar, or obscene language",
-            "ref": "{{AMAZON}}/resources/ad-policy/quick-reference#:~:text=Foul%2C%20vulgar%2C%20or%20obscene%20language"
+            "quote": "Uncensored profanity, uncensored sexually explicit language, and gratuitously offensive language.",
+            "ref": "{{AMAZON}}/help/GRW23T7LB4MFMBXQ#:~:text=Uncensored%20profanity"
         },
         {
-            "id": "amazon.restricted.political",
+            "id": "amazon.prohibited.political",
             "platform": ["Amazon"],
             "region": "global",
             "scope": "compliance",
             "appliesTo": "all",
-            "topic": "restricted:political",
-            "modality": "text",
+            "topic": "prohibited:political",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not include controversial social or political content.",
+            "check": "Do not include political ads (for or against a politician, party, election or active legislation) or content that revolves around highly debated social topics.",
             "severity": "blocker",
-            "quote": "Controversial social or political content",
-            "ref": "{{AMAZON}}/resources/ad-policy/quick-reference#:~:text=Controversial%20social%20or%20political%20content"
+            "quote": "Content that revolves around highly debated social topics.",
+            "ref": "{{AMAZON}}/help/GRW23T7LB4MFMBXQ#:~:text=highly%20debated%20social%20topics"
         },
         {
             "id": "amazon.deceptive.misleading",
@@ -353,26 +368,12 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "deceptive:misleading",
-            "modality": "text",
-            "checkType": "judgment",
-            "check": "Ads and claims must be truthful and accurate.",
-            "severity": "blocker",
-            "quote": "Your ads must be truthful and accurate, and that goes especially for any claims you make.",
-            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Your%20ads%20must%20be%20truthful%20and%20accurate"
-        },
-        {
-            "id": "amazon.general.standards",
-            "platform": ["Amazon"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "all",
-            "topic": "general:standards",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Creative must be suitable for a general audience.",
+            "check": "Flag claims the video itself presents as fact that look false or unsupported: superiority claims (best, #1, better than) with no visible substantiation, guarantees or results that look implausible, or photorealistic AI or deepfake content that misrepresents the product or real people.",
             "severity": "warning",
-            "quote": "Be suitable for a general audience",
-            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Be%20suitable%20for%20a%20general%20audience"
+            "quote": "Your ads must be truthful and accurate, and that goes especially for any claims you make.",
+            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Your%20ads%20must%20be%20truthful%20and%20accurate"
         },
         {
             "id": "amazon.harm.offence",
@@ -383,10 +384,10 @@
             "topic": "harm:offence",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not include content that is inappropriate, dangerous, offensive, or illegal.",
+            "check": "Do not include hate speech or discriminatory or harassing content; gratuitous violence, blood or gore; people shown under the influence of drugs or alcohol; realistic depictions of bodily fluids; content exploiting disasters, mass-casualty events or sensitive life events; content that appeals directly to children; or content promoting covert surveillance of a person.",
             "severity": "blocker",
-            "quote": "Prohibited content includes content that's inappropriate, dangerous, offensive, illegal, or violates our editorial guidelines.",
-            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Prohibited%20content%20includes"
+            "quote": "Hate speech or offensive, intolerant, discriminatory, or harassing content.",
+            "ref": "{{AMAZON}}/help/GRW23T7LB4MFMBXQ#:~:text=Hate%20speech%20or%20offensive"
         },
         {
             "id": "asa.deceptive.materially_mislead",
@@ -397,8 +398,8 @@
             "topic": "deceptive:misleading",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure the ad does not materially mislead or is not likely to mislead consumers.",
-            "severity": "blocker",
+            "check": "Flag only a specific statement or image in the ad that is plainly false or would mislead the average viewer about a material fact (e.g. 'risk-free', 'guaranteed profit', a price or result contradicted elsewhere in the ad). Do not fail on product category or on what the ad leaves unsaid.",
+            "severity": "warning",
             "quote": "Marketing communications must not materially mislead or be likely to do so",
             "ref": "{{ASA}}/advice-online/misleading-advertising.html"
         },
@@ -411,8 +412,8 @@
             "topic": "deceptive:misleading",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure the ad does not omit material information consumers need to make an informed decision.",
-            "severity": "blocker",
+            "check": "If the ad states a price, offer, investment return or result, flag it when a condition that obviously changes its meaning (e.g. a risk warning for an investment, a subscription commitment, mandatory fees) is absent, or shown too briefly or too small to read. Allow for the time limits of a short video: do not flag general brevity or missing detail that does not change the meaning of the claim.",
+            "severity": "warning",
             "quote": "marketing communications must not omit material information or information required to be included by law",
             "ref": "{{ASA}}/advice-online/misleading-advertising.html"
         },
@@ -423,10 +424,10 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "claims:unsubstantiated",
-            "modality": "audiovisual",
+            "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Ensure objective claims are backed by documentary evidence held before publication.",
-            "severity": "blocker",
+            "check": "Hold documentary evidence, before publishing, for every objective claim the ad makes (figures, percentages, 'clinically proven', '#1', comparisons, 'best').",
+            "severity": "info",
             "quote": "marketers must hold documentary evidence to prove claims that consumers are likely to regard as objective and that are capable of objective substantiation",
             "ref": "{{ASA}}/advice-online/substantiation.html"
         },
@@ -439,7 +440,7 @@
             "topic": "deceptive:misleading",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure the ad does not exaggerate the capability or performance of the product.",
+            "check": "Flag claims about what the product can do or achieve that the average viewer would take literally and that look implausible or overstated (e.g. a specific result, speed or effect). Obvious puffery no one takes literally ('the best coffee in the world') is allowed.",
             "severity": "warning",
             "quote": "Marketing communications must not mislead consumers by exaggerating the capability or performance of a product",
             "ref": "{{ASA}}/advice-online/exaggeration.html"
@@ -453,8 +454,8 @@
             "topic": "harm:gender_stereotype",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure the ad does not include gender stereotypes likely to cause harm or serious or widespread offence.",
-            "severity": "blocker",
+            "check": "Flag gender stereotypes likely to cause harm or serious or widespread offence, e.g. mocking someone for not conforming to a gender stereotype, showing a person failing at a task because of their gender, or linking an outcome to gender.",
+            "severity": "warning",
             "quote": "must not include gender stereotypes that are likely to cause harm, or serious or widespread offence",
             "ref": "{{ASA}}/advice-online/harm-and-offence-gender-stereotypes.html"
         },
@@ -467,8 +468,8 @@
             "topic": "harm:offence",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure the ad contains nothing likely to cause serious or widespread offence.",
-            "severity": "blocker",
+            "check": "Flag content likely to cause serious or widespread offence, judged for a general, untargeted online audience; name the specific element (image, word, gesture) and the group likely to be offended.",
+            "severity": "warning",
             "quote": "marketing communications must not contain anything that is likely to cause serious or widespread offence",
             "ref": "{{ASA}}/advice-online/offence-general.html"
         },
@@ -481,7 +482,7 @@
             "topic": "general:social_responsibility",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure the ad is prepared with a sense of responsibility to consumers and society.",
+            "check": "Flag only if the ad shows or encourages dangerous, illegal or anti-social behaviour, trivialises a serious risk (e.g. debt, gambling, investment loss), or exploits fear or insecurity to sell.",
             "severity": "warning",
             "quote": "All marketing communications should be prepared with a sense of responsibility to consumers and society",
             "ref": "{{ASA}}/advice-online/social-responsibility.html"
@@ -495,9 +496,9 @@
             "topic": "claims:environmental",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Ensure environmental claims are based on the product's full life cycle unless the ad states otherwise.",
+            "check": "Flag absolute or general green claims ('eco-friendly', 'sustainable', 'green', 'carbon neutral', 'good for the planet') shown or said without a visible qualification of what they refer to (e.g. 'packaging made from 50% recycled plastic').",
             "severity": "warning",
-            "quote": "Marketers must base environmental claims on the full life cycle of the advertised product, unless the marketing communication states otherwise",
+            "quote": "The Code requires that the basis of environmental claims must be clear, and unqualified claims could mislead if they omit material information",
             "ref": "{{ASA}}/advice-online/environmental-claims-general-green-claims.html"
         },
         {
@@ -509,8 +510,8 @@
             "topic": "deceptive:before_after",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Ensure before-and-after imagery is genuine, unmanipulated, and does not mislead about product efficacy.",
-            "severity": "blocker",
+            "check": "Flag before/after or transformation imagery (labelled or implied) that shows visible signs of manipulation: changed lighting, pose, make-up, filters or retouching between shots, or a result far beyond what the product could plausibly do. A disclaimer does not cure it.",
+            "severity": "warning",
             "quote": "Marketers do not have to label photographs explicitly as 'before' and 'after' to mislead readers about the effect of the product, and these are likely to be considered implied efficacy claims",
             "ref": "{{ASA}}/advice-online/before-and-after-photos.html"
         },
@@ -537,24 +538,10 @@
             "topic": "restricted:children",
             "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Ensure HFSS food or drink ads are not directed at under-16s through media selection or placement context.",
+            "check": "If the ad is for an HFSS food or soft drink, confirm it is not placed in media or contexts directed at under-16s (no medium where more than 25% of the audience is under 16).",
             "severity": "blocker",
-            "quote": "Ads for food or soft drink products that are high in fat, salt or sugar (HFSS) must not be directed at individuals under 16 through the selection of media or the context in which they appear",
-            "ref": "{{ASA}}/advice-online/children-food.html"
-        },
-        {
-            "id": "easa.general.legal_decent_honest_truthful",
-            "platform": ["all"],
-            "region": "EU",
-            "scope": "compliance",
-            "appliesTo": "all",
-            "topic": "general:standards",
-            "modality": "audiovisual",
-            "checkType": "judgment",
-            "check": "Ensure the ad content is legal, decent, honest and truthful.",
-            "severity": "warning",
-            "quote": "Advertising is legal, decent, honest and truthful",
-            "ref": "{{EASA}}/about-ad-standards/the-benefits/"
+            "quote": "HFSS product advertisements must not be directed at people under 16 through the selection of media or the context in which they appear",
+            "ref": "{{ASA}}/type/non_broadcast/code_section/15.html"
         },
         {
             "id": "easa.general.social_responsibility",
@@ -565,7 +552,7 @@
             "topic": "general:social_responsibility",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Prepare the ad with a due sense of social responsibility.",
+            "check": "Flag only if the ad shows or encourages dangerous, illegal or anti-social behaviour, trivialises a serious risk (e.g. debt, gambling, investment loss), or exploits fear or insecurity to sell.",
             "severity": "info",
             "quote": "Ads are prepared with a due sense of social responsibility",
             "ref": "{{EASA}}/about-ad-standards/the-benefits/"
@@ -577,12 +564,12 @@
             "scope": "compliance",
             "appliesTo": "video",
             "topic": "disclosure:paid_partnership",
-            "modality": "text",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Clearly disclose influencer marketing content so it is recognisable as advertising.",
+            "check": "If the video is creator/influencer-style content promoting a brand, flag when no clear disclosure ('ad', 'advertising', 'paid partnership') is visible or audible early in the video.",
             "severity": "warning",
-            "quote": "recognisability and disclosure, the responsibility of stakeholders and awareness-raising",
-            "ref": "{{EASA}}/issues/influencer-marketing/"
+            "quote": "covers rules for transparency and disclosure focusing on the prominence, location, and moment such disclosure is needed",
+            "ref": "{{EASA}}/publications/best-practice-recommendation-on-influencer-marketing-guidance_v2023/"
         },
         {
             "id": "easa.claims.environmental_substantiated",
@@ -591,10 +578,10 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "claims:environmental",
-            "modality": "audiovisual",
+            "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Ensure environmental claims are credible and can be substantiated if challenged.",
-            "severity": "warning",
+            "check": "Hold evidence for every environmental claim in the ad, and confirm any sustainability label is certified.",
+            "severity": "info",
             "quote": "environmental claims are credible to consumers and can be backed up if they are challenged",
             "ref": "{{EASA}}/issues/green-claims/"
         },
@@ -619,9 +606,9 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "disclosure:material_connection",
-            "modality": "text",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Disclose any financial, employment, personal, or family relationship with the advertised brand.",
+            "check": "If a person in the video endorses the product as an independent user, reviewer, expert or creator (not obviously the brand speaking), flag when no disclosure of the paid, gifted, employee or family connection ('ad', 'sponsored', 'paid partnership', 'I was paid/gifted') is visible or audible in the video; a disclosure only in the caption or description does not count. Skip ads that are plainly the brand's own ad.",
             "severity": "warning",
             "quote": "Disclose when you have any financial, employment, personal, or family relationship with a brand.",
             "ref": "{{FTC}}/business-guidance/resources/disclosures-101-social-media-influencers"
@@ -633,67 +620,11 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "disclosure:endorsement",
-            "modality": "text",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Place the disclosure with the endorsement so it is hard to miss.",
+            "check": "When the video contains an endorsement disclosure, flag it if it is not with the endorsement, appears only at the end, is on screen too briefly or too small/low-contrast to read, is spoken too fast or too quietly to understand, or does not match how the endorsement is made (a spoken endorsement needs at least a spoken disclosure, an on-screen one at least an on-screen disclosure).",
             "severity": "warning",
             "quote": "Place it so it's hard to miss. The disclosure should be placed with the endorsement message itself.",
-            "ref": "{{FTC}}/business-guidance/resources/disclosures-101-social-media-influencers"
-        },
-        {
-            "id": "ftc.disclosure.in_video",
-            "platform": ["all"],
-            "region": "US",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "disclosure:endorsement",
-            "modality": "text",
-            "checkType": "judgment",
-            "check": "Place the disclosure inside the video, not only in the uploaded description.",
-            "severity": "warning",
-            "quote": "If making an endorsement in a video, the disclosure should be in the video and not just in the description uploaded with the video.",
-            "ref": "{{FTC}}/business-guidance/resources/disclosures-101-social-media-influencers"
-        },
-        {
-            "id": "ftc.disclosure.audiovisual",
-            "platform": ["all"],
-            "region": "US",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "disclosure:material_connection",
-            "modality": "audiovisual",
-            "checkType": "judgment",
-            "check": "Present the disclosure both audibly and visually in the video.",
-            "severity": "info",
-            "quote": "Viewers are more likely to notice disclosures made in both audio and video.",
-            "ref": "{{FTC}}/business-guidance/resources/disclosures-101-social-media-influencers"
-        },
-        {
-            "id": "ftc.disclosure.match_modality",
-            "platform": ["all"],
-            "region": "US",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "disclosure:endorsement",
-            "modality": "audiovisual",
-            "checkType": "judgment",
-            "check": "Match disclosure modality to the endorsement: visual endorsement gets a visual disclosure, audible gets an audible one.",
-            "severity": "warning",
-            "quote": "if the endorsement is made through visual means, the disclosure should be made at least visually. If the representation is made audibly, the disclosure should be made at least audibly.",
-            "ref": "{{FTC}}/business-guidance/resources/ftcs-endorsement-guides-what-people-are-asking"
-        },
-        {
-            "id": "ftc.deceptive.honest_opinion",
-            "platform": ["all"],
-            "region": "US",
-            "scope": "compliance",
-            "appliesTo": "all",
-            "topic": "deceptive:misleading",
-            "modality": "text",
-            "checkType": "judgment",
-            "check": "Ensure endorsements reflect the endorser's honest, accurate experience and opinion.",
-            "severity": "warning",
-            "quote": "If you're paid to talk about a product and thought it was terrible, you can't say it's terrific.",
             "ref": "{{FTC}}/business-guidance/resources/disclosures-101-social-media-influencers"
         },
         {
@@ -703,10 +634,10 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "deceptive:misleading",
-            "modality": "text",
+            "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Do not misrepresent experience with or opinions about a product in an endorsement.",
-            "severity": "warning",
+            "check": "Confirm every endorser in the ad actually used the product and that the endorsement reflects their real experience and opinion.",
+            "severity": "info",
             "quote": "an endorsement has to represent the accurate experience and opinion of the endorser",
             "ref": "{{FTC}}/business-guidance/resources/ftcs-endorsement-guides-what-people-are-asking"
         },
@@ -717,10 +648,10 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "claims:unsubstantiated",
-            "modality": "text",
+            "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Back objective product claims with adequate evidence before making them.",
-            "severity": "warning",
+            "check": "Hold documentary evidence, before publishing, for every objective claim the ad makes (figures, percentages, 'clinically proven', '#1', comparisons, 'best'); health and safety claims may need scientific evidence.",
+            "severity": "info",
             "quote": "ad must be truthful, not misleading, and, when appropriate, backed by scientific evidence",
             "ref": "{{FTC}}/news-events/topics/truth-advertising"
         },
@@ -733,7 +664,7 @@
             "topic": "ip:trademark",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Flag video creative that depicts or promotes counterfeit goods bearing a trademark or logo identical to or substantially indistinguishable from another brand's.",
+            "check": "Flag video that offers another brand's products described as replica, knock-off, imitation, clone, faux, fake, '1:1' or mirror copies, or otherwise presents non-genuine goods bearing another brand's logo as genuine. Showing a branded product alone is not a violation.",
             "severity": "blocker",
             "quote": "Counterfeit goods are products that contain a trademark or logo that is identical to or substantially indistinguishable from the trademark of another.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/176017"
@@ -747,7 +678,7 @@
             "topic": "prohibited:drugs",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video promoting recreational drugs or substances that alter mental state or induce highs.",
+            "check": "Flag video promoting substances that alter mental state for recreation or induce highs, products marketed to facilitate recreational drug use (paraphernalia), instructions for producing, buying or using recreational drugs, or pill presses. Topical hemp CBD (0.3% THC or less) is allowed only with Google approval and only in California, Colorado and Puerto Rico: report it with verdict warning, not fail.",
             "severity": "blocker",
             "quote": "Ads for substances that alter mental state for the purpose of recreation or otherwise induce 'highs' are not allowed.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6014299"
@@ -759,9 +690,9 @@
             "scope": "compliance",
             "appliesTo": "video",
             "topic": "prohibited:weapons",
-            "modality": "visual",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video depicting or promoting guns, gun parts, or functional devices that appear to discharge a projectile at high velocity.",
+            "check": "Flag video promoting guns or other functional devices that discharge a projectile at high velocity, parts or components essential to or enhancing a gun's function, or instructions to assemble or enhance firearms. Gun-safety products (locks, safes) are allowed, and merely showing a gun is not a violation of this rule.",
             "severity": "blocker",
             "quote": "Ads for functional devices that appear to discharge a projectile at high velocity, whether for sport, self-defense, or combat are not allowed.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6014299"
@@ -789,7 +720,7 @@
             "topic": "restricted:tobacco",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video promoting tobacco or any products containing tobacco.",
+            "check": "Flag video promoting tobacco or tobacco-containing products, their component parts or products that facilitate tobacco use, or products designed to simulate smoking (e-cigarettes, vapes, heated tobacco devices).",
             "severity": "blocker",
             "quote": "Ads for tobacco or any products containing tobacco are not allowed.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6014299"
@@ -817,7 +748,7 @@
             "topic": "prohibited:hate",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video that harasses, intimidates, or bullies, or that incites hatred against or disparages an individual or group.",
+            "check": "Flag video that harasses, intimidates or bullies, or that incites hatred against, promotes discrimination of or disparages an individual or group, including slurs and derogatory language (also misspelled or varied spellings).",
             "severity": "blocker",
             "quote": "Content that harasses, intimidates, or bullies an individual or group of individuals",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6015406"
@@ -831,7 +762,7 @@
             "topic": "prohibited:violence",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Flag video frames containing gruesome or disgusting imagery, or graphic images or accounts of physical trauma.",
+            "check": "Flag video frames containing gruesome or disgusting imagery, graphic images or accounts of physical trauma, gore or exposed internal organs (including dramatized or animated), or gratuitous portrayals of bodily fluids or waste.",
             "severity": "blocker",
             "quote": "Promotions containing violent language, gruesome or disgusting imagery, or graphic images or accounts of physical trauma.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6015406"
@@ -845,7 +776,7 @@
             "topic": "deceptive:clickbait",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video using clickbait tactics or sensationalist text or imagery to drive traffic.",
+            "check": "Flag video using clickbait tactics or sensationalist text or imagery to drive clicks, or using negative life events (death, accidents, illness, arrests, bankruptcy) to induce fear or guilt and pressure the viewer into immediate action.",
             "severity": "blocker",
             "quote": "Ads that use clickbait tactics or sensationalist text or imagery to drive traffic are not allowed.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6020955"
@@ -859,24 +790,10 @@
             "topic": "deceptive:misleading",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video making misleading statements or obscuring/omitting material information about identity, affiliations, or qualifications.",
-            "severity": "blocker",
+            "check": "Flag video that presents itself as, or implies endorsement by or affiliation with, a government body, official service, another brand or a qualified professional (e.g. official seals, 'government program', fake credentials) when the video gives no basis for it. Remind the advertiser that identity claims must be true.",
+            "severity": "warning",
             "quote": "Making misleading statements, obscuring, or omitting material information about your identity, affiliations, or qualifications is not allowed.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6020955"
-        },
-        {
-            "id": "google.prohibited.adult",
-            "platform": ["Google"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "prohibited:adult",
-            "modality": "visual",
-            "checkType": "judgment",
-            "check": "Flag video frames showing nudity or exposed intimate body parts, including blurred or censored representations.",
-            "severity": "warning",
-            "quote": "People or representations of people that display exposed intimate body parts, including representations that are blurred or censored.",
-            "ref": "{{GOOGLE_ADS_POLICY}}/answer/6023699"
         },
         {
             "id": "google.restricted.alcohol_irresponsible",
@@ -887,10 +804,10 @@
             "topic": "restricted:alcohol",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video that shows excessive drinking favorably or features binge or competition drinking.",
-            "severity": "warning",
-            "quote": "Showing excessive drinking in a favorable way, or featuring binge or competition drinking",
-            "ref": "{{GOOGLE_ADS_POLICY}}/answer/6012382"
+            "check": "Flag video that shows excessive, binge or competition drinking favorably; implies alcohol improves social, sexual, professional, intellectual or athletic standing or has health or therapeutic benefits; shows drinking while driving, operating machinery or doing tasks needing alertness or dexterity; or encourages underage drinking.",
+            "severity": "blocker",
+            "quote": "Any ad implying health or social benefits from alcohol, promoting alcohol use in dangerous situations like driving, or encouraging underage or excessive drinking will be disapproved.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/6012382#:~:text=Any%20ad%20implying%20health%20or%20social%20benefits"
         },
         {
             "id": "google.restricted.alcohol_targeting",
@@ -929,7 +846,7 @@
             "topic": "claims:health",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video health/clinical-trial claims that create misleading expectations or effects of a product being tested.",
+            "check": "If the video recruits for a clinical trial: flag promotion of prescription drugs, and any claim of expected effects or implication that the tested product is safe. Clinical trial recruitment ads are allowed only in some locations.",
             "severity": "warning",
             "quote": "Promotions may not create misleading expectations or effects of a product being tested.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/176031"
@@ -943,7 +860,7 @@
             "topic": "disclosure:ai_generated",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag election video containing synthetic or digitally altered content requiring the altered/synthetic content disclosure.",
+            "check": "If the video is an election ad (features a candidate, party, officeholder or referendum) and realistically shows a real person saying or doing something they didn't, or a realistic event that didn't happen, remind the advertiser to tick 'Altered or synthetic content' in the campaign settings. No in-video disclosure is needed for YouTube in-stream, Shorts or in-feed ads, since Google generates it.",
             "severity": "warning",
             "quote": "Advertisers must disclose all election ads that contain synthetic or digitally altered content by selecting the checkbox in the 'Altered or synthetic content' section.",
             "ref": "{{GOOGLE_ADS_POLICY}}/answer/6014595"
@@ -969,12 +886,12 @@
             "scope": "compliance",
             "appliesTo": "video",
             "topic": "restricted:gambling",
-            "modality": "audiovisual",
+            "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Flag social casino game video lacking a disclaimer that it is only intended for users over legal gambling age.",
-            "severity": "warning",
+            "check": "Advisory: social casino game ads need Google's Social casino games certification for Group 1 or Group 2 countries; the game itself must carry an over-legal-gambling-age disclaimer and state that it offers no real-money gambling or prizes of real-world value; in-app purchases must be disclosed in the ad or on the landing page.",
+            "severity": "info",
             "quote": "Games must include a disclaimer that they are only intended for users over legal gambling age",
-            "ref": "{{GOOGLE_ADS_POLICY}}/answer/15132179"
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/15132179#:~:text=Games%20must%20include%20a%20disclaimer"
         },
         {
             "id": "google.restricted.crypto",
@@ -985,10 +902,10 @@
             "topic": "restricted:crypto",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video promoting initial coin offerings, DeFi trading protocols, or the purchase, sale, or trade of cryptocurrencies.",
-            "severity": "blocker",
-            "quote": "Ads promoting initial coin offerings, DeFi trading protocols, or the purchase, sale, or trade of cryptocurrencies or related products are not allowed.",
-            "ref": "{{GOOGLE_ADS_POLICY}}/answer/14009787"
+            "check": "Flag video promoting a cryptocurrency exchange, a software or hardware crypto wallet, or a crypto coin trust. These are allowed, not prohibited: report the ad as needing Google's Cryptocurrencies certification and a local licence (e.g. MiCA authorisation in the EU) in the targeted countries.",
+            "severity": "warning",
+            "quote": "The following cryptocurrency products and services can only be promoted in your ads if you’ve applied and been approved to advertise Cryptocurrencies and related products.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/14009787#:~:text=can%20only%20be%20promoted%20in%20your%20ads"
         },
         {
             "id": "linkedin.prohibited.illegal",
@@ -1061,27 +978,27 @@
             "ref": "{{LINKEDIN}}/#:~:text=offensive%20to%20good%20taste"
         },
         {
-            "id": "linkedin.restricted.tobacco",
+            "id": "linkedin.prohibited.tobacco",
             "platform": ["LinkedIn"],
             "region": "global",
             "scope": "compliance",
             "appliesTo": "all",
-            "topic": "restricted:tobacco",
-            "modality": "visual",
+            "topic": "prohibited:tobacco",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not advertise tobacco products.",
+            "check": "Do not advertise tobacco, e-cigarettes, vaporizers or tobacco-use equipment. Ads for products or services that help people quit tobacco are allowed.",
             "severity": "blocker",
             "quote": "Ads for tobacco products are prohibited.",
             "ref": "{{LINKEDIN}}/#:~:text=Ads%20for%20tobacco%20products%20are%20prohibited."
         },
         {
-            "id": "linkedin.restricted.gambling",
+            "id": "linkedin.prohibited.gambling",
             "platform": ["LinkedIn"],
             "region": "global",
             "scope": "compliance",
             "appliesTo": "all",
-            "topic": "restricted:gambling",
-            "modality": "visual",
+            "topic": "prohibited:gambling",
+            "modality": "audiovisual",
             "checkType": "judgment",
             "check": "Do not run ads for gambling or sweepstakes.",
             "severity": "blocker",
@@ -1095,23 +1012,23 @@
             "scope": "compliance",
             "appliesTo": "all",
             "topic": "restricted:financial",
-            "modality": "visual",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Restrict ads promoting financial products and services to permitted contexts.",
+            "check": "Flag (as a warning) when the ad promotes a financial product or service: loans, mortgages, credit, investments or investment advice, trading platforms or exchanges, insurance or pensions. This is a restricted category; don't fail an ad for merely being in it.",
             "severity": "warning",
             "quote": "Ads promoting financial products and services are restricted.",
             "ref": "{{LINKEDIN}}/#:~:text=Ads%20promoting%20financial%20products%20and%20services%20are%20restricted."
         },
         {
-            "id": "linkedin.restricted.political",
+            "id": "linkedin.prohibited.political",
             "platform": ["LinkedIn"],
             "region": "global",
             "scope": "compliance",
             "appliesTo": "all",
-            "topic": "restricted:political",
-            "modality": "visual",
+            "topic": "prohibited:political",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not run political ads intended to influence an election outcome.",
+            "check": "Do not run political ads: for or against a candidate, party, ballot proposition, law or regulation, election-influencing content, political fundraising, or ads exploiting a sensitive political issue even without an explicit political agenda.",
             "severity": "blocker",
             "quote": "Political ads are prohibited, including ads advocating for or against a particular candidate, party, ballot proposition, law, regulation, or otherwise intended to influence an election outcome.",
             "ref": "{{LINKEDIN}}/#:~:text=Political%20ads%20are%20prohibited"
@@ -1181,9 +1098,9 @@
             "topic": "prohibited:weapons",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Creative must not promote the sale or use of weapons, ammunition or explosives.",
+            "check": "Creative must not promote the sale or use of weapons (firearms and their parts, ammunition, paintball/BB guns, non-culinary knives, tasers, pepper spray), weapon modification accessories (silencers, scopes, weapon lights), or explosives including fireworks. Toy weapons, firearm-safety courses and materials, right-to-bear-arms advocacy, and weapons shown in a fictional context (games, films, music) with nothing offered for sale are allowed.",
             "severity": "blocker",
-            "quote": "Ads must not promote the sale or use of weapons, ammunition or explosives.",
+            "quote": "Ads must not promote the sale or use of weapons, ammunition or explosives. This includes ads for weapon modification accessories.",
             "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/weapons-ammunitions-explosives/#:~:text=Ads%20must%20not%20promote%20the%20sale%20or%20use%20of%20weapons"
         },
         {
@@ -1209,7 +1126,7 @@
             "topic": "restricted:alcohol",
             "modality": "out_of_creative",
             "checkType": "judgment",
-            "check": "Alcohol ads must not be targeted to people under 18 years of age.",
+            "check": "Alcohol ads must be targeted to at least 18+, or the higher legal age of the targeted country (e.g. US 21+, Canada 19+, Japan 20+, Sweden 25+), and must not run in countries where Meta prohibits alcohol ads (e.g. Norway, Lithuania, Russia, Turkey, Saudi Arabia, UAE).",
             "severity": "warning",
             "quote": "At a minimum, ads may not be targeted to people under 18 years of age.",
             "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/alcohol/#:~:text=may%20not%20be%20targeted%20to%20people%20under%2018"
@@ -1223,24 +1140,10 @@
             "topic": "restricted:tobacco",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Creative must not promote the sale or use of tobacco or nicotine products and related paraphernalia.",
+            "check": "Creative must not promote the sale or use of tobacco or nicotine products (including nicotine pouches), e-cigarettes or vapes (including nicotine-free or 'wellness' vapes), or related paraphernalia (rolling papers, hookahs, pipes), or promote tobacco brands. Smoking-cessation products and services and anti-smoking messaging are allowed; vapes are never allowed.",
             "severity": "blocker",
-            "quote": "Ads must not promote the sale or use of tobacco or nicotine products and related paraphernalia.",
+            "quote": "Ads must not promote the sale or use of tobacco or nicotine products and related paraphernalia. Ads must not promote Electronic Nicotine delivery devices, such as electronic cigarettes, vaporizers, or any other products that simulate smoking",
             "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/tobacco-related-products/#:~:text=Ads%20must%20not%20promote%20the%20sale%20or%20use%20of%20tobacco"
-        },
-        {
-            "id": "meta.restricted.tobacco_vape_devices",
-            "platform": ["Meta"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "restricted:tobacco",
-            "modality": "visual",
-            "checkType": "judgment",
-            "check": "Creative must not promote electronic nicotine delivery devices such as e-cigarettes or vaporizers.",
-            "severity": "blocker",
-            "quote": "Ads must not promote Electronic Nicotine delivery devices, such as electronic cigarettes, vaporizers, or any other products that simulate smoking or are otherwise designed for use with tobacco or nicotine products.",
-            "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/tobacco-related-products/#:~:text=Electronic%20Nicotine%20delivery%20devices"
         },
         {
             "id": "meta.prohibited.drugs_illicit_recreational",
@@ -1251,24 +1154,10 @@
             "topic": "prohibited:drugs",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Creative must not promote the sale or use of illicit or recreational drugs or other unsafe substances.",
+            "check": "Creative must not promote the sale or use of illicit or recreational drugs (including THC or other psychoactive cannabis products), drug paraphernalia, or other unsafe substances or supplements. Mentioning drugs for news, advocacy or awareness without promoting their use is allowed; CBD and hemp products are restricted, not prohibited.",
             "severity": "blocker",
             "quote": "Ads must not promote the sale or use of illicit or recreational drugs, or other unsafe substances, products or supplements, as determined by Meta at its sole discretion.",
             "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/drugs-pharmaceuticals/#:~:text=Ads%20must%20not%20promote%20the%20sale%20or%20use%20of%20illicit"
-        },
-        {
-            "id": "meta.prohibited.drugs_cannabis_thc",
-            "platform": ["Meta"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "prohibited:drugs",
-            "modality": "visual",
-            "checkType": "judgment",
-            "check": "Creative must not promote or offer the sale of THC or psychoactive cannabis products.",
-            "severity": "blocker",
-            "quote": "Promote or offer the sale of Tetrahydrocannabinol (THC) products or cannabis products containing related psychoactive components.",
-            "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/drugs-pharmaceuticals/"
         },
         {
             "id": "meta.restricted.gambling_depict_minors",
@@ -1377,9 +1266,9 @@
             "topic": "restricted:dating",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Dating ad creative must not use sexually suggestive emphasis.",
+            "check": "Dating ad creative must not use sexually suggestive emphasis, offer to facilitate affairs or infidelity, reference dating based on money or other financial transactions (e.g. mail-order brides), or indicate the viewer will meet or connect with fictitious people or groups.",
             "severity": "blocker",
-            "quote": "Sexually suggestive emphasis",
+            "quote": "dating ads can't include the following in their creatives: … Facilitating affairs or infidelity … Indicating people will meet or connect with fictitious groups or individuals … Sexually suggestive emphasis",
             "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/dating-ads/"
         },
         {
@@ -1391,9 +1280,9 @@
             "topic": "claims:health",
             "modality": "text",
             "checkType": "judgment",
-            "check": "Creative must not claim to cure, heal, or eliminate incurable diseases.",
+            "check": "Creative must not claim to cure, heal or eliminate any of: diabetes, herpes, thyroid disease, psoriasis, Ebola, cancer, autism, Alzheimer's, Parkinson's, ALS or HIV. Claims to treat or manage their symptoms, and cure claims for other conditions, are not covered by this rule.",
             "severity": "blocker",
-            "quote": "Claims (including those from health professionals or health organizations) to cure, heal, or eliminate any of the following incurable diseases",
+            "quote": "Claims (including those from health professionals or health organizations) to cure, heal, or eliminate any of the following incurable diseases and/or terminal illnesses (exhaustive list)",
             "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/health-wellness/"
         },
         {
@@ -1475,7 +1364,7 @@
             "topic": "prohibited:profanity",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Creative must not contain profanity, whether spoken or shown on screen.",
+            "check": "Creative must not contain profanity or obscene language, spoken or on screen, including misspelled, symbol-masked or emoji forms (e.g. '$hit', 'f*!%ing') and profane gestures. Fully bleeped, blurred or covered profanity used sparingly, and acronyms that don't themselves spell a profane word, are allowed.",
             "severity": "blocker",
             "quote": "Ads must not contain profanity.",
             "ref": "{{META_AD_STANDARDS}}/objectionable-content/profanity/#:~:text=Ads%20must%20not%20contain%20profanity"
@@ -1515,9 +1404,9 @@
             "scope": "compliance",
             "appliesTo": "video",
             "topic": "prohibited:hate",
-            "modality": "audiovisual",
+            "modality": "text",
             "checkType": "judgment",
-            "check": "Creative must not discriminate or encourage discrimination against people based on personal attributes.",
+            "check": "Creative must not state or imply that an offer (especially housing, employment or credit) is available only to, preferred for, or excluded from people based on personal attributes such as race, ethnicity, religion, age, sex, sexual orientation, gender identity, family status or disability.",
             "severity": "blocker",
             "quote": "Ads must not discriminate or encourage discrimination against people based on personal attributes such as race, ethnicity, color, national origin, religion, age, sex, sexual orientation, gender identity, family status, disability, medical or genetic condition.",
             "ref": "{{META_AD_STANDARDS}}/unacceptable-content/discriminatory-practices/#:~:text=Ads%20must%20not%20discriminate%20or%20encourage%20discrimination"
@@ -1545,8 +1434,8 @@
             "topic": "ip:copyright",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Creative must not contain content that violates a third party's copyright, trademark or other legal rights.",
-            "severity": "blocker",
+            "check": "Flag when the creative prominently uses third-party trademarks, logos, characters, copyrighted footage or artwork, or a celebrity's likeness in a way that suggests endorsement or is not clearly the advertiser's own or licensed (music licensing and counterfeits are covered by separate rules).",
+            "severity": "warning",
             "quote": "Ads may not contain content that violates the intellectual property rights of any third party, including copyright, trademark or other legal rights.",
             "ref": "{{META_AD_STANDARDS}}/intellectual-property-infringement/third-party-infringement/#:~:text=Ads%20may%20not%20contain%20content%20that%20violates%20the%20intellectual%20property%20rights"
         },
@@ -1587,10 +1476,10 @@
             "topic": "prohibited:adult",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Do not depict or advertise adult, pornographic, sexual-enhancement content, sex toys, or nudity/implied nudity",
+            "check": "Do not depict or advertise sex toys, adult or pornographic content, sexual enhancement products, escort or casual-sex services, nudity or implied nudity, implied sexual activity, sexual objectification, or focus on genitals, buttocks or breasts. Modeled swimwear or lingerie is allowed if not adult-themed or overtly sexual. Never show minors in underwear, or in swimsuits without adults present.",
             "severity": "blocker",
             "quote": "We don't allow the advertising of: Sex toys, Products in the shape of certain body parts (genitals, butts, or female breasts), Adult or pornographic videos, publications, live shows, Sexual enhancement products",
-            "ref": "{{PINTEREST}}/#:~:text=Sexual%20enhancement%20products"
+            "ref": "{{PINTEREST}}/#adult-and-nudity-content"
         },
         {
             "id": "pinterest.prohibited.drugs",
@@ -1601,10 +1490,10 @@
             "topic": "prohibited:drugs",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Do not advertise or depict the sale or use of illegal or recreational drugs",
+            "check": "Do not advertise, depict, or give information promoting the use or legalisation of illegal or recreational drugs, drug paraphernalia, or products containing CBD. Informational or brand content on CBD and hemp, and US topical hemp seed oil with no CBD and no therapeutic claims, are allowed.",
             "severity": "blocker",
             "quote": "We don't allow the advertising of: The sale or use of illegal or recreational drugs, Informational material about the use or legalization of illegal or recreational drugs",
-            "ref": "{{PINTEREST}}/#:~:text=illegal%20or%20recreational%20drugs"
+            "ref": "{{PINTEREST}}/#drugs-and-paraphernalia"
         },
         {
             "id": "pinterest.prohibited.weapons",
@@ -1615,10 +1504,10 @@
             "topic": "prohibited:weapons",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Do not depict or advertise guns, firearms, ammunition, or lifelike fake firearms",
+            "check": "Do not depict or advertise guns, firearms, ammunition, gun accessories, lifelike fake firearms (incl. BB, airsoft, paintball), knives intended for violent use, crossbows, tasers, pepper spray, fireworks, explosives, or instructions for making weapons.",
             "severity": "blocker",
             "quote": "We don't allow the advertising of weapons including but not limited to: Guns, firearms or ammunition. This includes functioning antique devices, BB guns, airsoft guns, paintball guns and lifelike fake firearms",
-            "ref": "{{PINTEREST}}/#:~:text=Guns%2C%20firearms%20or%20ammunition"
+            "ref": "{{PINTEREST}}/#weapons-and-explosives"
         },
         {
             "id": "pinterest.prohibited.violence",
@@ -1632,7 +1521,7 @@
             "check": "Do not include excessively violent or gory imagery",
             "severity": "blocker",
             "quote": "Excessively violent or gory",
-            "ref": "{{PINTEREST}}/#section-sensitive-content"
+            "ref": "{{PINTEREST}}/#sensitive-content"
         },
         {
             "id": "pinterest.prohibited.hate",
@@ -1646,7 +1535,7 @@
             "check": "Do not include politically, culturally, or racially divisive or insensitive content",
             "severity": "blocker",
             "quote": "Politically, culturally or racially divisive or insensitive",
-            "ref": "{{PINTEREST}}/#section-sensitive-content"
+            "ref": "{{PINTEREST}}/#sensitive-content"
         },
         {
             "id": "pinterest.prohibited.profanity",
@@ -1660,7 +1549,7 @@
             "check": "Do not include offensive or profane language, censored or not, in visuals or audio",
             "severity": "blocker",
             "quote": "Offensive or profane (censored or not)",
-            "ref": "{{PINTEREST}}/#section-sensitive-content"
+            "ref": "{{PINTEREST}}/#sensitive-content"
         },
         {
             "id": "pinterest.deceptive.misleading",
@@ -1671,10 +1560,10 @@
             "topic": "deceptive:misleading",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not present false or misleading content, including conspiracy theories, misinformation, or disinformation",
+            "check": "Do not present false or misleading content, including conspiracy theories, misinformation, or disinformation, attempts to impede election integrity or civic participation, and climate change denial",
             "severity": "blocker",
             "quote": "False or misleading, including conspiracy theories, misinformation and disinformation.",
-            "ref": "{{PINTEREST}}/#section-sensitive-content"
+            "ref": "{{PINTEREST}}/#sensitive-content"
         },
         {
             "id": "pinterest.claims.unsubstantiated",
@@ -1713,10 +1602,10 @@
             "topic": "restricted:alcohol",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not associate alcohol consumption with enhanced physical performance, improved social standing, or sexual success",
-            "severity": "warning",
+            "check": "If the ad promotes alcohol, flag if it depicts minors drinking, encourages excessive drinking or claims alcohol is beneficial or therapeutic, depicts people under the influence, links drinking to risky, antisocial or illegal activity (e.g. driving), associates drinking with better physical performance, social standing or sexual success, or emphasises high alcohol content as a positive.",
+            "severity": "blocker",
             "quote": "Can't associate the consumption of alcohol to enhanced physical performance, improved social standing or better sexual success",
-            "ref": "{{PINTEREST}}/#:~:text=enhanced%20physical%20performance"
+            "ref": "{{PINTEREST}}/#alcohol"
         },
         {
             "id": "pinterest.restricted.children",
@@ -1741,10 +1630,10 @@
             "topic": "prohibited:weapons",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Reject creative that promotes or shows weapons, explosives, or related accessories (firearms, ammunition, fireworks, combat knives, pepper spray).",
+            "check": "Reject creative that promotes the sale of, or shows imagery of, weapons, explosives or related accessories (firearms, ammunition, fireworks, combat knives, pepper spray), including on merchandise. Advocacy for safe weapon use is allowed; fictional weapons in movie or game ads are a warning, not a fail.",
             "severity": "blocker",
-            "quote": "We prohibit ads for the sales of weapons and explosives and related accessories. This includes firearms, ammunition, fireworks, combat knives and pepper spray.",
-            "ref": "{{SNAPCHAT}}/#prohibited-content"
+            "quote": "We prohibit ads for the sales of weapons and explosives and related accessories. This includes firearms, ammunition, fireworks, combat knives and pepper spray. Imagery of weapons, including on merchandise, is prohibited.",
+            "ref": "{{SNAPCHAT}}/#regulated-goods"
         },
         {
             "id": "snapchat.prohibited.drugs",
@@ -1758,7 +1647,7 @@
             "check": "Reject creative depicting illegal drug use or recreational use of pharmaceuticals.",
             "severity": "blocker",
             "quote": "We prohibit the depiction of illegal drug use or the recreational use of pharmaceuticals.",
-            "ref": "{{SNAPCHAT}}/#prohibited-content"
+            "ref": "{{SNAPCHAT}}/#regulated-goods"
         },
         {
             "id": "snapchat.prohibited.hate",
@@ -1772,7 +1661,7 @@
             "check": "Reject creative that demeans, defames, or promotes discrimination or violence based on protected characteristics.",
             "severity": "blocker",
             "quote": "Hate speech is content that demeans, defames, or promotes discrimination or violence on the basis of race, color, caste, ethnicity, national origin, religion",
-            "ref": "{{SNAPCHAT}}/#prohibited-content"
+            "ref": "{{SNAPCHAT}}/#discriminatory"
         },
         {
             "id": "snapchat.prohibited.violence",
@@ -1786,7 +1675,7 @@
             "check": "Reject creative depicting real-life graphic violence.",
             "severity": "blocker",
             "quote": "We prohibit the depiction of real-life graphic violence in creatives (e.g., top Snaps, Filters, Sponsored Lenses).",
-            "ref": "{{SNAPCHAT}}/#prohibited-content"
+            "ref": "{{SNAPCHAT}}/#violent-or-disturbing"
         },
         {
             "id": "snapchat.prohibited.adult",
@@ -1797,10 +1686,10 @@
             "topic": "prohibited:adult",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Reject creative that is sexually explicit or contains sexual solicitation.",
+            "check": "Reject creative that is sexually explicit: sexual solicitation, genitalia, exposed nipples or bare buttocks, partially obscured nudity (e.g. body paint or emoji), depictions of or references to specific sex acts or gestures imitating them, adult entertainment, or dating ads emphasising casual sex. Non-explicit suggestive content is not covered by this rule.",
             "severity": "blocker",
             "quote": "We prohibit content that is sexually explicit. This includes: Sexual solicitation of any kind.",
-            "ref": "{{SNAPCHAT}}/#prohibited-content"
+            "ref": "{{SNAPCHAT}}/#adult-content"
         },
         {
             "id": "snapchat.restricted.tobacco",
@@ -1814,7 +1703,7 @@
             "check": "Do not depict or promote tobacco or vaping products, except in public-health messaging or smoking cessation.",
             "severity": "blocker",
             "quote": "We do not allow the depiction or promotion of tobacco or vaping products except in the context of public health messaging or smoking cessation.",
-            "ref": "{{SNAPCHAT}}/#category-specific"
+            "ref": "{{SNAPCHAT}}/#regulated-goods"
         },
         {
             "id": "snapchat.deceptive.misleading",
@@ -1825,10 +1714,10 @@
             "topic": "deceptive:misleading",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Reject creative with false or misleading claims, offers, functionality, or business practices.",
+            "check": "Reject creative with claims or offers that are evidently false, impossible or misleading, content manipulated (by AI or editing) to mislead, deceiving calls to action, or subliminal techniques.",
             "severity": "blocker",
-            "quote": "Ads that are false or misleading, including deceptive claims, offers, functionality, or business practices.",
-            "ref": "{{SNAPCHAT}}/#general-requirements"
+            "quote": "Ads that are false or misleading, including deceptive claims, offers, functionality, or business practices, including manipulating content for false or misleading purposes (whether through generative AI or through deceptive editing).",
+            "ref": "{{SNAPCHAT}}/#deceptive-content"
         },
         {
             "id": "snapchat.deceptive.before_after",
@@ -1842,7 +1731,7 @@
             "check": "Do not show before-and-after or side-by-side comparison imagery depicting weight loss.",
             "severity": "blocker",
             "quote": "Contain 'before and after' or side-by-side comparison images depicting a person's weight loss.",
-            "ref": "{{SNAPCHAT}}/#category-specific"
+            "ref": "{{SNAPCHAT}}/#health"
         },
         {
             "id": "snapchat.brand.usage",
@@ -1853,10 +1742,10 @@
             "topic": "brand:usage",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Do not use Snap-owned trademarks, copyright, Bitmoji artwork, or representations of the Snapchat user interface.",
+            "check": "Do not imply affiliation with or endorsement by Snap: no Snap-owned trademarks, Bitmoji artwork, altered or look-alike Snap marks, or imitations of the Snapchat UI or features, except uses permitted by the Snapchat or Bitmoji Brand Guidelines.",
             "severity": "blocker",
-            "quote": "Ads must not use any Snap-owned trademark or copyright, Bitmoji artwork, or representations of the Snapchat user interface.",
-            "ref": "{{SNAPCHAT}}/#general-requirements"
+            "quote": "ads must not use any Snap-owned trademark or copyright, Bitmoji artwork, or representations of the Snapchat user interface, except as permitted in the Snapchat Brand Guidelines or the Bitmoji Brand Guidelines.",
+            "ref": "{{SNAPCHAT}}/#ip"
         },
         {
             "id": "tiktok.prohibited.weapons",
@@ -1867,7 +1756,7 @@
             "topic": "prohibited:weapons",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Do not display or promote dangerous weapons, ammunition, or explosives.",
+            "check": "Do not display or promote real-life use of dangerous weapons: guns, gun parts, ammunition, explosives or fireworks, blades, batons, tasers or pepper spray. Toys that don't look like real weapons, weapons in films, TV, cartoons or games, and utility or culinary knives are allowed.",
             "severity": "blocker",
             "quote": "We do not allow ad content and landing pages to display or promote the use of dangerous weapons, ammunitions, explosives in real life",
             "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-dangerous-products-or-services"
@@ -1887,15 +1776,15 @@
             "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-dangerous-products-or-services"
         },
         {
-            "id": "tiktok.restricted.tobacco",
+            "id": "tiktok.prohibited.tobacco",
             "platform": ["TikTok"],
             "region": "global",
             "scope": "compliance",
             "appliesTo": "all",
-            "topic": "restricted:tobacco",
+            "topic": "prohibited:tobacco",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not show, promote, or sell tobacco, nicotine, or related products.",
+            "check": "Do not show, promote or sell tobacco, nicotine, e-cigarette or related products, smoking paraphernalia or smoking venues. Anti-smoking campaigns, non-medical quit-smoking aids, and smoking depicted within film, TV, game or cartoon content are allowed.",
             "severity": "blocker",
             "quote": "We do not allow ad content and landing pages to show, promote, or sell tobacco, nicotine, or related products.",
             "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-dangerous-products-or-services"
@@ -1923,7 +1812,7 @@
             "topic": "prohibited:violence",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not display or promote violence or dangerous activities and challenges.",
+            "check": "Do not display or promote violence, bloody or gruesome imagery, or dangerous activities, challenges or stunts that viewers could copy. Allowed: dangerous behaviour in films, games or cartoons, educational safety messages, and professional stunts or extreme sports shown with safety context and a 'do not try this at home' disclaimer.",
             "severity": "blocker",
             "quote": "We do not allow the display or promotion of dangerous activities and challenges or violence.",
             "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-violence-and-dangerous-activities"
@@ -1951,8 +1840,8 @@
             "topic": "restricted:alcohol",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not portray excessive drinking, intoxication, or reckless behavior under the influence of alcohol.",
-            "severity": "warning",
+            "check": "If the ad promotes alcohol, flag if it portrays excessive drinking, intoxication or reckless behaviour under the influence; features people who are or look under 25, or pregnant people; appeals to people below drinking age; or offers alcohol as a prize, reward or consumption incentive.",
+            "severity": "blocker",
             "quote": "Portrayal of excessive drinking, intoxication, or reckless behavior under the influence of alcohol",
             "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-alcohol"
         },
@@ -1965,8 +1854,8 @@
             "topic": "restricted:crypto",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not promote virtual currencies or cryptocurrencies where restricted.",
-            "severity": "blocker",
+            "check": "Flag (as a warning) ads promoting cryptocurrencies, crypto exchanges or trading platforms, wallets, NFTs or crypto mining: they need a local licence, TikTok approval and 18+ targeting, and what is allowed varies by market. In the UK and most EU markets only licensed exchange services and custodial wallets may be advertised, not virtual currencies such as Bitcoin themselves; initial coin offerings are not allowed in the US, Canada and many other markets.",
+            "severity": "warning",
             "quote": "Virtual currencies or cryptocurrencies, such as Bitcoin and Ethereum",
             "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-financial-services"
         },
@@ -1979,10 +1868,10 @@
             "topic": "claims:health",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Do not make medicinal claims to treat, cure, heal, or prevent any medical condition, disease, or symptoms.",
-            "severity": "blocker",
-            "quote": "Medicinal claims to treat, cure, heal, or prevent any medical condition, disease, or symptoms",
-            "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-healthcare-pharmaceuticals"
+            "check": "Flag medical claims (treats, cures, heals or prevents a disease or condition, e.g. cures acne, treats hair loss, herbal remedy cures illness) made for cosmetics, beauty products, supplements or other products not shown to be approved medicines or medical devices. Such claims need an approved medical licence or certification.",
+            "severity": "warning",
+            "quote": "We do not allow cosmetic or beauty product ads to make medical claims.",
+            "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-healthcare-pharmaceuticals#:~:text=We%20do%20not%20allow%20cosmetic%20or%20beauty%20product%20ads%20to%20make%20medical%20claims"
         },
         {
             "id": "tiktok.deceptive.misleading",
@@ -2047,15 +1936,15 @@
             "scope": "compliance",
             "appliesTo": "video",
             "topic": "prohibited:adult",
-            "modality": "visual",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Reject video ads featuring highly sexualized themes or sexualized title/thumbnail imagery.",
+            "check": "Flag video showing nudity (genitalia, female breasts including the exposed lower or outer curve, most of the buttocks exposed, focus on the groin), people in sexually suggestive poses, revealing attire as the focus, sexually suggestive language, sexual entertainment (strip clubs, suggestive live streams or chat), or dating promoted with 'hook-up', 'no strings attached' or 'naughty singles' style imagery or language. Swimwear, spa and non-suggestive affection are allowed if not overtly sexualized.",
             "severity": "blocker",
-            "quote": "Content that features highly sexualized content in the title or thumbnail or highly sexualized themes is not suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Adult"
+            "quote": "Ads containing nudity or that include racy or sexually suggestive topics or content are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=Ads%20containing%20nudity"
         },
         {
-            "id": "youtube.prohibited.violence",
+            "id": "youtube.prohibited.violent_dangerous_acts",
             "platform": ["YouTube", "Google"],
             "region": "global",
             "scope": "compliance",
@@ -2063,24 +1952,10 @@
             "topic": "prohibited:violence",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Reject video ads whose focal point is blood, violence, or injury presented without context.",
+            "check": "Flag realistic or graphic violent acts (fights, harm with a weapon, graphic wounds, excessive bloodshed), depictions of weapons (especially close-ups of military-grade weapons being used) or of illegal activity such as drug or animal-parts trafficking. Professional media (film, TV, game trailers) that clearly names its source gets a contextual review: flag only gratuitous or extended violent scenes.",
             "severity": "blocker",
-            "quote": "Content where the focal point is on blood, violence, or injury, when presented without other context, is not suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Violence"
-        },
-        {
-            "id": "youtube.prohibited.violent_imagery",
-            "platform": ["YouTube", "Google"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "prohibited:violence",
-            "modality": "visual",
-            "checkType": "judgment",
-            "check": "Reject video ad scenes with shocking or disturbing graphic imagery such as blood splatter or bodily fluids.",
-            "severity": "blocker",
-            "quote": "Scenes containing violent or graphic imagery that can be shocking or disturbing to viewers like: blood splatter, sexual fluids, human or animal waste",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6362085"
+            "quote": "Ads containing graphic violence, weapons, or illegal activity are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=Ads%20containing%20graphic%20violence"
         },
         {
             "id": "youtube.prohibited.profanity",
@@ -2091,24 +1966,10 @@
             "topic": "prohibited:profanity",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video ads with profanity or vulgarity at the start or throughout the majority of the video.",
-            "severity": "warning",
-            "quote": "Content that contains profanity or vulgarity at the start or throughout the majority of the video may not be suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Inappropriate_language"
-        },
-        {
-            "id": "youtube.prohibited.hate",
-            "platform": ["YouTube", "Google"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "prohibited:hate",
-            "modality": "audiovisual",
-            "checkType": "judgment",
-            "check": "Reject video ads that incite hatred, promote discrimination, or disparage or humiliate an individual or group.",
+            "check": "Flag any obscene, profane or offensive language or gesture in the audio, captions or on-screen text, in any language, including misspelled, abbreviated or bleeped/partly censored swear words and obscene hand gestures.",
             "severity": "blocker",
-            "quote": "Content that incites hatred against, promotes discrimination, disparages, or humiliates an individual or group of people is not suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Hateful"
+            "quote": "Ads that include inappropriate or offensive language are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=Ads%20that%20include%20inappropriate%20or%20offensive%20language"
         },
         {
             "id": "youtube.general.harmful_acts",
@@ -2119,10 +1980,10 @@
             "topic": "general:standards",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Flag video ads promoting harmful or dangerous acts risking serious physical, emotional, or psychological injury.",
-            "severity": "warning",
-            "quote": "Content that promotes harmful or dangerous acts resulting in serious physical, emotional, or psychological injury is not suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Harmful_dangerous"
+            "check": "Flag video showing dangerous actions that could cause bodily harm or invite imitation, such as dangerous challenges (e.g. eating laundry pods, the cinnamon challenge) or stunts shown without clear professional context.",
+            "severity": "blocker",
+            "quote": "Ads containing dangerous actions that could result in bodily harm or encourage imitation, such as dangerous challenges",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=Ads%20containing%20dangerous%20actions"
         },
         {
             "id": "youtube.harm.shocking",
@@ -2133,24 +1994,10 @@
             "topic": "harm:offence",
             "modality": "visual",
             "checkType": "judgment",
-            "check": "Flag video ads intended to upset, disgust, or shock viewers.",
-            "severity": "warning",
-            "quote": "Content that may upset, disgust, or shock viewers may not be suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Shocking_content"
-        },
-        {
-            "id": "youtube.prohibited.weapons",
-            "platform": ["YouTube", "Google"],
-            "region": "global",
-            "scope": "compliance",
-            "appliesTo": "video",
-            "topic": "prohibited:weapons",
-            "modality": "visual",
-            "checkType": "judgment",
-            "check": "Reject video ads focused on the sale, assembly, abuse, or misuse of real or fake firearms.",
+            "check": "Flag footage meant to shock or scare: funerals with weeping, wailing or collapsing mourners; real or simulated footage of severe accidents, natural disasters, riots or civil unrest; jump-scares; or clear depictions of domestic violence, abuse, self-harm or overdose.",
             "severity": "blocker",
-            "quote": "Content focused on the sale, assembly, abuse, or misuse of real or fake firearms is not suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Firearms"
+            "quote": "Ads containing content that is intended to shock or scare, using repulsive imagery or footage of distressing or negative unhappy events that are likely to make the user uncomfortable, distressed, or feel negative emotions are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=intended%20to%20shock%20or%20scare"
         },
         {
             "id": "youtube.prohibited.drugs",
@@ -2161,10 +2008,10 @@
             "topic": "prohibited:drugs",
             "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Reject video ads promoting the sale, use, or abuse of illegal or regulated drugs or drug trafficking.",
+            "check": "Flag video showing the sale, use or glorification of recreational drugs, illegal substances, cannabis leaves or products, smoking or nicotine products, or drug paraphernalia (bongs, pipes, rolling papers). Anti-drug educational messages without explicit or sensationalized drug-use imagery are allowed.",
             "severity": "blocker",
-            "quote": "Content that promotes or features the sale, use, or abuse of illegal drugs, regulated legal drugs or substances, drug trafficking organizations or other dangerous products is not suitable for advertising.",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Recreational_drugs"
+            "quote": "Ads that contain or promote illegal or harmful substances are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=Ads%20that%20contain%20or%20promote%20illegal%20or%20harmful%20substances"
         },
         {
             "id": "youtube.deceptive.clickbait",
@@ -2173,12 +2020,12 @@
             "scope": "compliance",
             "appliesTo": "video",
             "topic": "deceptive:clickbait",
-            "modality": "text",
+            "modality": "audiovisual",
             "checkType": "judgment",
-            "check": "Reject misleading titles or thumbnails that promise content the video does not actually contain.",
-            "severity": "warning",
-            "quote": "Misleading title where a video promises sexual content, but it doesn't have it (such as a cooking video with the title 'watch porn').",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/6162278#Adult"
+            "check": "Flag promises of overnight wealth or 'free money' without a clear legitimate action, cash giveaways without clear terms, misleading or exaggerated claims about price, availability, quality or effectiveness (e.g. a $1,000 item 'for $1 ONLY!', guaranteed unlikely outcomes), language that guilt-trips or creates false urgency, and false or exaggerated health claims (secret cure, '100% effective', guaranteed transformation, misleading before-and-after).",
+            "severity": "blocker",
+            "quote": "Ads containing exaggerated or inaccurate claims about a product or service, or that mislead users are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/10249050#:~:text=Ads%20containing%20exaggerated%20or%20inaccurate%20claims"
         },
         {
             "id": "youtube.creative_spec.bumper_duration",
@@ -2190,12 +2037,526 @@
             "topic": "creative_spec:duration",
             "modality": "metadata",
             "checkType": "duration_max",
-            "check": "Ensure bumper ad creative does not exceed the maximum allowed duration.",
-            "severity": "info",
-            "quote": "up to 6 seconds long",
-            "ref": "{{YOUTUBE_ADS_POLICY}}/answer/2467968",
+            "check": "Bumper ads must be at most 6 seconds long.",
+            "severity": "blocker",
+            "quote": "6 seconds (>=5 seconds minimum)",
+            "ref": "{{GOOGLE_ADS_HELP}}/answer/2375464",
             "value": 6,
             "unit": "s"
+        },
+        {
+            "id": "google.prohibited.crypto",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "restricted:crypto",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag video promoting initial coin offerings or token pre-sales, initial DEX offerings, DeFi trading protocols, crypto loans, token liquidity pools, unhosted software wallets, unregulated dApps, crypto trading signals or investment advice, or games where players stake or win NFTs for real-world value. An ordinary exchange, wallet or coin trust ad is not a violation of this rule.",
+            "severity": "blocker",
+            "quote": "Ads promoting initial coin offerings, DeFi trading protocols, or the purchase, sale, or trade of cryptocurrencies or related products are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/14009787#:~:text=Ads%20promoting%20initial%20coin%20offerings"
+        },
+        {
+            "id": "google.prohibited.binary_options",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "restricted:financial",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag video promoting binary options or equivalent financial products, binary-options brokers, signals or software, or education about them.",
+            "severity": "blocker",
+            "quote": "Ads for binary options or equivalent financial products are not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/2464998#:~:text=Ads%20for%20binary%20options"
+        },
+        {
+            "id": "google.restricted.complex_speculative_finance",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "restricted:financial",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag video promoting CFDs, financial spread betting, rolling spot forex (FX) or similar speculative products: allowed only for licensed providers with Google approval in eligible locations. Offering trading signals for these products is not allowed.",
+            "severity": "warning",
+            "quote": "Contracts for Difference (CFD), financial spread betting, rolling spot forex (often referred to as \"Forex\" or \"FX\"), and related forms of speculative products",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/2464998#:~:text=Contracts%20for%20Difference"
+        },
+        {
+            "id": "google.prohibited.unapproved_health_claims",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "claims:health",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag video that markets a supplement or other non-approved product as preventing, curing or treating a disease or ailment, or as being as effective as a prescription drug or controlled substance.",
+            "severity": "blocker",
+            "quote": "Non-government approved products that are marketed in a way that implies that they're safe or effective for use in preventing, curing, or treating a particular disease or ailment",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/176031#:~:text=Non%2Dgovernment%20approved%20products"
+        },
+        {
+            "id": "google.deceptive.manipulated_media",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "deceptive:misleading",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag video that uses altered or synthetic footage or audio to deceive, e.g. a public figure or news anchor appearing to endorse the product or saying things they evidently didn't, or doctored 'news' segments.",
+            "severity": "blocker",
+            "quote": "Manipulating media to deceive, defraud, or mislead others is not allowed.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/6020955#:~:text=Manipulating%20media%20to%20deceive"
+        },
+        {
+            "id": "google.deceptive.misleading_ad_design",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "deceptive:fake_ui",
+            "modality": "visual",
+            "checkType": "judgment",
+            "check": "Flag video that imitates interface elements to trick viewers into clicking: fake close or skip buttons, fake input fields or multiple-choice options, fake play buttons presented as a video player control, or designs that mimic system notifications, virus alerts or dialog boxes. An ordinary call-to-action end card (a brand message such as 'Watch the story' or 'Shop now' with an arrow or play icon) is not a fake element.",
+            "severity": "blocker",
+            "quote": "Non-functional elements that resemble buttons, input fields, or multiple-choice options.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/6020955#:~:text=Non%2Dfunctional%20elements"
+        },
+        {
+            "id": "youtube.creative_spec.non_skippable_duration",
+            "platform": ["YouTube", "Google"],
+            "placements": ["youtube_non_skippable_in_stream"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "creative_spec:duration",
+            "modality": "metadata",
+            "checkType": "duration_max",
+            "check": "Non-skippable in-stream ads over 30 seconds are disapproved in auction campaigns (reservation campaigns allow up to 60 seconds).",
+            "severity": "warning",
+            "quote": "Non-skippable in-stream ads that are longer than 30 seconds in the auction and 60 seconds in reservation campaigns.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/2679940#:~:text=Non%2Dskippable%20in%2Dstream%20ads%20that%20are%20longer",
+            "value": 30,
+            "unit": "s"
+        },
+        {
+            "id": "youtube.creative_spec.bumper_min_duration",
+            "platform": ["YouTube", "Google"],
+            "placements": ["youtube_bumper"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "creative_spec:duration",
+            "modality": "metadata",
+            "checkType": "duration_min",
+            "check": "Bumper ads must be at least 5 seconds long.",
+            "severity": "blocker",
+            "quote": "6 seconds (>=5 seconds minimum)",
+            "ref": "{{GOOGLE_ADS_HELP}}/answer/2375464",
+            "value": 5,
+            "unit": "s"
+        },
+        {
+            "id": "google.restricted.election_ads",
+            "platform": ["Google"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:political",
+            "modality": "out_of_creative",
+            "checkType": "judgment",
+            "check": "Advisory: election ads (featuring a candidate, party, officeholder or referendum) need Google election-ads verification in many regions and carry disclosure and targeting limits. In the EU, political advertising under Regulation 2024/900 is restricted on Google platforms, with exemptions only for official electoral or public-authority information after applying. Some countries prohibit them outright (e.g. Brazil; Canada during federal election periods).",
+            "severity": "info",
+            "quote": "In some regions, election ads may run only if the advertiser is verified by Google.",
+            "ref": "{{GOOGLE_ADS_POLICY}}/answer/6014595#:~:text=election%20ads%20may%20run%20only"
+        },
+        {
+            "id": "meta.claims.personal_attributes",
+            "platform": ["Meta"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "claims:personal_attributes",
+            "modality": "text",
+            "checkType": "judgment",
+            "check": "Creative must not assert or imply the viewer's personal attributes: race, ethnicity, religion, beliefs, age, sexual orientation, gender identity, disability, physical or mental health, vulnerable financial status, voting status, union membership, criminal record or name (e.g. 'Are you depressed?', 'Meet other seniors', 'Are you bankrupt?'). Neutral offers ('Depression counselling', 'Meet seniors') and passing references to gender or age groups are fine.",
+            "severity": "blocker",
+            "quote": "In addition, ads must not contain content that asserts or implies personal attributes.",
+            "ref": "{{META_AD_STANDARDS}}/objectionable-content/privacy-violations-personal-attributes/"
+        },
+        {
+            "id": "meta.claims.body_image_weight_loss",
+            "platform": ["Meta"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "claims:body_image",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Weight-loss, weight-gain or cosmetic creative must not attack appearance, body parts or hygiene with negative statements or questions, show a close-up of pinching body fat, or claim results from wearable products alone; creative must not promote skin whitening or bleaching that permanently changes skin colour. Before-and-after imagery for these products is allowed (with 18+ targeting).",
+            "severity": "blocker",
+            "quote": "Contains statements of inferiority about physical appearance (i.e., terms, descriptions, or questions that are negative and attack an individual's appearance, specific body parts, or hygiene).",
+            "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/health-wellness/"
+        },
+        {
+            "id": "meta.prohibited.financial_products",
+            "platform": ["Meta"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:financial",
+            "modality": "text",
+            "checkType": "judgment",
+            "check": "Creative must not promote bail bonds, short-term loans repayable in 90 days or less (payday loans and binary options have their own rules), contracts for difference (CFD), initial coin offerings (ICOs), penny or bidding-fee auctions, or misleading student-loan consolidation, forgiveness or refinancing services.",
+            "severity": "blocker",
+            "quote": "Promote Bail Bonds … Promote Short-term Loans of 90 days or less … Promote Contract for Difference trading … Promote Initial Coin Offerings",
+            "ref": "{{META_AD_STANDARDS}}/restricted-goods-services/financial-services/"
+        },
+        {
+            "id": "meta.prohibited.suicide_self_injury_eating_disorders",
+            "platform": ["Meta"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:self_harm",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Creative must not encourage, mock or depict suicide, self-injury or eating disorders: no written or spoken admissions of these behaviours or of extreme weight-loss behaviour, self-injury imagery (including healed cuts), emaciated bodies (visible ribs, spine, thigh gaps, hollow cheeks) in a recovery context, detailed suicide narratives, or before/after weight imagery unrelated to a product or service.",
+            "severity": "blocker",
+            "quote": "Ads must not encourage suicide, self-injury, or eating disorders, including fictional content such as memes or illustrations and any such content which is graphic, regardless of context.",
+            "ref": "{{META_AD_STANDARDS}}/objectionable-content/suicide-selfinjury-eating-disorders/"
+        },
+        {
+            "id": "snapchat.restricted.alcohol_content",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:alcohol",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Alcohol creative must not appeal particularly to people under the drinking age, show anyone drinking who appears under 25, encourage or depict excessive consumption, portray abstinence or moderation negatively, exploit intoxicated people, claim alcohol improves performance, health or social success, or associate it with driving, skilled activities or illegal behaviour.",
+            "severity": "blocker",
+            "quote": "Ads that promote or reference alcohol must not: … Encourage or depict excessive or irresponsible consumption of alcohol. … Show anyone drinking who appears to be under the age of 25.",
+            "ref": "{{SNAPCHAT}}/#regulated-goods"
+        },
+        {
+            "id": "snapchat.restricted.gambling_content",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:gambling",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Gambling creative (casinos, lotteries, daily fantasy, sweepstakes, pay-to-play games of chance) must not glorify gambling, misrepresent the benefits of taking part, encourage playing beyond one's means, or appeal particularly to people under the legal gambling age.",
+            "severity": "blocker",
+            "quote": "Ads for Gaming and Gambling Services must not: … Glorify gambling or misrepresent the benefits of participation. Encourage individuals to play beyond their means.",
+            "ref": "{{SNAPCHAT}}/#gaming-gambling-lotteries"
+        },
+        {
+            "id": "snapchat.claims.health_exaggerated",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "claims:health",
+            "modality": "text",
+            "checkType": "judgment",
+            "check": "Health, OTC medicine, supplement, diet and fitness creative must not make over-exaggerated, unhealthy or unrealistic claims (e.g. 'cure your depression', 'eliminate brain fog', 'drop 2 dress sizes in a week', 'build instant muscle', 'lose weight without changing your diet') or imply prescription-strength efficacy for an OTC product.",
+            "severity": "blocker",
+            "quote": "Contain over-exaggerated, unhealthy, or unrealistic claims.",
+            "ref": "{{SNAPCHAT}}/#health"
+        },
+        {
+            "id": "snapchat.prohibited.weight_loss_supplements",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:health",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Reject creative promoting weight-loss supplements, including fat burners and appetite suppressants (prescription weight-loss injectables are a separate, pre-approved category).",
+            "severity": "blocker",
+            "quote": "Promote weight loss supplements, including fat burners and appetite suppressants.",
+            "ref": "{{SNAPCHAT}}/#health"
+        },
+        {
+            "id": "snapchat.prohibited.profanity",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:profanity",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Reject creative containing profanity, obscenity or obscene gestures, whether spoken, on screen or gestured.",
+            "severity": "blocker",
+            "quote": "We prohibit profanity, obscenity and obscene gestures.",
+            "ref": "{{SNAPCHAT}}/#harassment"
+        },
+        {
+            "id": "snapchat.prohibited.disturbing_content",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "prohibited:violence",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Reject creative that glorifies violence (self-harm, war, murder, abuse, animal abuse) or contains distressing content such as graphic gore, physical afflictions, bodily fluids or graphic medical or cosmetic procedures (real-life graphic violence is covered by a separate rule). Spooky ads are allowed, but flag intense jump scares or prolonged screaming or crying as a warning.",
+            "severity": "blocker",
+            "quote": "We prohibit disturbing content that may cause distress, such as graphic depictions of gore, physical afflictions, bodily fluids, and certain medical or cosmetic procedures.",
+            "ref": "{{SNAPCHAT}}/#violent-or-disturbing"
+        },
+        {
+            "id": "snapchat.prohibited.financial_schemes",
+            "platform": ["Snapchat"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:financial",
+            "modality": "text",
+            "checkType": "judgment",
+            "check": "Reject creative with get-rich-quick or too-good-to-be-true financial offers, pyramid schemes, guaranteed returns on speculative investments, promotion of particular securities or insider tips, or payday or predatory lending.",
+            "severity": "blocker",
+            "quote": "Get-rich-quick offers, pyramid schemes, or other deceptive or too-good-to-be true financial offers … Promising guaranteed financial returns on speculative investments",
+            "ref": "{{SNAPCHAT}}/#financial-products"
+        },
+        {
+            "id": "amazon.advisory.alcohol_markets",
+            "platform": ["Amazon"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:alcohol",
+            "modality": "out_of_creative",
+            "checkType": "judgment",
+            "check": "Alcohol ads can't run on Amazon.com, Alexa, on-package, lockers or physical stores; India and the UAE ban alcoholic-drink ads, and in the US Sponsored Products, Brands and Display allow only non-alcoholic drinks. Elsewhere they are limited by market, supply and time of day, must exclude customers under the legal drinking age, and need locally required disclaimers.",
+            "severity": "warning",
+            "quote": "Amazon.com, Alexa, and on-package, lockers and physical stores: Prohibited for alcohol ads.",
+            "ref": "{{AMAZON}}/help/G2MMCHZDCTW37V39#:~:text=Prohibited%20for%20alcohol%20ads"
+        },
+        {
+            "id": "amazon.prohibited.customer_reviews",
+            "platform": ["Amazon"],
+            "placements": ["amazon_sponsored_brands_video"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "prohibited:reviews",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "The video must not include customer reviews or star ratings, even if they are from Amazon.",
+            "severity": "blocker",
+            "quote": "Customer reviews, including star ratings, even if these reviews are on Amazon",
+            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Customer%20reviews%2C%20including%20star%20ratings"
+        },
+        {
+            "id": "amazon.prohibited.amazon_references",
+            "platform": ["Amazon"],
+            "placements": ["amazon_sponsored_brands_video"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "prohibited:trademark",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "The video must not include Amazon branding, trademarks, logos or badges (e.g. 'Amazon's Choice'), Amazon products, or references to Amazon products or services, and must not look like or mimic Amazon content or its user interface.",
+            "severity": "blocker",
+            "quote": "Amazon branding elements, trademarks, products, or references to Amazon products or services",
+            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Amazon%20branding%20elements%2C%20trademarks%2C%20products"
+        },
+        {
+            "id": "amazon.prohibited.video_promotions",
+            "platform": ["Amazon"],
+            "placements": ["amazon_sponsored_brands_video"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "prohibited:promotions",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "The video must not include deals, discounts or other savings promotions, or pressuring, combative or urgent language meant to force a click or sale (e.g. 'Hurry, while supplies last!').",
+            "severity": "blocker",
+            "quote": "Deals, discounts, or other savings promotions",
+            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Deals%2C%20discounts%2C%20or%20other%20savings%20promotions"
+        },
+        {
+            "id": "amazon.creative_spec.video_framing",
+            "platform": ["Amazon"],
+            "placements": ["amazon_sponsored_brands_video"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "video",
+            "topic": "creative_spec:framing",
+            "modality": "visual",
+            "checkType": "judgment",
+            "check": "The video must fill the frame: no letterbox or pillarbox bars (black, coloured or blurred), no black or blank frames at the start or end, and no flashing, spinning, blinking or pulsating objects or text or high-contrast transitions.",
+            "severity": "blocker",
+            "quote": "Your videos must fill the available space. They must not have black bars on any side, which means letterbox and pillar-box formats are not permitted.",
+            "ref": "{{AMAZON}}/library/guides/sponsored-brands-display-ads-moderation#:~:text=Your%20videos%20must%20fill%20the%20available%20space"
+        },
+        {
+            "id": "linkedin.advisory.financial",
+            "platform": ["LinkedIn"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:financial",
+            "modality": "out_of_creative",
+            "checkType": "judgment",
+            "check": "Financial ads must include legally required disclosures (for personal loans: total cost, repayment terms and maximum APR), must not target members under 18, and in the UK may run only from FCA-authorised advertisers.",
+            "severity": "warning",
+            "quote": "Ads promoting financial services or products to audiences in the United Kingdom may come from UK Financial Conduct Authority authorized advertisers only.",
+            "ref": "{{LINKEDIN}}/#:~:text=UK%20Financial%20Conduct%20Authority"
+        },
+        {
+            "id": "linkedin.prohibited.financial_products",
+            "platform": ["LinkedIn"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:financial",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Do not promote payday loans, reverse mortgages, peer-to-peer (P2P) lending, binary options, penny stocks or penny auctions, financial products or services meant for illegal purposes, or services that guarantee financial returns, foreclosure prevention or loan modification.",
+            "severity": "blocker",
+            "quote": "Ads promoting the following financial products and services are prohibited:",
+            "ref": "{{LINKEDIN_HELP}}/a9357023#:~:text=Ads%20promoting%20the%20following%20financial%20products%20and%20services%20are%20prohibited"
+        },
+        {
+            "id": "pinterest.prohibited.weight_loss",
+            "platform": ["Pinterest"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:weight_loss",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Do not use weight-loss language or imagery: body shaming, weight-loss or appetite-suppressant products (incl. ones worn or applied to the skin), before-and-after weight-loss imagery, weight-loss procedures, weight-loss testimonials, BMI references, or unrealistic cosmetic results. Only approved US/Canada GLP-1 prescription advertisers are excepted.",
+            "severity": "blocker",
+            "quote": "With the exception of approved healthcare advertisers in the US and Canada who promote prescription GLP-1 medication, we don’t allow any weight loss language or imagery in advertisements.",
+            "ref": "{{PINTEREST}}/#weight-loss-products-and-services"
+        },
+        {
+            "id": "tiktok.prohibited.speculative_investments",
+            "platform": ["TikTok"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:financial",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Do not promote binary options, contracts for difference (CFDs), financial spread betting, penny stocks, mini-bonds or other complex speculative investments; forex trading is also not allowed in the UK and many EU markets.",
+            "severity": "blocker",
+            "quote": "Complex speculative investments such as contracts for differences (CFDs), financial spread betting, penny stocks, binary options, and mini-bonds",
+            "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-financial-services#:~:text=Complex%20speculative%20investments"
+        },
+        {
+            "id": "tiktok.prohibited.get_rich_quick",
+            "platform": ["TikTok"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "prohibited:financial",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Do not promote get-rich-quick offers, pyramid schemes, or too-good-to-be-true financial offers (e.g. guaranteed or implausibly fast or large returns).",
+            "severity": "blocker",
+            "quote": "Examples of what is not allowed: Get-rich-quick offers, Pyramid schemes, Too-good-to-be-true financial offers",
+            "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-financial-services#:~:text=Get%2Drich%2Dquick%20offers"
+        },
+        {
+            "id": "tiktok.claims.incurable_cure",
+            "platform": ["TikTok"],
+            "region": "global",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "claims:health",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Do not claim that a product or service cures an incurable disease or makes serious conditions (e.g. cancer, HIV) curable.",
+            "severity": "blocker",
+            "quote": "Claims of cures for incurable diseases",
+            "ref": "{{TIKTOK_AD_POLICY}}/tiktok-ads-policy-misleading-and-false-content#:~:text=Claims%20of%20cures%20for%20incurable%20diseases"
+        },
+        {
+            "id": "asa.recognition.identifiable_as_ad",
+            "platform": ["all"],
+            "region": "UK",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "disclosure:paid_partnership",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "If the video looks like organic, creator or consumer content rather than an obvious ad, flag when nothing visible or audible (e.g. 'ad', 'advert', 'paid partnership') makes its commercial intent clear.",
+            "severity": "warning",
+            "quote": "Marketing communications must be obviously identifiable as such.",
+            "ref": "{{ASA}}/type/non_broadcast/code_section/02.html"
+        },
+        {
+            "id": "asa.restricted.lhf_paid_online",
+            "platform": ["all"],
+            "region": "UK",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:children",
+            "modality": "out_of_creative",
+            "checkType": "judgment",
+            "check": "If the ad depicts an identifiable food or drink product in a UK 'less healthy' (HFSS) category, confirm an exemption applies (e.g. a food or drink SME advertiser) before paying to place it online in the UK; brand ads that show no specific less-healthy product are exempt.",
+            "severity": "blocker",
+            "quote": "Persons must not pay for advertisements for an identifiable less healthy food or drink product to be placed on the internet.",
+            "ref": "{{ASA}}/type/non_broadcast/code_section/15.html"
+        },
+        {
+            "id": "asa.restricted.financial_value_variable",
+            "platform": ["all"],
+            "region": "UK",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "restricted:financial",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "In an ad for an investment or trading product, flag when nothing visible or audible makes clear that its value can go down as well as up (unless the ad explains a guarantee), or when the ad implies returns are certain or risk-free.",
+            "severity": "warning",
+            "quote": "the value of investments is variable and, unless guaranteed, can go down as well as up",
+            "ref": "{{ASA}}/type/non_broadcast/code_section/14.html"
+        },
+        {
+            "id": "ftc.deceptive.fake_testimonial",
+            "platform": ["all"],
+            "region": "US",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "deceptive:misleading",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag testimonials presented as coming from real customers or a real celebrity that appear to be delivered by an AI-generated or synthetic person, or by a synthetic (deepfake) celebrity likeness. An AI avatar that is not presented as a real customer or real endorser is allowed.",
+            "severity": "warning",
+            "quote": "It would also violate the rule for someone to use a celebrity avatar without the celebrity’s permission to speak favorably about a product, if reasonable consumers would think that the celebrity actually gave a testimonial for the product.",
+            "ref": "{{FTC}}/business-guidance/resources/consumer-reviews-testimonials-rule-questions-answers"
+        },
+        {
+            "id": "eu.claims.generic_environmental",
+            "platform": ["all"],
+            "region": "EU",
+            "scope": "compliance",
+            "appliesTo": "all",
+            "topic": "claims:environmental",
+            "modality": "audiovisual",
+            "checkType": "judgment",
+            "check": "Flag generic environmental claims ('eco-friendly', 'green', 'sustainable', 'climate friendly', 'good for the planet') whose specific basis is not stated clearly and prominently in the ad itself and that are not backed by a visible recognised certification (e.g. EU Ecolabel), and claims that the product is climate or carbon neutral, or has a reduced or positive climate impact, because of offsetting.",
+            "severity": "warning",
+            "quote": "Making a generic environmental claim for which the trader is not able to demonstrate recognised excellent environmental performance relevant to the claim.",
+            "ref": "{{EUR_LEX}}/eli/dir/2024/825/oj/eng"
         }
     ]
 }
