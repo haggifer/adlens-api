@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { ModelFinding, RuleProjection } from '../../rules'
 
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
-export const PROMPT_VERSION = '4'
+export const PROMPT_VERSION = '5'
 
 const reviewOutputSchema = z.object({
     transcript: z.string(),
@@ -41,11 +41,13 @@ export const parseReviewOutput = (text: string | undefined): ReviewOutput => {
     }
 }
 
+// With no platform or market chosen, every one's rules are sent (see selectRules), so the model must not read "none" as
+// "these rules don't apply here".
 const describeCampaign = (settings: AnalysisSettings): string =>
     [
-        `Platforms: ${settings.platforms.join(', ') || 'not specified'}`,
+        `Platforms: ${settings.platforms.join(', ') || 'all (none chosen)'}`,
         `Placements: ${settings.placements.join(', ') || 'not specified'}`,
-        `Markets: ${settings.markets.join(', ') || 'not specified'}`,
+        `Markets: ${settings.markets.join(', ') || 'all (none chosen)'}`,
     ].join('\n')
 
 export const buildReviewPrompt = (settings: AnalysisSettings, rules: RuleProjection[]): string =>

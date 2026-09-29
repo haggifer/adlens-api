@@ -41,6 +41,30 @@ describe('selectRules', () => {
         expect(unreachable).toEqual([])
     })
 
+    it('checks every platform’s rules when no platform is chosen', () => {
+        const noPlatform = selectedIds(settingsFor({}))
+        const everyPlatform = selectedIds(settingsFor({ platforms: Object.values(Platform) }))
+
+        expect(noPlatform.size).toBeGreaterThan(0)
+        expect(noPlatform).toEqual(everyPlatform)
+    })
+
+    it('checks every market’s rules when no market is chosen', () => {
+        const regionalRules = ruleSet.rules.filter((rule) => rule.region !== 'global').map((rule) => rule.id)
+        const noMarket = selectedIds(settingsFor({ platforms: [Platform.Meta] }))
+
+        expect(regionalRules.length).toBeGreaterThan(0)
+        expect(regionalRules.filter((id) => !noMarket.has(id))).toEqual([])
+    })
+
+    it('still applies placement-specific rules only when their placement is chosen', () => {
+        const placementRules = ruleSet.rules.filter((rule) => rule.placements).map((rule) => rule.id)
+        const nothingChosen = selectedIds(settingsFor({}))
+
+        expect(placementRules.length).toBeGreaterThan(0)
+        expect(placementRules.filter((id) => nothingChosen.has(id))).toEqual([])
+    })
+
     it('applies the 6-second bumper limit only when the bumper placement is chosen', () => {
         const bumper = 'youtube.creative_spec.bumper_duration'
 

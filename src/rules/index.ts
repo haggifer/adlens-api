@@ -36,16 +36,17 @@ const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
 
 // The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives, to the
 // selected markets (global rules always apply) and, for placement-specific rules, to the selected placements. Then
-// split by how each one is checked.
+// split by how each one is checked. No platform (or market) chosen means none is ruled out, so the ad is checked
+// against all of them; placements stay opt-in, since a placement's specs (a bumper's 6 seconds) only bind that format.
 export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): SelectedRules => {
-    const platforms = rulePlatformsFor(settings)
-    const markets = new Set<string>(settings.markets)
+    const platforms = settings.platforms.length ? rulePlatformsFor(settings) : null
+    const markets = settings.markets.length ? new Set<string>(settings.markets) : null
     const placements = new Set(settings.placements)
     const relevant = ruleSet.rules.filter(
         (rule) =>
             rule.appliesTo !== 'image' &&
-            rule.platform.some((platform) => platforms.has(platform)) &&
-            (rule.region === 'global' || markets.has(rule.region)) &&
+            (!platforms || rule.platform.some((platform) => platforms.has(platform))) &&
+            (rule.region === 'global' || !markets || markets.has(rule.region)) &&
             (!rule.placements || rule.placements.some((placement) => placements.has(placement))),
     )
 

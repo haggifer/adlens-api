@@ -193,8 +193,9 @@ version that already exists is refused). The worker serves the newest published 
 
 Selection ([`src/rules/index.ts`](src/rules/index.ts)) targets the job's settings: its **platforms** (YouTube also pulls
 in Google Ads policy), its **markets** (global rules always apply; UK/EU/US rules only in their market) and, for
-format-specific rules such as the 6-second bumper cap, its **placements**. A test proves every rule is reachable from
-some combination of settings. Selected rules are then routed by `modality`:
+format-specific rules such as the 6-second bumper cap, its **placements**. No platform chosen means every platform, and
+no market chosen means every market, so an ad is never checked against nothing; placement specs still apply only to
+their chosen placement. A test proves every rule is reachable from some combination of settings. Selected rules are then routed by `modality`:
 
 - `metadata` → checked in code against the measured media facts (duration, dimensions, real object size);
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
