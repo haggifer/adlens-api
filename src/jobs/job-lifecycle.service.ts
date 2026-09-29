@@ -60,7 +60,15 @@ export class JobLifecycle {
         try {
             runId = await this.quota.consume(userId, jobId)
         } catch (err) {
-            await this.refundNetwork(ipRunId)
+            // The caller needs the reason the user couldn't be charged (e.g. QUOTA_EXCEEDED), not the refund's.
+            try {
+                await this.refundNetwork(ipRunId)
+            } catch (refundErr) {
+                this.logger.error(
+                    `could not refund network run ${ipRunId} of job ${jobId}: ${refundErr instanceof Error ? refundErr.message : refundErr}`,
+                )
+            }
+
             throw err
         }
 
@@ -163,14 +171,25 @@ export class JobLifecycle {
             return false
         }
 
-        if (before.chargedRunId) {
-            await this.quota.refund(before.userId, before.chargedRunId)
+        // Both refunds run to the end even when one fails, so a failure can't skip the other. Jobs charged before the
+        // network quota existed have no chargedIpRunId.
+        const refunds = await Promise.allSettled([
+            this.refundUser(before.userId, before.chargedRunId),
+            this.refundNetwork(before.chargedIpRunId ?? null),
+        ])
+        const failed = refunds.find((refund) => refund.status === 'rejected')
+
+        if (failed) {
+            throw failed.reason
         }
 
-        // Jobs charged before the network quota existed have no such field.
-        await this.refundNetwork(before.chargedIpRunId ?? null)
-
         return true
+    }
+
+    private async refundUser(userId: string, runId: string | null): Promise<void> {
+        if (runId) {
+            await this.quota.refund(userId, runId)
+        }
     }
 
     private async refundNetwork(runId: string | null): Promise<void> {

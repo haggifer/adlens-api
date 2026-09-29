@@ -90,11 +90,12 @@ export class IpQuotaService {
     }
 
     // Concurrent first charges race to create the document; the loser's duplicate-key error only means it exists.
+    // Pushing the expiry out here, never back, stops MongoDB deleting a nearly expired bucket before the charge lands.
     private async ensureBucket(bucketKey: string, expiresAt: Date): Promise<void> {
         try {
             await this.buckets.updateOne(
                 { _id: bucketKey },
-                { $setOnInsert: { runs: [], expiresAt } },
+                { $setOnInsert: { runs: [] }, $max: { expiresAt } },
                 { upsert: true },
             )
         } catch (err) {

@@ -130,6 +130,35 @@ describe('IpQuotaService', () => {
         expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([kept])
     })
 
+    it('keeps a network for a window after its latest charge', async () => {
+        const later = new Date(NOW.getTime() + 24 * 60 * 60 * 1000)
+
+        await ipQuota.charge(member(), 'job-1', NOW)
+        await ipQuota.charge(member(), 'job-2', later)
+
+        expect((await buckets().findOne({ _id: NETWORK }))?.expiresAt).toEqual(
+            new Date(later.getTime() + QUOTA_WINDOW_MS),
+        )
+    })
+
+    it('extends a nearly expired network before charging it, so MongoDB cannot delete it mid-charge', async () => {
+        const runs = Array.from({ length: LIMITS.IP_HARD_LIMIT }, (_, i) => ({
+            id: `run-${i}`,
+            startedAt: NOW,
+            jobId: `job-${i}`,
+            anonymous: false,
+        }))
+
+        await buckets().insertOne({ _id: NETWORK, runs, expiresAt: new Date(NOW.getTime() + 1000) })
+        await expect(ipQuota.charge(member({ hasPassedChallenge: true }), 'job-extra', NOW)).rejects.toMatchObject({
+            response: { errorCode: RequestErrorCode.NetworkQuotaExceeded },
+        })
+
+        expect((await buckets().findOne({ _id: NETWORK }))?.expiresAt).toEqual(
+            new Date(NOW.getTime() + QUOTA_WINDOW_MS),
+        )
+    })
+
     it('lets MongoDB expire a network and find a run by id through indexes', async () => {
         expect(await buckets().indexes()).toEqual(
             expect.arrayContaining([

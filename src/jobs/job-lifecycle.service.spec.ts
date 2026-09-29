@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import {
     JobErrorCode,
     type JobMedia,
@@ -34,6 +35,8 @@ describe('JobLifecycle', () => {
     let mongo: MemoryMongo
     let jobs: Model<JobDoc>
     let lifecycle: JobLifecycle
+    let quota: QuotaService
+    let ipQuota: IpQuotaService
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
     const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
@@ -79,11 +82,9 @@ describe('JobLifecycle', () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
         await mongo.connection.model(IP_QUOTA_MODEL, IpQuotaSchema).init()
-        lifecycle = new JobLifecycle(
-            jobs,
-            new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })),
-            new IpQuotaService(mongo.connection, configStub(IP_LIMITS)),
-        )
+        quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
+        ipQuota = new IpQuotaService(mongo.connection, configStub(IP_LIMITS))
+        lifecycle = new JobLifecycle(jobs, quota, ipQuota)
     })
 
     beforeEach(async () => {
@@ -91,6 +92,7 @@ describe('JobLifecycle', () => {
     })
 
     afterEach(async () => {
+        jest.restoreAllMocks()
         await Promise.all([
             jobs.deleteMany({}),
             users().deleteMany({}),
@@ -224,5 +226,31 @@ describe('JobLifecycle', () => {
         expect((await findJob(jobId))?.chargedIpRunId).toBeNull()
         expect(await networkRuns()).toBe(0)
         expect(await used()).toBe(0)
+    })
+
+    it('still refunds the network run when refunding the user run fails', async () => {
+        const jobId = await queueJob(NETWORK_CHARGE)
+
+        jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+
+        await expect(lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')).rejects.toThrow('user refund failed')
+        expect(await networkRuns()).toBe(0)
+    })
+
+    it('reports why the user could not be charged, even when giving the network run back fails', async () => {
+        for (let i = 0; i < 3; i++) {
+            await queueJob(NETWORK_CHARGE)
+        }
+
+        const jobId = await createJob()
+        const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+
+        jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
+        await lifecycle.claimForVerification(USER, jobId)
+
+        await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
+            response: { errorCode: RequestErrorCode.QuotaExceeded },
+        })
+        expect(logError).toHaveBeenCalledWith(expect.stringContaining('network refund failed'))
     })
 })
