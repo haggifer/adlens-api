@@ -360,8 +360,13 @@ gcloud scheduler jobs "$SCHEDULER_VERB" http "$CLEANUP_JOB" --location="$REGION"
     --http-method=POST --oauth-service-account-email="$RUNTIME_SA"
 
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
+# Pinned so a re-created service can't fall back to Cloud Run's defaults (up to 100 instances). 3 instances × 80
+# concurrent requests is far above the traffic, and caps what a flood or stuck sockets can cost and how many MongoDB
+# connections the API can open. CPU is billed only while a request (or an open socket) is in flight.
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
+    --min-instances=0 --max-instances=3 --concurrency=80 --timeout=300 \
+    --cpu=1 --memory=512Mi --cpu-throttling \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 
