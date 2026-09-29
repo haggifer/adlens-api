@@ -246,9 +246,12 @@ infra/      gcloud setup script and bucket CORS policy
 
 All variables are validated at startup by [`src/config/env.ts`](src/config/env.ts); a missing or malformed value stops
 the process with a readable error. Locally they come from `.env` (non-secret, committed) and `.env.local` (secrets).
+In production, secrets come from one Secret Manager secret, `API_SECRETS`, mounted as a JSON file and merged into the
+config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](infra/setup.sh).
 
 | Variable                 | Default                 | Purpose                                                                     |
 | ------------------------ | ----------------------- | --------------------------------------------------------------------------- |
+| `SECRETS_FILE`           | —                       | Path to a mounted JSON file of secrets; unset locally. Its keys fill gaps in the environment, never override it |
 | `MONGODB_URI`            | required                | Atlas connection string (Mongoose, Better Auth, Change Stream)              |
 | `GOOGLE_CLOUD_PROJECT`   | required                | GCP project for Vertex and Cloud Run                                        |
 | `STORAGE_BUCKET`         | required                | The uploads bucket                                                          |
