@@ -6,6 +6,8 @@ import { createRateLimitStorage } from './rate-limit-storage'
 
 const SECRET = 'rate-limit-test-secret'
 const RAW_KEY = '203.0.113.7|/sign-in/anonymous'
+const OTHER_CLIENT_KEY = '203.0.113.8|/sign-in/anonymous'
+const OTHER_PATH_KEY = '203.0.113.7|/sign-in/email'
 const RULE = { window: 60, max: 3 }
 const START = new Date('2026-09-29T10:00:00Z').getTime()
 
@@ -49,9 +51,20 @@ describe('the rate-limit storage', () => {
         expect(results.map((result) => result.allowed)).toEqual([true, true, true, false])
         expect(results[RULE.max].retryAfter).toBe(RULE.window)
 
+        clock = START + RULE.window * 1000 - 1
+
+        expect(await storage().consume(RAW_KEY, RULE)).toEqual({ allowed: false, retryAfter: 1 })
+
         clock = START + RULE.window * 1000
 
         expect(await storage().consume(RAW_KEY, RULE)).toEqual({ allowed: true, retryAfter: null })
+    })
+
+    it('counts each client and path on its own', async () => {
+        await consumeTimes(RULE.max + 1)
+
+        expect(await storage().consume(OTHER_CLIENT_KEY, RULE)).toEqual({ allowed: true, retryAfter: null })
+        expect(await storage().consume(OTHER_PATH_KEY, RULE)).toEqual({ allowed: true, retryAfter: null })
     })
 
     it("doesn't let concurrent requests overdraw", async () => {
