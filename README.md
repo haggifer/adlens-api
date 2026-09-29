@@ -332,8 +332,12 @@ confirmation before writing, merges the exported values into the `API_SECRETS` b
 its current value), and deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json`
 (`SECRETS_FILE`). Both processes run as the same runtime service account today, so both mount the whole bundle even
 though the worker only reads `MONGODB_URI` from it. To remove a key from the bundle entirely, edit it by hand
-(`gcloud secrets versions access latest --secret=API_SECRETS`, edit the JSON, `gcloud secrets versions add`) — the
-script only ever adds or overwrites keys, it never drops one on its own.
+(`gcloud secrets versions access latest --secret=API_SECRETS`, edit the JSON, then
+`gcloud secrets versions add API_SECRETS --data-file=edited.json`) — the script only ever adds or overwrites keys,
+it never drops one on its own. A key removed this way comes back on the next run of the script if its legacy
+individual secret still exists: the script's source order is exported, then the bundle, then the legacy secret of
+the same name, so a hand-removed key is still "absent" only until that legacy secret is deleted too (the
+confirmation prompt shows `legacy` as its source when this happens).
 
 **Once a deploy succeeds, the script destroys every other `API_SECRETS` version**, enabled or disabled (the free
 tier counts disabled versions too), so a rotation can't be undone from Secret Manager afterwards — keep your own

@@ -24,6 +24,11 @@
 # individual secrets of the same names already held.
 set -euo pipefail
 
+# The RESOLVED_VALUE/RESOLVED_SOURCE associative arrays below need bash 4+. macOS ships bash 3.2 (Apple stopped
+# bundling GPLv3 bash), so this fails fast there with a clear message instead of an obscure "declare: -A: invalid
+# option" later: install a newer bash first (macOS: brew install bash).
+((BASH_VERSINFO[0] >= 4)) || { echo "infra/setup.sh needs bash 4 or later (macOS: brew install bash)." >&2; exit 1; }
+
 # Git Bash (MSYS) rewrites an argument that looks like a POSIX path before it reaches a native program — which
 # mangles SECRETS_FILE's value and a secret's mount path inside --set-env-vars / --set-secrets. Exclude only those
 # two flags, never MSYS_NO_PATHCONV globally: that also stops the gcloud launcher script from finding itself.
@@ -84,16 +89,42 @@ echo "== secrets: build/update the API_SECRETS bundle =="
 gcloud secrets describe "$SECRETS_BUNDLE" >/dev/null 2>&1 || \
     gcloud secrets create "$SECRETS_BUNDLE" --replication-policy=automatic
 
+# Every helper below emits its result with a trailing SENTINEL byte, never stripped internally: `$(...)` always
+# discards every trailing newline a captured command printed, so a secret value that itself ends with one or more
+# newlines would otherwise come back truncated — silently, and differently run to run, which made an unchanged
+# bundle re-prompt forever. Appending one fixed, non-newline byte after the real value and stripping exactly that
+# one trailing byte back off in bash (`${v%$SENTINEL}`), at the point each value is finally used, makes every round
+# trip exact no matter what the value itself ends with.
+SENTINEL='x'
+
+# Decodes a base64url secret payload fetched with --format="get(payload.data)", which returns the raw API field
+# instead of running it through gcloud's own text-mode stdout decoding — the thing that turns an embedded \n into
+# \r\n on Windows. Used for every secret payload this script reads, so no path depends on gcloud's text output.
+decode_secret_payload() {
+    node -e '
+        let input = ""
+        process.stdin.on("data", (chunk) => { input += chunk })
+        process.stdin.on("end", () => {
+            const value = Buffer.from(input.trim(), "base64url").toString("utf8")
+            process.stdout.write(value + "x")
+        })
+    '
+}
+
 # An ENABLED version must exist before we try to read one: a secret with none yet is not a read failure (use {}),
 # but a real read failure once one exists must abort, not silently become an empty bundle. `tr -d '\r'` strips the
-# CRLF Git Bash's gcloud sometimes emits.
+# CRLF Git Bash's gcloud sometimes emits. `value(name)` is the version's fully qualified resource name, which lets
+# the read below target this exact version instead of re-resolving `latest` (matching what the prune step keeps).
 LATEST_ENABLED_VERSION=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state=ENABLED" \
     --sort-by="~createTime" --limit=1 --format="value(name)" | tr -d '\r')
 
 if [ -n "$LATEST_ENABLED_VERSION" ]; then
-    CURRENT_BUNDLE_JSON=$(gcloud secrets versions access latest --secret="$SECRETS_BUNDLE")
+    CURRENT_BUNDLE_JSON=$(gcloud secrets versions access "$LATEST_ENABLED_VERSION" --format="get(payload.data)" | decode_secret_payload)
+    CURRENT_BUNDLE_JSON="${CURRENT_BUNDLE_JSON%$SENTINEL}"
+    IS_FIRST_VERSION=0
 else
     CURRENT_BUNDLE_JSON='{}'
+    IS_FIRST_VERSION=1
 fi
 
 # Validates the bundle is a JSON object of strings whose keys are all known, and re-serializes it with sorted keys
@@ -141,7 +172,8 @@ normalize_bundle_json() {
 CURRENT_BUNDLE_NORMALIZED=$(printf '%s' "$CURRENT_BUNDLE_JSON" | normalize_bundle_json)
 unset CURRENT_BUNDLE_JSON
 
-# Reads one key out of $CURRENT_BUNDLE_NORMALIZED, given on stdin (never an env var or an argument).
+# Reads one key out of $CURRENT_BUNDLE_NORMALIZED, given on stdin (never an env var or an argument). Emits the
+# value with the trailing SENTINEL, like every other helper above — the caller strips it.
 bundle_value() {
     printf '%s' "$CURRENT_BUNDLE_NORMALIZED" | KEY="$1" node -e '
         let input = ""
@@ -155,16 +187,17 @@ bundle_value() {
                 process.exit(1)
             }
             const value = bundle[process.env.KEY]
-            if (typeof value === "string") process.stdout.write(value)
+            if (typeof value === "string") process.stdout.write(value + "x")
         })
     '
 }
 
 # Migration only: before the bundle, each key was its own secret. A missing secret means "never had one" (skip);
-# an existing one that can't be read is a real problem, so this never silently drops a value that exists.
+# an existing one that can't be read is a real problem, so this never silently drops a value that exists. The
+# payload travels through decode_secret_payload like every other read, with the SENTINEL left for the caller.
 legacy_secret_value() {
     gcloud secrets describe "$1" >/dev/null 2>&1 || return 0
-    gcloud secrets versions access latest --secret="$1"
+    gcloud secrets versions access latest --secret="$1" --format="get(payload.data)" | decode_secret_payload
 }
 
 declare -A RESOLVED_VALUE
@@ -178,6 +211,7 @@ for name in $BUNDLE_KEYS; do
     fi
 
     current_value=$(bundle_value "$name")
+    current_value="${current_value%$SENTINEL}"
     if [ -n "$current_value" ]; then
         RESOLVED_VALUE[$name]="$current_value"
         RESOLVED_SOURCE[$name]=bundle
@@ -185,6 +219,7 @@ for name in $BUNDLE_KEYS; do
     fi
 
     legacy_value=$(legacy_secret_value "$name")
+    legacy_value="${legacy_value%$SENTINEL}"
     if [ -n "$legacy_value" ]; then
         RESOLVED_VALUE[$name]="$legacy_value"
         RESOLVED_SOURCE[$name]=legacy
@@ -225,19 +260,29 @@ build_bundle_json() {
 NEW_BUNDLE_JSON=$(build_bundle_json)
 
 if [ "$NEW_BUNDLE_JSON" != "$CURRENT_BUNDLE_NORMALIZED" ]; then
-    echo "About to write a new API_SECRETS version. Source of each key (never the value):"
+    if [ "$IS_FIRST_VERSION" = "1" ]; then
+        echo "API_SECRETS was just created and has no version yet. About to write its first version."
+    else
+        echo "About to write a new API_SECRETS version."
+    fi
+    echo "Source of each key (never the value):"
     for name in $BUNDLE_KEYS; do
         echo "  $name: ${RESOLVED_SOURCE[$name]:-absent}"
     done
-    read -r -p "Write this bundle to API_SECRETS? [y/N] " CONFIRM_WRITE
-    if [ "$CONFIRM_WRITE" != "y" ]; then
-        echo "Aborted: API_SECRETS was not changed." >&2
-        exit 1
-    fi
+    # A closed or redirected stdin (no TTY) makes `read` fail; treat that the same as a no, rather than letting
+    # set -e kill the script with no explanation.
+    read -r -p "Write this bundle to API_SECRETS? [y/N] " CONFIRM_WRITE || CONFIRM_WRITE=''
+    case "$CONFIRM_WRITE" in
+        y | Y | yes) : ;;
+        *)
+            echo "Aborted: API_SECRETS was not written." >&2
+            exit 1
+            ;;
+    esac
     printf '%s' "$NEW_BUNDLE_JSON" | gcloud secrets versions add "$SECRETS_BUNDLE" --data-file=-
 fi
 
-unset CURRENT_BUNDLE_NORMALIZED NEW_BUNDLE_JSON RESOLVED_VALUE RESOLVED_SOURCE
+unset CURRENT_BUNDLE_NORMALIZED NEW_BUNDLE_JSON RESOLVED_VALUE RESOLVED_SOURCE IS_FIRST_VERSION
 
 gcloud secrets add-iam-policy-binding "$SECRETS_BUNDLE" --member="serviceAccount:$RUNTIME_SA" --role="roles/secretmanager.secretAccessor"
 
@@ -302,12 +347,18 @@ ALL_VERSIONS=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state!=D
 LATEST_ENABLED=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state=ENABLED" --sort-by="~createTime" \
     --limit=1 --format="value(name.basename())" | tr -d '\r')
 
-for version in $ALL_VERSIONS; do
-    if [ "$version" = "$LATEST_ENABLED" ]; then
-        continue
-    fi
-    gcloud secrets versions destroy "$version" --secret="$SECRETS_BUNDLE" --quiet
-done
+if [ -z "$LATEST_ENABLED" ]; then
+    # No ENABLED version to keep — pruning here could destroy every version there is. Skip it; the next successful
+    # run (once a version is ENABLED again) will catch up.
+    echo "Warning: no ENABLED API_SECRETS version found; skipping the prune." >&2
+else
+    for version in $ALL_VERSIONS; do
+        if [ "$version" = "$LATEST_ENABLED" ]; then
+            continue
+        fi
+        gcloud secrets versions destroy "$version" --secret="$SECRETS_BUNDLE" --quiet
+    done
+fi
 
 echo "Done. The web app's NEXT_PUBLIC_API_BASE_URL is $API_URL"
 echo "Once the new revision is verified, delete the legacy individual secrets by hand (never done automatically):"
