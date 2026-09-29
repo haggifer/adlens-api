@@ -319,10 +319,17 @@ the `adlens-analyze` job and then the `adlens-api` service to that digest, and e
 
 [`infra/setup.sh`](infra/setup.sh) (plain gcloud, see [Design decisions](#design-decisions)) creates
 everything the workflow relies on: the APIs, the bucket and its CORS policy from [`infra/cors.json`](infra/cors.json),
-the runtime and deploy service accounts, the Workload Identity provider, the secrets and the image repository. It also
-owns the runtime config (env vars, secrets, the job's 2 retries and 15-minute timeout), which CI leaves untouched, and
-can deploy the current checkout by hand. The API is served at `https://api.useadlens.com` through a Cloud Run domain
-mapping.
+the runtime and deploy service accounts, the Workload Identity provider, the `API_SECRETS` bundle and the image
+repository. It also owns the runtime config (env vars, secrets, the job's 2 retries and 15-minute timeout), which CI
+leaves untouched, and can deploy the current checkout by hand. The API is served at `https://api.useadlens.com`
+through a Cloud Run domain mapping.
+
+To create or rotate a secret, export any subset of `MONGODB_URI`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`,
+`CONTACT_EMAIL`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET` and `TURNSTILE_SECRET_KEY`, then run the script: it
+merges the exported values into the `API_SECRETS` bundle (a key you didn't export keeps its current value) and
+deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json` (`SECRETS_FILE`). Both processes run
+as the same runtime service account today, so both mount the whole bundle even though the worker only reads
+`MONGODB_URI` from it.
 
 ## Design decisions
 
@@ -407,3 +414,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
   rolled to the same digest, the job first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
 - **Infrastructure as a gcloud script.** The infrastructure is a handful of set-once resources, so an idempotent,
   committed script is enough; Terraform or Pulumi would be the step up if it grows.
+- **One Secret Manager secret for all of the API's secrets.** The free tier caps active secret *versions* per billing
+  account, and every secret is at least one version; one JSON bundle (`API_SECRETS`) uses a single version however
+  many keys it holds, and costs one access per instance start instead of one per secret. The trade-off is no per-key
+  IAM binding — anything that can read the bundle can read every key in it — which is fine while the API and the
+  worker share one runtime service account; split into per-identity secrets when the worker gets its own.

@@ -40,6 +40,8 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
   bump the exact pin here. Never commit a `file:` dependency (`npm run check:deps` fails on it).
 - All configuration goes through the Zod schema in `src/config/env.ts`. Tests set `NODE_ENV=test`, which stops env
   files from loading, so tests can never reach a real database or bucket.
+- Production secrets go in the `API_SECRETS` Secret Manager bundle, via `infra/setup.sh` (export the key and run the
+  script) — never as their own individual secret, and never as a plain env var in a deploy command.
 - `ANALYZE_MAX_RETRIES` must equal the Cloud Run Job's `--max-retries` in `infra/setup.sh`.
 - Never delete a user's upload on a transient storage or network error; only a definite problem with the file
   deletes it.
