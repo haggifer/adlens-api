@@ -327,10 +327,21 @@ through a Cloud Run domain mapping.
 
 To create or rotate a secret, export any subset of `MONGODB_URI`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`,
 `CONTACT_EMAIL`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET` and `TURNSTILE_SECRET_KEY`, then run the script: it
-merges the exported values into the `API_SECRETS` bundle (a key you didn't export keeps its current value) and
-deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json` (`SECRETS_FILE`). Both processes run
-as the same runtime service account today, so both mount the whole bundle even though the worker only reads
-`MONGODB_URI` from it.
+prints the source of every key (exported, the bundle, a legacy secret, or absent — never a value) and asks for
+confirmation before writing, merges the exported values into the `API_SECRETS` bundle (a key you didn't export keeps
+its current value), and deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json`
+(`SECRETS_FILE`). Both processes run as the same runtime service account today, so both mount the whole bundle even
+though the worker only reads `MONGODB_URI` from it. To remove a key from the bundle entirely, edit it by hand
+(`gcloud secrets versions access latest --secret=API_SECRETS`, edit the JSON, `gcloud secrets versions add`) — the
+script only ever adds or overwrites keys, it never drops one on its own.
+
+**Once a deploy succeeds, the script destroys every other `API_SECRETS` version**, enabled or disabled (the free
+tier counts disabled versions too), so a rotation can't be undone from Secret Manager afterwards — keep your own
+copy of anything you rotate away from. The legacy individual secrets it can still migrate from
+(`MONGODB_URI`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`, `CONTACT_EMAIL`, `GOOGLE_CLIENT_SECRET`,
+`GITHUB_CLIENT_SECRET`, `TURNSTILE_SECRET_KEY`) and the unused `GEMINI_API_KEY` are never deleted automatically; the
+script prints a reminder, and deleting them (a one-time manual step, once the bundle is verified live) is on the
+maintainer.
 
 ## Design decisions
 
@@ -365,7 +376,7 @@ Why the system is built this way, and what was rejected. Decisions that span the
   single-document atomicity; runs pruned to the window, so the document stays small; the runs go away with the
   account.
 - **Network limits keyed by a derived HMAC, soft before hard.** The key is derived from `BETTER_AUTH_SECRET`, so no
-  new secret (and Secret Manager version) is needed; rotating that secret resets every network's count. Shared
+  extra secret needs managing or rotating on its own; rotating that secret resets every network's count. Shared
   networks (offices, mobile carriers) get a Turnstile check at the soft limit instead of a block. Jobs store only the
   network run's random id, never the hash, so nothing network-derived outlives the 7-day document.
 - **`X-Forwarded-For` read from the right, not `trust proxy`.** One function with a configured hop count, unit-tested,
