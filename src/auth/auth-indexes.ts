@@ -42,20 +42,19 @@ const describeFailure = (err: unknown): string => {
     return parts.length ? parts.join(' ') : 'unknown error'
 }
 
-// One index at a time, each on its own, so one the data can't satisfy (duplicate emails, say) never takes the others
-// with it. Creating an index that already exists with the same name and options is a no-op.
+// All indexes at once, each on its own, so one the data can't satisfy (duplicate emails, say) never takes the
+// others with it and a cold start isn't paying for eight round trips in sequence. Creating an index that already
+// exists with the same name and options is a no-op.
 export const ensureAuthIndexes = async (connection: Connection): Promise<AuthIndexFailure[]> => {
-    const failures: AuthIndexFailure[] = []
+    const results = await Promise.allSettled(
+        AUTH_INDEXES.map(({ collection, index }) => connection.collection(collection).createIndexes([index])),
+    )
 
-    for (const { collection, index } of AUTH_INDEXES) {
-        try {
-            await connection.collection(collection).createIndexes([index])
-        } catch (err) {
-            failures.push({ name: index.name, reason: describeFailure(err) })
-        }
-    }
-
-    return failures
+    return results.flatMap((result, i) =>
+        result.status === 'rejected'
+            ? [{ name: AUTH_INDEXES[i].index.name, reason: describeFailure(result.reason) }]
+            : [],
+    )
 }
 
 // Runs on every API start (the worker never reads these collections through Better Auth). A failure is logged, not
