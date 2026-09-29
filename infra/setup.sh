@@ -328,7 +328,7 @@ echo "== deploy analysis worker job (on-demand; runs dist/worker to completion, 
 # its own identity, so each mounts only what it needs.
 gcloud run jobs deploy "$ANALYZE_JOB" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --command="node" --args="dist/worker" --tasks=1 --max-retries=2 --task-timeout=15m \
-    --cpu=2 --memory=2Gi \
+    --cpu=1 --memory=1Gi \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,GEMINI_LOCATION=global,ANALYZE_MAX_RETRIES=2,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 # The API executes this job as the runtime SA. run.developer on the job includes run.jobs.run; narrow
