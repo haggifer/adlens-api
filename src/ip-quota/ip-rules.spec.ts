@@ -13,11 +13,13 @@ describe('checkIpRules', () => {
     })
 
     it('sends anonymous users to sign up once the network used its anonymous analyses', () => {
+        expect(checkIpRules({ total: 2, anonymous: 2 }, true, LIMITS)).toBe(IpVerdict.NeedsChallenge)
         expect(checkIpRules({ total: 3, anonymous: 3 }, true, LIMITS)).toBe(IpVerdict.SignUpRequired)
         expect(checkIpRules({ total: 3, anonymous: 3 }, false, LIMITS)).toBe(IpVerdict.Allowed)
     })
 
     it('stops everyone at the hard limit before any other rule', () => {
+        expect(checkIpRules({ total: 29, anonymous: 0 }, false, LIMITS)).toBe(IpVerdict.NeedsChallenge)
         expect(checkIpRules({ total: 30, anonymous: 3 }, true, LIMITS)).toBe(IpVerdict.NetworkLimit)
         expect(checkIpRules({ total: 30, anonymous: 0 }, false, LIMITS)).toBe(IpVerdict.NetworkLimit)
     })

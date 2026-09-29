@@ -50,7 +50,7 @@ describe('IpQuotaService', () => {
         expect(await ipQuota.usage(NETWORK, NOW)).toEqual({ total: 0, anonymous: 0 })
     })
 
-    it('charges a run and keeps the network for a window after its last charge', async () => {
+    it('charges a run and sets the network to expire a window later', async () => {
         const runId = await ipQuota.charge(anonymous(), 'job-1', NOW)
 
         expect(await buckets().findOne({ _id: NETWORK })).toMatchObject({
@@ -68,6 +68,13 @@ describe('IpQuotaService', () => {
             response: { errorCode: RequestErrorCode.SignUpRequired },
         })
         await expect(ipQuota.charge(member(), 'job-member', NOW)).resolves.toEqual(expect.any(String))
+    })
+
+    it("doesn't count members' runs against the anonymous allowance", async () => {
+        await chargeTimes(LIMITS.IP_ANON_LIMIT, member())
+
+        await expect(ipQuota.charge(anonymous(), 'job-anonymous', NOW)).resolves.toEqual(expect.any(String))
+        expect(await ipQuota.usage(NETWORK, NOW)).toEqual({ total: LIMITS.IP_ANON_LIMIT + 1, anonymous: 1 })
     })
 
     it('never charges an anonymous user who has not passed a challenge', async () => {
@@ -130,7 +137,7 @@ describe('IpQuotaService', () => {
         expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([kept])
     })
 
-    it('keeps a network for a window after its latest charge', async () => {
+    it('pushes the expiry out with every charge', async () => {
         const later = new Date(NOW.getTime() + 24 * 60 * 60 * 1000)
 
         await ipQuota.charge(member(), 'job-1', NOW)
