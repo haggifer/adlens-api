@@ -180,6 +180,21 @@ test('an unverified account cannot sign in', async () => {
     assert.equal(res.status, 403)
 })
 
+test('confirmation emails to one address stop at 3 an hour, however often someone signs in', async () => {
+    const email = 'flooded@example.com'
+    const signUp = await post('/api/auth/sign-up/email', { email, password: 'flood-password', name: 'Flooded' })
+
+    assert.equal(signUp.status, 200)
+
+    for (let i = 0; i < 4; i++) {
+        const signIn = await post('/api/auth/sign-in/email', { email, password: 'flood-password' })
+
+        assert.equal(signIn.status, 403)
+    }
+
+    assert.equal(outbox.filter((message) => message.to === email).length, 3)
+})
+
 test('the emailed link opens the web app, which confirms the email and gets an httpOnly SameSite=Lax cookie', async () => {
     const link = linkIn(outbox[0])
     const token = link.searchParams.get('token')

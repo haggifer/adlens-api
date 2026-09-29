@@ -180,6 +180,10 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
   forever. The cost is that a password-reset request for an existing address takes a Resend round trip longer than one
   for an unknown address.
+- **At most 3 confirmation and 3 reset emails per address per hour**, whoever asks. Each sign-in to an unconfirmed
+  account resends its link, so without a cap anyone could flood an inbox and use up the day's Resend quota. The count
+  lives in `rate_limits` under a keyed hash of `email|<kind>|<address>`, never the address. Past the cap nothing is
+  sent and the request answers as usual; a failed count lets the email through.
 - **Better Auth's rate limits** (its defaults, plus 10 anonymous sign-ins an hour per client) are counted in MongoDB,
   so they hold across instances, by [`createRateLimitStorage`](src/auth/rate-limit-storage.ts): one `rate_limits`
   document per client and path, keyed by `HMAC-SHA256(key, "<ip>|<path>")` with its own HKDF key from

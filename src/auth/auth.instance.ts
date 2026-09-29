@@ -22,6 +22,11 @@ const RESET_TOKEN_TTL_S = 60 * 60
 // anonymously right before a first analysis.
 const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
 
+// Emails of one kind to one address per hour, whoever asks for them.
+const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 3 }
+
+type AuthEmailKind = 'confirmation' | 'reset'
+
 // Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
 const NO_PROVIDER_TOKENS = {
     accessToken: null,
@@ -82,9 +87,11 @@ const outbox = new AsyncLocalStorage<MailMessage[]>()
 
 export const withOutbox = <T>(run: () => T): T => outbox.run([], run)
 
+// An anonymous user has no mailbox: a send would only fail the request.
+const isPlaceholderAddress = (address: string): boolean => address.endsWith(ANONYMOUS_EMAIL_SUFFIX)
+
 const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> => {
-    // An anonymous user has no mailbox: a send would only fail the request.
-    if (message.to.endsWith(ANONYMOUS_EMAIL_SUFFIX)) {
+    if (isPlaceholderAddress(message.to)) {
         return
     }
 
@@ -134,6 +141,40 @@ export const createAuth = ({
     // so onLinkAccount can check a /verify-email confirmation against it before linking.
     const pendingLinks = db.collection<{ pendingLinkEmail?: string | null }>(USER_COLLECTION)
     const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
+    const rateLimits = createRateLimitStorage(db, secret)
+
+    // Fails open: a database blip must not stop a real user's email.
+    const isMailAllowed = async (kind: AuthEmailKind, address: string): Promise<boolean> => {
+        try {
+            const { allowed } = await rateLimits.consume(
+                `email|${kind}|${normalizeEmail(address)}`,
+                MAIL_PER_ADDRESS_LIMIT,
+            )
+
+            return allowed
+        } catch (err) {
+            logger.error(`could not check the ${kind} email limit: ${err instanceof Error ? err.message : err}`)
+            return true
+        }
+    }
+
+    // Each sign-in to an unconfirmed account resends its link, so without a cap anyone could flood an inbox and use up
+    // the day's sending quota. Counted like the rate limits, under a keyed hash of the address; past the cap nothing
+    // is sent and the request still answers as usual, so the cap reveals nothing about the account.
+    const queueCappedMail = async (kind: AuthEmailKind, message: MailMessage): Promise<void> => {
+        if (isPlaceholderAddress(message.to)) {
+            return
+        }
+
+        const isAllowed = await isMailAllowed(kind, message.to)
+
+        if (!isAllowed) {
+            logger.warn(`a ${kind} email was not sent: its address reached the hourly limit`)
+            return
+        }
+
+        await queueMail(mailer, message)
+    }
 
     // AnonymousCleanupService deletes an anonymous user a week after this. Sign-out deletes the session, so the time
     // must live on the user. A failed write only logs: the cleanup never deletes a user whose session is still live.
@@ -168,7 +209,7 @@ export const createAuth = ({
             ...(cookieDomain && { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }),
         },
         rateLimit: {
-            customStorage: createRateLimitStorage(db, secret),
+            customStorage: rateLimits,
             customRules: { '/sign-in/anonymous': ANONYMOUS_SIGN_IN_LIMIT },
         },
         emailAndPassword: {
@@ -178,7 +219,10 @@ export const createAuth = ({
             resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_S,
             revokeSessionsOnPasswordReset: true,
             sendResetPassword: async ({ user, token }) =>
-                queueMail(mailer, passwordResetEmail(user.email, toWebLink(webOrigin, '/reset-password', token))),
+                queueCappedMail(
+                    'reset',
+                    passwordResetEmail(user.email, toWebLink(webOrigin, '/reset-password', token)),
+                ),
         },
         socialProviders,
         emailVerification: {
@@ -186,7 +230,10 @@ export const createAuth = ({
             sendOnSignIn: true,
             autoSignInAfterVerification: true,
             sendVerificationEmail: async ({ user, token }) =>
-                queueMail(mailer, verificationEmail(user.email, toWebLink(webOrigin, '/confirm-email', token))),
+                queueCappedMail(
+                    'confirmation',
+                    verificationEmail(user.email, toWebLink(webOrigin, '/confirm-email', token)),
+                ),
         },
         user: {
             // Set by hand in the database (QuotaService lifts the analysis limit for admins). `input: false` keeps it
