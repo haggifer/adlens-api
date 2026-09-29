@@ -612,6 +612,15 @@ describe('Jobs API (e2e)', () => {
             expect((await usage('203.0.113.5')).total).toBe(30)
         })
 
+        it('only calls Turnstile when a rule requires it, whatever token the client sends', async () => {
+            await seedNetwork('203.0.113.9', 10)
+
+            await createFrom(MEMBER, '203.0.113.8', { challengeToken: 'fail' }).expect(201)
+            await createFrom(ADMIN, '203.0.113.9', { challengeToken: 'fail' }).expect(201)
+
+            expect(verifyChallenge).not.toHaveBeenCalled()
+        })
+
         it('refuses a new job once the user has no analyses left', async () => {
             const res = await createFrom(LIMITED, '203.0.113.6').expect(429)
 
