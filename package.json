@@ -12,6 +12,7 @@
         "start:dev": "nest start --watch",
         "start:prod": "node dist/main",
         "start:worker": "node dist/worker",
+        "start:cleanup": "node dist/cleanup",
         "lint": "eslint .",
         "format": "prettier --write .",
         "test": "jest",

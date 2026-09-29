@@ -30,6 +30,11 @@ repos.
 - **Worker** (`src/worker.ts` → `WorkerModule`): the same image run as an **on-demand Cloud Run Job**. The API starts
   one execution per analysis; the worker analyzes that job once and exits. It has no HTTP layer and no dispatcher, so
   it can never start another worker.
+- **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
+  started by Cloud Scheduler at 03:00 UTC. It deletes anonymous users unused for a week (see Authentication), and the
+  videos of uploads left `pending` for a week ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)):
+  every object's path is made from its user and job ids, so the jobs find them all. The job document stays, and
+  analyzing it later answers `UPLOAD_INCOMPLETE`. A sample's shared video is never deleted.
 - **Realtime**: a MongoDB Change Stream on `jobs` pushes every update to the owner's Socket.IO room. The stream is
   reopened from its last resume token after errors.
 - **Contract**: every request body, response and error has a Zod schema in `adlens-shared`. The API returns the
@@ -131,6 +136,13 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   anonymous user — otherwise a confirmation link mailed to someone else could hijack a visitor's analyses.
   `/link-social` is refused for an anonymous session (it could attach a provider and stay anonymous forever), and so
   is `/delete-anonymous-user` (it deletes through Better Auth's internal adapter and would skip the purge).
+- **Abandoned anonymous users are deleted after a week.** Every time an anonymous session is created or refreshed
+  (Better Auth refreshes a session at most once a day), a session hook stamps `lastSeenAt` on the user. The daily
+  cleanup job ([`AnonymousCleanupService`](src/cleanup/anonymous-cleanup.service.ts)) deletes each anonymous user whose
+  `lastSeenAt` (or, without one, `createdAt`) is more than 7 days old and who has no unexpired session: first its jobs
+  and uploads (`AccountDataService.purge`), then its sessions, accounts and the user document. A user whose purge fails
+  stays and is tried again the next day. The stamp must live on the user because signing out ("Forget this browser")
+  deletes the session.
 - **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
   `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
 - **Email verification is required** before the first sign-in; signing in unverified resends the link.
@@ -244,7 +256,7 @@ Set `"isPublished": false` and publish again to hide a sample.
 ## Layout
 
 ```
-src/        main.ts (API) and worker.ts (analysis worker), one Nest module per feature: jobs, analysis, rules, quota,
+src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs, analysis, rules, quota,
             ip-quota, challenge, auth, account, mail, storage, realtime, database, config
 test/       e2e (Supertest) and auth-flow tests
 scripts/    ruleset publishing, dependency guard
@@ -324,12 +336,13 @@ Every push to `init-setup` that passes CI deploys to production
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The `deploy` job signs in to Google Cloud with Workload
 Identity Federation: GitHub's OIDC token is exchanged for a short-lived credential, no service account key exists, and
 only this repository's pushes to `init-setup` are accepted. It builds one image, pushes it to Artifact Registry, rolls
-the `adlens-analyze` job and then the `adlens-api` service to that digest, and ends with a health check.
+the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, and ends with a health check.
 
 [`infra/setup.sh`](infra/setup.sh) (plain gcloud, see [Design decisions](#design-decisions)) creates
 everything the workflow relies on: the APIs, the bucket and its CORS policy from [`infra/cors.json`](infra/cors.json),
-the runtime and deploy service accounts, the Workload Identity provider, the `API_SECRETS` bundle and the image
-repository. It also owns the runtime config (env vars, secrets, the job's 2 retries and 15-minute timeout), which CI
+the runtime and deploy service accounts, the Workload Identity provider, the `API_SECRETS` bundle, the image
+repository and the Cloud Scheduler job that starts `adlens-cleanup` daily. It also owns the runtime config (env vars,
+secrets, the analysis job's 2 retries and 15-minute timeout, the cleanup job's schedule), which CI
 leaves untouched, and can deploy the current checkout by hand. The API is served at `https://api.useadlens.com`
 through a Cloud Run domain mapping.
 
@@ -365,8 +378,11 @@ Why the system is built this way, and what was rejected. Decisions that span the
   over 99% of the time at a few analyses a week. A job costs nothing when idle and gives per-run isolation, retries and
   a hard timeout. Cloud Tasks pushing to a scale-to-zero service would also work; worker pools with an external
   autoscaler were more moving parts for no gain at this load.
-- **One image, two entry points.** The API (`dist/main`) and the worker (`dist/worker`) share code and an image but have
-  separate composition roots, so the worker has no HTTP layer and can't start another worker.
+- **One image, three entry points.** The API (`dist/main`), the worker (`dist/worker`) and the cleanup (`dist/cleanup`)
+  share code and an image but have separate composition roots, so the jobs have no HTTP layer and can't start a worker.
+- **The cleanup is a scheduled Cloud Run Job, not a cron inside the API.** The API scales to zero and may run several
+  instances, so an in-process timer would miss days or run twice; Cloud Scheduler starting a job runs it once a day for
+  free (3 scheduler jobs per billing account are free) and shows each run's outcome in the console.
 - **MongoDB (Atlas) over Postgres.** A job is one nested document (settings, media facts, analysis), and Change Streams
   give realtime updates without a separate broker. They need a replica set, which Atlas provides (and Better Auth needs
   for transactions).
@@ -422,8 +438,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
 **Auth and hosting**
 
 - **Anonymous users are real Better Auth users**, created only when a visitor starts an analysis, so every existing
-  path (jobs, quota, history, Socket.IO) works unchanged and crawlers create none. Abandoned anonymous users aren't
-  cleaned up yet.
+  path (jobs, quota, history, Socket.IO) works unchanged and crawlers create none. Once nobody can reach one (its
+  session expired or was signed out), the daily cleanup deletes it a week after it was last seen.
 - **Linking moves ownership, not objects.** `jobs.userId` is rewritten and the runs are merged, but the GCS objects stay
   where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge

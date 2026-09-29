@@ -27,7 +27,7 @@ jobs:
 
     # Production deploy of a verified push to init-setup. Authenticates to Google Cloud through Workload Identity
     # Federation (GitHub's OIDC token, no stored key; the provider only accepts this repo on this branch), builds one
-    # image and rolls both the worker job and the API to its digest. Env and secrets stay as infra/setup.sh set them.
+    # image and rolls both jobs and the API to its digest. Env and secrets stay as infra/setup.sh set them.
     deploy:
         needs: verify
         if: github.event_name == 'push' && github.ref == 'refs/heads/init-setup'
@@ -60,6 +60,8 @@ jobs:
             # The worker first, so the API never launches a job on an older image than its own.
             - name: Deploy the analysis worker job
               run: gcloud run jobs update adlens-analyze --region "$REGION" --image "$IMAGE_REF"
+            - name: Deploy the cleanup job
+              run: gcloud run jobs update adlens-cleanup --region "$REGION" --image "$IMAGE_REF"
             - name: Deploy the API
               run: gcloud run services update adlens-api --region "$REGION" --image "$IMAGE_REF"
             - name: Check the API is healthy

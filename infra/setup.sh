@@ -4,7 +4,8 @@
 # design decisions).
 #
 # The analysis runs as an on-demand Cloud Run Job (adlens-analyze) launched by the API — there is no
-# always-on worker service and no Redis.
+# always-on worker service and no Redis. A second job (adlens-cleanup), started daily by Cloud Scheduler, deletes
+# anonymous users unused for a week.
 #
 # Day-to-day deploys don't use this script: every push to init-setup that passes CI is built into one image and rolled
 # out to the job and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
@@ -45,6 +46,9 @@ IMAGE_REPO=adlens
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${IMAGE_REPO}/api"
 API_SVC=adlens-api
 ANALYZE_JOB=adlens-analyze
+CLEANUP_JOB=adlens-cleanup
+# Daily, at a quiet hour for Europe. Anonymous data is kept for a week, so a missed day only delays a deletion.
+CLEANUP_SCHEDULE="0 3 * * *"
 WEB_ORIGIN=https://www.useadlens.com
 API_URL=https://api.useadlens.com
 COOKIE_DOMAIN=useadlens.com
@@ -68,7 +72,7 @@ gcloud config set project "$PROJECT"
 echo "== enable APIs =="
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
     aiplatform.googleapis.com secretmanager.googleapis.com storage.googleapis.com iamcredentials.googleapis.com \
-    sts.googleapis.com
+    sts.googleapis.com cloudscheduler.googleapis.com
 
 echo "== uploads bucket + CORS =="
 gcloud storage buckets describe "gs://$BUCKET" >/dev/null 2>&1 || \
@@ -331,6 +335,17 @@ gcloud run jobs deploy "$ANALYZE_JOB" --image="$IMAGE_REF" --region="$REGION" --
 # to a custom role with only run.jobs.run + run.executions.get if you prefer (verify with a dry run).
 gcloud run jobs add-iam-policy-binding "$ANALYZE_JOB" --region="$REGION" \
     --member="serviceAccount:$RUNTIME_SA" --role="roles/run.developer"
+
+echo "== deploy cleanup job (daily; runs dist/cleanup, no retries: the next day's run catches up) =="
+gcloud run jobs deploy "$CLEANUP_JOB" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA"     --command="node" --args="dist/cleanup" --tasks=1 --max-retries=0 --task-timeout=10m     --cpu=1 --memory=512Mi     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest"     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,SECRETS_FILE=$SECRETS_PATH"
+# Cloud Scheduler starts the job as the runtime SA, which needs only run.invoker on this one job.
+gcloud run jobs add-iam-policy-binding "$CLEANUP_JOB" --region="$REGION"     --member="serviceAccount:$RUNTIME_SA" --role="roles/run.invoker"
+if gcloud scheduler jobs describe "$CLEANUP_JOB" --location="$REGION" >/dev/null 2>&1; then
+    SCHEDULER_VERB=update
+else
+    SCHEDULER_VERB=create
+fi
+gcloud scheduler jobs "$SCHEDULER_VERB" http "$CLEANUP_JOB" --location="$REGION"     --schedule="$CLEANUP_SCHEDULE" --time-zone="Etc/UTC"     --uri="https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/$CLEANUP_JOB:run"     --http-method=POST --oauth-service-account-email="$RUNTIME_SA"
 
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
