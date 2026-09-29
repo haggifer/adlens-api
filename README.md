@@ -147,8 +147,9 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   work unchanged. When they sign up or in, `onLinkAccount` moves their jobs (`userId`) and quota runs to the account
   ([`AccountDataService.adopt`](src/account/account-data.service.ts)), then the plugin deletes the anonymous user.
   `/verify-email` links only when the anonymous session confirming it is the one that started that sign-up: the
-  address is recorded as `pendingLinkEmail` on the anonymous user document (written straight to the collection, never
-  through a Better Auth field), and a mismatch answers 403 `ACCOUNT_LINK_FAILED` and leaves the history with the
+  address is added to `pendingLinkEmails` on the anonymous user document (the last 5, so a sign-up corrected for a typo
+  keeps the first link working; written straight to the collection, never through a Better Auth field), and a mismatch
+  answers 403 `ACCOUNT_LINK_FAILED` and leaves the history with the
   anonymous user — otherwise a confirmation link mailed to someone else could hijack a visitor's analyses.
   `/link-social` is refused for an anonymous session (it could attach a provider and stay anonymous forever), and so
   is `/delete-anonymous-user` (it deletes through Better Auth's internal adapter and would skip the purge).

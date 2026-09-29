@@ -521,6 +521,27 @@ test('confirming a sign-up in the same browser moves the anonymous history to th
     assert.deepEqual(deletedPaths, [])
 })
 
+test("a corrected second sign-up doesn't stop the first sign-up's link from moving the history", async () => {
+    const { ObjectId } = require('mongodb')
+    const first = 'first-try@example.com'
+    const anonymous = await signInAnonymously()
+
+    await post('/api/auth/sign-up/email', { name: 'First', email: first, password: 'first-password' }, anonymous.cookie)
+    await post(
+        '/api/auth/sign-up/email',
+        { name: 'Second', email: 'second-try@example.com', password: 'second-password' },
+        anonymous.cookie,
+    )
+
+    const confirmed = await confirmEmail(first, anonymous.cookie)
+    const afterConfirming = await withDb((db) =>
+        db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+    )
+
+    assert.equal(confirmed.status, 200)
+    assert.equal(afterConfirming, null)
+})
+
 test('deleting an account also deletes the videos it adopted from an anonymous session', async () => {
     const linker = await withDb((db) => db.collection('user').findOne({ email: 'linker@example.com' }))
     const deleted = await post('/api/auth/delete-user', { password: 'first-password' }, linkerSession)

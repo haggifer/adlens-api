@@ -27,6 +27,10 @@ const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 3 }
 
 type AuthEmailKind = 'confirmation' | 'reset'
 
+// Sign-ups one anonymous session may still confirm: a visitor who fixes a typo and signs up again keeps the first
+// link working.
+const MAX_PENDING_LINK_EMAILS = 5
+
 // Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
 const NO_PROVIDER_TOKENS = {
     accessToken: null,
@@ -137,9 +141,9 @@ export const createAuth = ({
     onDeleteUser,
     onLinkAnonymous,
 }: AuthOptions) => {
-    // Not a Better Auth field (no endpoint can set or return it): the email an anonymous session signed up with,
-    // so onLinkAccount can check a /verify-email confirmation against it before linking.
-    const pendingLinks = db.collection<{ pendingLinkEmail?: string | null }>(USER_COLLECTION)
+    // Not a Better Auth field (no endpoint can set or return it): the emails an anonymous session signed up with,
+    // so onLinkAccount can check a /verify-email confirmation against them before linking.
+    const pendingLinks = db.collection<{ pendingLinkEmails?: string[] }>(USER_COLLECTION)
     const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
     const rateLimits = createRateLimitStorage(db, secret)
 
@@ -280,7 +284,7 @@ export const createAuth = ({
                         const pending = await pendingLinks.findOne({ _id: new ObjectId(anonymousUser.user.id) })
                         const confirmedEmail = normalizeEmail(newUser.user.email)
 
-                        if (!pending?.pendingLinkEmail || pending.pendingLinkEmail !== confirmedEmail) {
+                        if (!pending?.pendingLinkEmails?.includes(confirmedEmail)) {
                             logger.error(
                                 `refused to link anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: the confirmed email does not match the sign-up that started the anonymous session`,
                             )
@@ -340,10 +344,24 @@ export const createAuth = ({
 
                     // Recorded so onLinkAccount can check a later /verify-email confirmation against it.
                     if (session?.user.isAnonymous) {
-                        await pendingLinks.updateOne(
-                            { _id: new ObjectId(session.user.id) },
-                            { $set: { pendingLinkEmail: normalizeEmail(email) } },
-                        )
+                        const normalized = normalizeEmail(email)
+                        const others = {
+                            $filter: {
+                                input: { $ifNull: ['$pendingLinkEmails', []] },
+                                cond: { $ne: ['$$this', normalized] },
+                            },
+                        }
+
+                        // The newest last, without repeats, keeping only the latest few.
+                        await pendingLinks.updateOne({ _id: new ObjectId(session.user.id) }, [
+                            {
+                                $set: {
+                                    pendingLinkEmails: {
+                                        $slice: [{ $concatArrays: [others, [normalized]] }, -MAX_PENDING_LINK_EMAILS],
+                                    },
+                                },
+                            },
+                        ])
                     }
                 }
             }),
