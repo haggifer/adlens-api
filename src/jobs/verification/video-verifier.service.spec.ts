@@ -39,6 +39,15 @@ describe('VideoVerifier', () => {
         })
     })
 
+    it('accepts a video exactly at the size and duration limits', async () => {
+        const outcome = await build(
+            { ...MP4, sizeBytes: MAX_UPLOAD_BYTES },
+            { ...PROBE, durationS: MAX_DURATION_S },
+        ).verify('p')
+
+        expect(outcome).toMatchObject({ kind: 'verified' })
+    })
+
     it('reports an upload that has not arrived yet', async () => {
         expect(await build(null).verify('p')).toEqual({ kind: 'upload-incomplete' })
     })
@@ -49,6 +58,7 @@ describe('VideoVerifier', () => {
         ['undecodable', MP4, new UndecodableMediaError('Invalid data found'), JobErrorCode.VideoUnreadable],
         ['too long', MP4, { ...PROBE, durationS: MAX_DURATION_S + 1 }, JobErrorCode.VideoTooLong],
         ['without a duration', MP4, { ...PROBE, durationS: Number.NaN }, JobErrorCode.VideoUnreadable],
+        ['of zero length', MP4, { ...PROBE, durationS: 0 }, JobErrorCode.VideoUnreadable],
     ])('rejects a video that is %s', async (_case, info, probe, errorCode) => {
         expect(await build(info, probe).verify('p')).toEqual({ kind: 'rejected', errorCode })
     })
