@@ -72,3 +72,6 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
   Turnstile verifier (`'pass'` passes), and `X-Forwarded-For` picks each test's network.
 - A Better Auth index that fails to build only logs `could not create the Better Auth index <name>` at startup. After
   a deploy that adds one, check the logs, or `getIndexes()` in Atlas.
+- Before upgrading Better Auth, diff its table-level `indexes` against `AUTH_INDEXES`: an index on the same key with
+  a different name or options raises `IndexOptionsConflict` in the adapter's `ensureModelIndexes`, which runs before
+  every write, so every write would fail.
