@@ -24,6 +24,12 @@
 # individual secrets of the same names already held.
 set -euo pipefail
 
+# Git Bash (MSYS) rewrites an argument that looks like a POSIX path before it reaches a native program — which
+# mangles SECRETS_FILE's value and a secret's mount path inside --set-env-vars / --set-secrets. Exclude only those
+# two flags, never MSYS_NO_PATHCONV globally: that also stops the gcloud launcher script from finding itself.
+# Harmless where MSYS2_ARG_CONV_EXCL doesn't exist (Linux, macOS).
+export MSYS2_ARG_CONV_EXCL="--set-env-vars=;--set-secrets="
+
 PROJECT=adlens-ca57f
 PROJECT_NUMBER=629217115736
 REGION=europe-west1
@@ -49,7 +55,8 @@ GITHUB_CLIENT_ID=Ov23ct4gfbO6JyiOGopx
 SECRETS_BUNDLE=API_SECRETS
 SECRETS_PATH=/secrets/api.json
 BUNDLE_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL GOOGLE_CLIENT_SECRET GITHUB_CLIENT_SECRET TURNSTILE_SECRET_KEY"
-REQUIRED_KEYS="MONGODB_URI BETTER_AUTH_SECRET"
+# RESEND_API_KEY is required because MailModule asserts it at startup; the API won't boot without it.
+REQUIRED_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY"
 
 gcloud config set project "$PROJECT"
 
@@ -77,82 +84,160 @@ echo "== secrets: build/update the API_SECRETS bundle =="
 gcloud secrets describe "$SECRETS_BUNDLE" >/dev/null 2>&1 || \
     gcloud secrets create "$SECRETS_BUNDLE" --replication-policy=automatic
 
-# The bundle's current value, so an unexported key keeps what it already had. Empty when the secret has no version yet.
-CURRENT_BUNDLE_JSON=$(gcloud secrets versions access latest --secret="$SECRETS_BUNDLE" 2>/dev/null || echo '{}')
-export CURRENT_BUNDLE_JSON
+# An ENABLED version must exist before we try to read one: a secret with none yet is not a read failure (use {}),
+# but a real read failure once one exists must abort, not silently become an empty bundle. `tr -d '\r'` strips the
+# CRLF Git Bash's gcloud sometimes emits.
+LATEST_ENABLED_VERSION=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state=ENABLED" \
+    --sort-by="~createTime" --limit=1 --format="value(name)" | tr -d '\r')
 
-# Reads one key out of $CURRENT_BUNDLE_JSON. A separate node call per key keeps each value out of the shell's own
-# variable-expansion and quoting, and off the command line of anything but node itself.
-bundle_value() {
-    KEY="$1" node -e '
-        const bundle = JSON.parse(process.env.CURRENT_BUNDLE_JSON || "{}")
-        const value = bundle[process.env.KEY]
-        if (typeof value === "string") process.stdout.write(value)
-    '
-}
+if [ -n "$LATEST_ENABLED_VERSION" ]; then
+    CURRENT_BUNDLE_JSON=$(gcloud secrets versions access latest --secret="$SECRETS_BUNDLE")
+else
+    CURRENT_BUNDLE_JSON='{}'
+fi
 
-# Migration only: before the bundle, each key was its own secret. Never used once every key resolves from an export
-# or the bundle itself.
-legacy_secret_value() {
-    gcloud secrets versions access latest --secret="$1" 2>/dev/null || true
-}
-
-for name in $BUNDLE_KEYS; do
-    if [ -n "${!name:-}" ]; then
-        export "RESOLVED_$name=${!name}"
-        continue
-    fi
-
-    current_value=$(bundle_value "$name")
-    if [ -n "$current_value" ]; then
-        export "RESOLVED_$name=$current_value"
-        continue
-    fi
-
-    legacy_value=$(legacy_secret_value "$name")
-    if [ -n "$legacy_value" ]; then
-        export "RESOLVED_$name=$legacy_value"
-    fi
-done
-
-for name in $REQUIRED_KEYS; do
-    resolved="RESOLVED_$name"
-    if [ -z "${!resolved:-}" ]; then
-        echo "Missing required secret: $name — export it and re-run (see the header comment)." >&2
-        exit 1
-    fi
-done
-
-# Builds the bundle's JSON from the RESOLVED_* env vars, with sorted keys so it compares stably below.
-build_bundle_json() {
-    BUNDLE_KEYS="$BUNDLE_KEYS" node -e '
-        const bundle = {}
-        for (const key of process.env.BUNDLE_KEYS.split(" ")) {
-            const value = process.env["RESOLVED_" + key]
-            if (value !== undefined) bundle[key] = value
-        }
-        process.stdout.write(JSON.stringify(bundle, Object.keys(bundle).sort()))
-    '
-}
-
-# Re-serializes an existing bundle with sorted keys, so an unchanged bundle compares equal regardless of key order.
+# Validates the bundle is a JSON object of strings whose keys are all known, and re-serializes it with sorted keys
+# so later comparisons don't depend on key order. Never prints what failed to parse — only a fixed message — and a
+# key BUNDLE_KEYS doesn't know about fails loudly instead of being silently dropped (which would rewrite the bundle
+# on every run). Takes the bundle on stdin, never as an argument or an env var, which Git Bash rewrites when a
+# value looks like a POSIX path.
 normalize_bundle_json() {
-    node -e '
+    BUNDLE_KEYS="$BUNDLE_KEYS" node -e '
+        const allowed = new Set((process.env.BUNDLE_KEYS || "").split(" ").filter(Boolean))
         let input = ""
         process.stdin.on("data", (chunk) => { input += chunk })
         process.stdin.on("end", () => {
-            const parsed = JSON.parse(input || "{}")
+            let parsed
+            try {
+                parsed = JSON.parse(input || "{}")
+            } catch {
+                console.error("API_SECRETS latest version is not a JSON object of strings")
+                process.exit(1)
+            }
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                console.error("API_SECRETS latest version is not a JSON object of strings")
+                process.exit(1)
+            }
+            const unknown = []
+            for (const [key, value] of Object.entries(parsed)) {
+                if (typeof value !== "string") {
+                    console.error("API_SECRETS latest version is not a JSON object of strings")
+                    process.exit(1)
+                }
+                if (!allowed.has(key)) unknown.push(key)
+            }
+            if (unknown.length > 0) {
+                console.error(
+                    `API_SECRETS has keys BUNDLE_KEYS does not list: ${unknown.sort().join(", ")}. ` +
+                    "Add them to BUNDLE_KEYS in infra/setup.sh, or remove them from the bundle by hand.",
+                )
+                process.exit(1)
+            }
             process.stdout.write(JSON.stringify(parsed, Object.keys(parsed).sort()))
         })
     '
 }
 
-NEW_BUNDLE_JSON=$(build_bundle_json)
 CURRENT_BUNDLE_NORMALIZED=$(printf '%s' "$CURRENT_BUNDLE_JSON" | normalize_bundle_json)
+unset CURRENT_BUNDLE_JSON
+
+# Reads one key out of $CURRENT_BUNDLE_NORMALIZED, given on stdin (never an env var or an argument).
+bundle_value() {
+    printf '%s' "$CURRENT_BUNDLE_NORMALIZED" | KEY="$1" node -e '
+        let input = ""
+        process.stdin.on("data", (chunk) => { input += chunk })
+        process.stdin.on("end", () => {
+            let bundle
+            try {
+                bundle = JSON.parse(input || "{}")
+            } catch {
+                console.error("API_SECRETS latest version is not a JSON object of strings")
+                process.exit(1)
+            }
+            const value = bundle[process.env.KEY]
+            if (typeof value === "string") process.stdout.write(value)
+        })
+    '
+}
+
+# Migration only: before the bundle, each key was its own secret. A missing secret means "never had one" (skip);
+# an existing one that can't be read is a real problem, so this never silently drops a value that exists.
+legacy_secret_value() {
+    gcloud secrets describe "$1" >/dev/null 2>&1 || return 0
+    gcloud secrets versions access latest --secret="$1"
+}
+
+declare -A RESOLVED_VALUE
+declare -A RESOLVED_SOURCE
+
+for name in $BUNDLE_KEYS; do
+    if [ -n "${!name:-}" ]; then
+        RESOLVED_VALUE[$name]="${!name}"
+        RESOLVED_SOURCE[$name]=exported
+        continue
+    fi
+
+    current_value=$(bundle_value "$name")
+    if [ -n "$current_value" ]; then
+        RESOLVED_VALUE[$name]="$current_value"
+        RESOLVED_SOURCE[$name]=bundle
+        continue
+    fi
+
+    legacy_value=$(legacy_secret_value "$name")
+    if [ -n "$legacy_value" ]; then
+        RESOLVED_VALUE[$name]="$legacy_value"
+        RESOLVED_SOURCE[$name]=legacy
+    fi
+done
+
+for name in $REQUIRED_KEYS; do
+    if [ -z "${RESOLVED_VALUE[$name]:-}" ]; then
+        echo "Missing required secret: $name — export it and re-run (see the header comment)." >&2
+        exit 1
+    fi
+done
+
+# Builds the bundle's JSON from RESOLVED_VALUE on stdin, NUL-delimited (a bash variable can never contain a NUL
+# byte, so it's a safe separator even for a value with a newline in it). No secret ever touches a child process's
+# argv or environment — only this pipe — so Git Bash's POSIX-path rewriting can't reach it.
+build_bundle_json() {
+    {
+        for name in $BUNDLE_KEYS; do
+            if [ -n "${RESOLVED_SOURCE[$name]:-}" ]; then
+                printf '%s\0%s\0' "$name" "${RESOLVED_VALUE[$name]}"
+            fi
+        done
+    } | node -e '
+        const chunks = []
+        process.stdin.on("data", (chunk) => chunks.push(chunk))
+        process.stdin.on("end", () => {
+            const parts = Buffer.concat(chunks).toString("utf8").split("\u0000")
+            const bundle = {}
+            for (let i = 0; i + 1 < parts.length; i += 2) {
+                bundle[parts[i]] = parts[i + 1]
+            }
+            process.stdout.write(JSON.stringify(bundle, Object.keys(bundle).sort()))
+        })
+    '
+}
+
+NEW_BUNDLE_JSON=$(build_bundle_json)
 
 if [ "$NEW_BUNDLE_JSON" != "$CURRENT_BUNDLE_NORMALIZED" ]; then
+    echo "About to write a new API_SECRETS version. Source of each key (never the value):"
+    for name in $BUNDLE_KEYS; do
+        echo "  $name: ${RESOLVED_SOURCE[$name]:-absent}"
+    done
+    read -r -p "Write this bundle to API_SECRETS? [y/N] " CONFIRM_WRITE
+    if [ "$CONFIRM_WRITE" != "y" ]; then
+        echo "Aborted: API_SECRETS was not changed." >&2
+        exit 1
+    fi
     printf '%s' "$NEW_BUNDLE_JSON" | gcloud secrets versions add "$SECRETS_BUNDLE" --data-file=-
 fi
+
+unset CURRENT_BUNDLE_NORMALIZED NEW_BUNDLE_JSON RESOLVED_VALUE RESOLVED_SOURCE
 
 gcloud secrets add-iam-policy-binding "$SECRETS_BUNDLE" --member="serviceAccount:$RUNTIME_SA" --role="roles/secretmanager.secretAccessor"
 
@@ -209,13 +294,16 @@ gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-a
     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH"
 
 echo "== prune old API_SECRETS versions (the free tier counts disabled versions too) =="
-# CI and this script always roll forward from :latest, so an old revision never needs an old version.
-ENABLED_VERSIONS=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state=ENABLED" --sort-by="~createTime" \
-    --format="value(name)")
-KEEP_LATEST=1
-for version in $ENABLED_VERSIONS; do
-    if [ "$KEEP_LATEST" = "1" ]; then
-        KEEP_LATEST=0
+# CI and this script always roll forward from :latest, so nothing needs an old version — ENABLED or DISABLED. Keep
+# only the version :latest itself resolves to (the newest ENABLED one); destroy every other non-destroyed version.
+# `tr -d '\r'` strips the CRLF Git Bash's gcloud sometimes emits.
+ALL_VERSIONS=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state!=DESTROYED" --sort-by="~createTime" \
+    --format="value(name.basename())" | tr -d '\r')
+LATEST_ENABLED=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state=ENABLED" --sort-by="~createTime" \
+    --limit=1 --format="value(name.basename())" | tr -d '\r')
+
+for version in $ALL_VERSIONS; do
+    if [ "$version" = "$LATEST_ENABLED" ]; then
         continue
     fi
     gcloud secrets versions destroy "$version" --secret="$SECRETS_BUNDLE" --quiet
