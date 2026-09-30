@@ -229,7 +229,10 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 Rules are data. The ruleset is authored **outside this repo**, as a JSON file in the shape of
 [`ruleSetSchema`](src/rules/schema.ts), and published to MongoDB as an **immutable version** with
 `npm run rules:publish -- <path/to/rules.json>` (validated by the same Zod schema the worker parses it with; a
-version that already exists is refused). The worker serves the newest published version via
+version that already exists is refused). After publishing, the script keeps a copy named `rules_<version>.json` and
+rewrites `rules_current_summary.md` next to the file (`npm run rules:summary` writes the summary alone): which app
+options reach each rule platform, the placements, regions and check types in use, and the sources, so the code's
+options can be checked against every new version. The worker serves the newest published version via
 [`RulesetService`](src/rules/ruleset.service.ts), so a rules update needs no redeploy, and every analysis records the
 `rulesetVersion` it ran with.
 
