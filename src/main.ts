@@ -10,6 +10,7 @@ import { ApiExceptionFilter } from './common/api-exception.filter'
 import { createLogger } from './common/cloud-logger'
 import type { Env } from './config/env'
 import { readLogFormat } from './config/log-format'
+import { allowedWebOrigins } from './config/web-origins'
 import { RealtimeIoAdapter } from './realtime/realtime-io.adapter'
 
 const bootstrap = async () => {
@@ -20,13 +21,13 @@ const bootstrap = async () => {
     })
     const config = app.get<ConfigService<Env, true>>(ConfigService)
     const auth = app.get<AuthInstance>(AUTH)
-    const webOrigin = config.get('WEB_ORIGIN', { infer: true })
+    const webOrigins = allowedWebOrigins(config.get('WEB_ORIGIN', { infer: true }))
 
     app.use(helmet())
-    app.enableCors({ origin: webOrigin, credentials: true })
+    app.enableCors({ origin: webOrigins, credentials: true })
     app.enableShutdownHooks()
     app.useGlobalFilters(new ApiExceptionFilter())
-    app.useWebSocketAdapter(new RealtimeIoAdapter(app, webOrigin))
+    app.useWebSocketAdapter(new RealtimeIoAdapter(app, webOrigins))
     const authHandler = toNodeHandler(auth)
     app.getHttpAdapter()
         .getInstance()

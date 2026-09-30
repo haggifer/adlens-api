@@ -2,11 +2,11 @@ import type { INestApplicationContext } from '@nestjs/common'
 import { IoAdapter } from '@nestjs/platform-socket.io'
 import type { ServerOptions } from 'socket.io'
 
-// Socket.IO with the same single allowed origin as HTTP CORS; the gateway decorator can't read config itself.
+// Socket.IO with the same allowed origins as HTTP CORS; the gateway decorator can't read config itself.
 export class RealtimeIoAdapter extends IoAdapter {
     constructor(
         app: INestApplicationContext,
-        private readonly webOrigin: string,
+        private readonly webOrigins: string[],
     ) {
         super(app)
     }
@@ -16,7 +16,7 @@ export class RealtimeIoAdapter extends IoAdapter {
         return super.createIOServer(port, {
             ...options,
             transports: ['websocket'],
-            cors: { origin: this.webOrigin, credentials: true },
+            cors: { origin: this.webOrigins, credentials: true },
         })
     }
 }

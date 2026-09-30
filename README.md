@@ -308,7 +308,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `STORAGE_BUCKET`         | required                | The uploads bucket                                                          |
 | `BETTER_AUTH_SECRET`     | required by the API     | Better Auth signing secret                                                  |
 | `BETTER_AUTH_URL`        | `http://localhost:8080` | The API's own public URL                                                    |
-| `WEB_ORIGIN`             | `http://localhost:3000` | The one web origin allowed by CORS, Socket.IO and Better Auth               |
+| `WEB_ORIGIN`             | `http://localhost:3000` | Web origin for CORS, Socket.IO, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
 | `COOKIE_DOMAIN`          | —                       | Parent domain for the session cookie in production (`useadlens.com`)        |
 | `RESEND_API_KEY`         | required by the API     | Resend sending key; the API won't start without it                          |
 | `CONTACT_EMAIL`          | —                       | Where Contact form messages go; unset, the form answers 503                 |

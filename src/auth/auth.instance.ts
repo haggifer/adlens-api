@@ -7,6 +7,7 @@ import { anonymous } from 'better-auth/plugins/anonymous'
 import { type Db, type MongoClient, ObjectId } from 'mongodb'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { format } from 'node:util'
+import { allowedWebOrigins } from '../config/web-origins'
 import { USER_COLLECTION } from '../database/user.doc'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
@@ -205,7 +206,7 @@ export const createAuth = ({
         baseURL,
         basePath: '/api/auth',
         logger: { log: logBetterAuth },
-        trustedOrigins: [webOrigin],
+        trustedOrigins: allowedWebOrigins(webOrigin),
         advanced: {
             // Better Auth skips its origin and callback-URL checks when NODE_ENV is test; keep them on so the tests
             // run with the same protection as production.
