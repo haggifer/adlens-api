@@ -7,7 +7,14 @@ import {
     RulePlatform,
     type TimeRange,
 } from 'adlens-shared'
-import { resolveRef, type Rule, RULE_PLATFORMS, type RuleSet } from './schema'
+import {
+    aspectRatioListParamsSchema,
+    aspectRatioRangeParamsSchema,
+    resolveRef,
+    type Rule,
+    RULE_PLATFORMS,
+    type RuleSet,
+} from './schema'
 
 const ASPECT_RATIO_TOLERANCE = 0.02
 
@@ -68,8 +75,39 @@ const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string 
     ref: resolveRef(rule.ref, ruleSet.sources),
 })
 
+const toRatio = (label: string): number => {
+    const [width, height] = label.split(':').map(Number)
+
+    return width / height
+}
+
+const evaluateAspectRatio = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 'verdict' | 'detail'> => {
+    if (media.width === undefined || media.height === undefined) {
+        return { verdict: 'unknown', detail: 'Video dimensions unavailable' }
+    }
+
+    const ratio = media.width / media.height
+    const aspect = `Aspect ${ratio.toFixed(3)}`
+
+    if (rule.checkType === 'aspect_ratio_one_of') {
+        const { ratios } = aspectRatioListParamsSchema.parse(rule.params)
+        const isListed = ratios.some((label) => Math.abs(ratio - toRatio(label)) <= ASPECT_RATIO_TOLERANCE)
+
+        return { verdict: isListed ? 'pass' : 'fail', detail: `${aspect} vs allowed ${ratios.join(', ')}` }
+    }
+
+    const { min, max } = aspectRatioRangeParamsSchema.parse(rule.params)
+    const isInRange = ratio >= toRatio(min) - ASPECT_RATIO_TOLERANCE && ratio <= toRatio(max) + ASPECT_RATIO_TOLERANCE
+
+    return { verdict: isInRange ? 'pass' : 'fail', detail: `${aspect} vs allowed ${min} to ${max}` }
+}
+
 const evaluateMetadataRule = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 'verdict' | 'detail'> => {
     const { value, unit } = rule
+
+    if (rule.checkType === 'aspect_ratio_one_of' || rule.checkType === 'aspect_ratio_between') {
+        return evaluateAspectRatio(rule, media)
+    }
 
     if (value === undefined) {
         return { verdict: 'unknown', detail: 'Rule has no threshold to check against' }

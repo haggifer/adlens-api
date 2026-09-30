@@ -240,7 +240,9 @@ no market chosen means every market, so an ad is never checked against nothing; 
 their chosen placement, and the schema requires a rule's placements to belong to its platforms, so every video rule is
 selected by some settings. Selected rules are then routed by `modality`:
 
-- `metadata` → checked in code against the measured media facts (duration, dimensions, real object size);
+- `metadata` → checked in code against the measured media facts (duration, dimensions, real object size); an aspect
+  ratio can be one required ratio (`aspect_ratio_in`), a list (`aspect_ratio_one_of`, `params.ratios`) or a range
+  (`aspect_ratio_between`, `params.min`/`max`), written as `W:H`;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
   source link are attached back by id, and ids the model invents are dropped;
 - `out_of_creative` → an advisory checklist, never auto-judged.

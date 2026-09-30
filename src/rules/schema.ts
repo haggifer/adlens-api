@@ -21,6 +21,25 @@ export const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
     [Platform.Amazon]: [RulePlatform.Amazon],
 }
 
+// A ratio as the platforms write it, width:height ("9:16", "1.91:1").
+const aspectRatioSchema = z.string().regex(/^\d+(\.\d+)?:\d+(\.\d+)?$/)
+
+// Platforms that accept several ratios (TikTok: 9:16, 1:1 or 16:9) or a range (Pinterest: 1:2 to 1.91:1) keep them in
+// `params`; a single required ratio stays `aspect_ratio_in` with `value`.
+export const aspectRatioListParamsSchema = z.object({ ratios: z.array(aspectRatioSchema).min(1) })
+export const aspectRatioRangeParamsSchema = z.object({ min: aspectRatioSchema, max: aspectRatioSchema })
+
+const RATIO_PARAMS_SCHEMAS: Partial<Record<string, z.ZodType>> = {
+    aspect_ratio_one_of: aspectRatioListParamsSchema,
+    aspect_ratio_between: aspectRatioRangeParamsSchema,
+}
+
+const hasThreshold = ({ checkType, value, params }: { checkType: string; value?: number; params?: unknown }) => {
+    const paramsSchema = RATIO_PARAMS_SCHEMAS[checkType]
+
+    return paramsSchema ? paramsSchema.safeParse(params).success : value !== undefined
+}
+
 // One rule, as authored in a ruleset file and as stored in every published ruleset version.
 export const ruleSchema = z
     .object({
@@ -38,6 +57,8 @@ export const ruleSchema = z
             'duration_max',
             'duration_min',
             'aspect_ratio_in',
+            'aspect_ratio_one_of',
+            'aspect_ratio_between',
             'filesize_max',
             'resolution_min',
         ]),
@@ -53,8 +74,8 @@ export const ruleSchema = z
     .refine((r) => (r.modality === 'metadata') === (r.checkType !== 'judgment'), {
         message: 'metadata rules need a deterministic checkType; all others must be judgment',
     })
-    .refine((r) => r.modality !== 'metadata' || (r.value !== undefined && r.unit !== undefined), {
-        message: 'metadata rules need value + unit',
+    .refine((r) => r.modality !== 'metadata' || (r.unit !== undefined && hasThreshold(r)), {
+        message: 'metadata rules need a unit and a threshold: value, or the ratios in params for a list or range',
     })
     .refine(
         (r) =>

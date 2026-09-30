@@ -62,6 +62,8 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 ## Gotchas
 
 - Every push to `init-setup` that passes CI deploys to production.
+- The worker validates each published ruleset with its own schema, so a ruleset using a new `checkType` (or any new
+  schema value) must be published only after the API that knows it is deployed; otherwise every analysis fails.
 - Jest can't load Better Auth's ESM build, so the e2e suite stubs it; real auth behaviour is covered by `test:auth`.
 - Better Auth needs MongoDB transactions, so `test:auth` runs on an in-memory replica set; the unit and e2e tests use
   a standalone in-memory server.

@@ -1,6 +1,7 @@
 import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
 import { TEST_RULESET } from '../testing/test-ruleset'
 import { evaluateMetadataRules, selectRules } from './index'
+import type { Rule } from './schema'
 
 const ruleSet = TEST_RULESET
 
@@ -118,6 +119,65 @@ describe('evaluateMetadataRules', () => {
         expect(verdictOf(rule, { width: 1440, height: 800 })).toBe('fail')
         expect(verdictOf(rule, { width: 1080, height: 1920 })).toBe('fail')
         expect(verdictOf(rule, { width: undefined, height: 1080 })).toBe('unknown')
+    })
+
+    describe('for a platform that accepts several ratios', () => {
+        // TikTok in-feed: 9:16, 1:1 or 16:9.
+        const rule: Rule = {
+            ...ruleSet.rules.find((candidate) => candidate.id === 'amazon.creative_spec.video_aspect_ratio')!,
+            checkType: 'aspect_ratio_one_of',
+            value: undefined,
+            params: { ratios: ['9:16', '1:1', '16:9'] },
+        }
+        const checkWith = (media: Partial<JobMedia>) =>
+            evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media })[0]
+
+        it('passes any listed ratio within the tolerance', () => {
+            expect(checkWith({ width: 1080, height: 1920 }).verdict).toBe('pass')
+            expect(checkWith({ width: 1440, height: 1440 }).verdict).toBe('pass')
+            expect(checkWith({ width: 1432, height: 800 }).verdict).toBe('pass')
+        })
+
+        it('fails a ratio that is not listed, naming the allowed ones', () => {
+            expect(checkWith({ width: 1080, height: 1350 })).toMatchObject({
+                verdict: 'fail',
+                detail: 'Aspect 0.800 vs allowed 9:16, 1:1, 16:9',
+            })
+        })
+
+        it('says so when the dimensions are unknown', () => {
+            expect(checkWith({ width: undefined }).verdict).toBe('unknown')
+        })
+    })
+
+    describe('for a platform that accepts a range of ratios', () => {
+        // Pinterest standard video: anything from 1:2 to 1.91:1.
+        const rule: Rule = {
+            ...ruleSet.rules.find((candidate) => candidate.id === 'amazon.creative_spec.video_aspect_ratio')!,
+            checkType: 'aspect_ratio_between',
+            value: undefined,
+            params: { min: '1:2', max: '1.91:1' },
+        }
+        const checkWith = (media: Partial<JobMedia>) =>
+            evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media })[0]
+
+        it('passes the bounds and anything between them', () => {
+            expect(checkWith({ width: 1000, height: 2000 }).verdict).toBe('pass')
+            expect(checkWith({ width: 1910, height: 1000 }).verdict).toBe('pass')
+            expect(checkWith({ width: 1080, height: 1350 }).verdict).toBe('pass')
+        })
+
+        it('fails a ratio outside the range, naming the range', () => {
+            expect(checkWith({ width: 900, height: 2000 }).verdict).toBe('fail')
+            expect(checkWith({ width: 2000, height: 1000 })).toMatchObject({
+                verdict: 'fail',
+                detail: 'Aspect 2.000 vs allowed 1:2 to 1.91:1',
+            })
+        })
+
+        it('says so when the dimensions are unknown', () => {
+            expect(checkWith({ height: undefined }).verdict).toBe('unknown')
+        })
     })
 
     it('cites the rule, with its source resolved to a link', () => {
