@@ -11,18 +11,21 @@
 # out to the job and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
 # owns the runtime config (env vars, secrets, limits); it also deploys the current checkout the same way CI does.
 #
-# Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, export any subset of the bundle
-# keys and re-run — the script merges them into the API_SECRETS bundle (one Secret Manager secret holding all of the
-# API's secrets as JSON; see the README's design decisions), leaving keys you didn't export as they were:
-#   export MONGODB_URI='mongodb+srv://…/adlens?retryWrites=true&w=majority'
-#   export BETTER_AUTH_SECRET='<a long random string>'
-#   export RESEND_API_KEY='<a Resend sending key for mail.useadlens.com>'
-#   export CONTACT_EMAIL='<the inbox that receives Contact form messages>'
-#   export GOOGLE_CLIENT_SECRET='<the Google OAuth client secret>'
-#   export GITHUB_CLIENT_SECRET='<the GitHub OAuth app client secret>'
-#   export TURNSTILE_SECRET_KEY='<the Turnstile widget's secret key, Cloudflare dashboard>'
-# The first run after upgrading from one-secret-per-key needs nothing exported: it folds in whatever the old
-# individual secrets of the same names already held.
+# Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, put any subset of the bundle keys
+# in .env.production at the repo root (git-, gcloud- and docker-ignored like every .env.* file) and re-run: the script
+# merges them into the API_SECRETS bundle (one Secret Manager secret holding all of the API's secrets as JSON; see the
+# README's design decisions), leaving keys the file doesn't set as they were. One KEY=value per line, taken literally
+# (no inline comments or escapes; surrounding quotes are optional and stripped):
+#   MONGODB_URI=mongodb+srv://…/adlens?retryWrites=true&w=majority
+#   BETTER_AUTH_SECRET=<a long random string>
+#   RESEND_API_KEY=<a Resend sending key for mail.useadlens.com>
+#   CONTACT_EMAIL=<the inbox that receives Contact form messages>
+#   GOOGLE_CLIENT_SECRET=<the Google OAuth client secret>
+#   GITHUB_CLIENT_SECRET=<the GitHub OAuth app client secret>
+#   TURNSTILE_SECRET_KEY=<the Turnstile widget's secret key, Cloudflare dashboard>
+# It is not .env.local: that file holds local values (e.g. Turnstile's always-pass test key) that must never reach
+# production. The first run after upgrading from one-secret-per-key needs no file for the keys the old individual
+# secrets of the same names already held: it folds those in.
 set -euo pipefail
 
 # The RESOLVED_VALUE/RESOLVED_SOURCE associative arrays below need bash 4+. macOS ships bash 3.2 (Apple stopped
@@ -66,6 +69,7 @@ SECRETS_PATH=/secrets/api.json
 BUNDLE_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL GOOGLE_CLIENT_SECRET GITHUB_CLIENT_SECRET TURNSTILE_SECRET_KEY"
 # RESEND_API_KEY is required because MailModule asserts it at startup; the API won't boot without it.
 REQUIRED_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY"
+ENV_FILE="$(dirname "$0")/../.env.production"
 
 gcloud config set project "$PROJECT"
 
@@ -204,13 +208,66 @@ legacy_secret_value() {
     gcloud secrets versions access latest --secret="$1" --format="get(payload.data)" | decode_secret_payload
 }
 
+# Emits .env.production's non-empty KEY=value pairs NUL-delimited (like build_bundle_json below, so a value round-trips
+# exactly). Values are literal: a secret may contain `#`, which dotenv-style parsers treat as a comment and silently
+# cut. The file arrives on stdin, never as a path argument, which Git Bash rewrites. Errors name a line number or a
+# key, never a value.
+env_file_pairs() {
+    BUNDLE_KEYS="$BUNDLE_KEYS" node -e '
+        const allowed = new Set((process.env.BUNDLE_KEYS || "").split(" ").filter(Boolean))
+        let input = ""
+        process.stdin.on("data", (chunk) => { input += chunk })
+        process.stdin.on("end", () => {
+            const pairs = []
+            const unknown = []
+            input.replace(/^\uFEFF/, "").split(/\r?\n/).forEach((line, index) => {
+                if (line.trim() === "" || line.trim().startsWith("#")) return
+                const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/)
+                if (!match) {
+                    console.error(`.env.production line ${index + 1} is not KEY=value`)
+                    process.exit(1)
+                }
+                const [, key, raw] = match
+                const trimmed = raw.trim()
+                const value = /^(["\x27]).*\1$/.test(trimmed) ? trimmed.slice(1, -1) : trimmed
+                if (!allowed.has(key)) unknown.push(key)
+                else if (value !== "") pairs.push(key, value)
+            })
+            if (unknown.length > 0) {
+                console.error(`.env.production has keys BUNDLE_KEYS does not list: ${unknown.sort().join(", ")}`)
+                process.exit(1)
+            }
+            process.stdout.write(pairs.map((part) => part + "\u0000").join(""))
+        })
+    ' < "$ENV_FILE"
+}
+
+declare -A FILE_VALUE
+
+if [ -f "$ENV_FILE" ]; then
+    if git ls-files --error-unmatch -- "$ENV_FILE" >/dev/null 2>&1; then
+        echo ".env.production is tracked by git; untrack it (git rm --cached .env.production) and re-run." >&2
+        exit 1
+    fi
+
+    # Run once on its own so a malformed file stops the script: a failure inside the process substitution below
+    # wouldn't.
+    env_file_pairs >/dev/null
+    while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+        FILE_VALUE[$key]="$value"
+    done < <(env_file_pairs)
+    echo "Read ${#FILE_VALUE[@]} key(s) from .env.production."
+else
+    echo "No .env.production: keeping the bundle's keys, or migrating the legacy secrets."
+fi
+
 declare -A RESOLVED_VALUE
 declare -A RESOLVED_SOURCE
 
 for name in $BUNDLE_KEYS; do
-    if [ -n "${!name:-}" ]; then
-        RESOLVED_VALUE[$name]="${!name}"
-        RESOLVED_SOURCE[$name]=exported
+    if [ -n "${FILE_VALUE[$name]:-}" ]; then
+        RESOLVED_VALUE[$name]="${FILE_VALUE[$name]}"
+        RESOLVED_SOURCE[$name]=.env.production
         continue
     fi
 
@@ -232,7 +289,7 @@ done
 
 for name in $REQUIRED_KEYS; do
     if [ -z "${RESOLVED_VALUE[$name]:-}" ]; then
-        echo "Missing required secret: $name — export it and re-run (see the header comment)." >&2
+        echo "Missing required secret: $name — add it to .env.production and re-run (see the header comment)." >&2
         exit 1
     fi
 done

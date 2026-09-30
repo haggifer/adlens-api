@@ -380,17 +380,20 @@ secrets, the analysis job's 2 retries and 15-minute timeout, the cleanup job's s
 leaves untouched, and can deploy the current checkout by hand. The API is served at `https://api.useadlens.com`
 through a Cloud Run domain mapping.
 
-To create or rotate a secret, export any subset of `MONGODB_URI`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`,
-`CONTACT_EMAIL`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET` and `TURNSTILE_SECRET_KEY`, then run the script: it
-prints the source of every key (exported, the bundle, a legacy secret, or absent — never a value) and asks for
-confirmation before writing, merges the exported values into the `API_SECRETS` bundle (a key you didn't export keeps
-its current value), and deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json`
+To create or rotate a secret, put any subset of `MONGODB_URI`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`,
+`CONTACT_EMAIL`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET` and `TURNSTILE_SECRET_KEY` in `.env.production` at the
+repo root (`KEY=value` per line, values taken literally; ignored by git, the Cloud Build upload and the image like
+every `.env.*` file, and the script refuses to run if it's tracked), then run the script. It's a separate file from
+`.env.local` on purpose: local values such as Turnstile's always-pass test key must never reach production. The script
+prints the source of every key (`.env.production`, the bundle, a legacy secret, or absent — never a value) and asks
+for confirmation before writing, merges the file's values into the `API_SECRETS` bundle (a key the file doesn't set
+keeps its current value), and deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json`
 (`SECRETS_FILE`). Both processes run as the same runtime service account today, so both mount the whole bundle even
 though the worker only reads `MONGODB_URI` from it. To remove a key from the bundle entirely, edit it by hand
 (`gcloud secrets versions access latest --secret=API_SECRETS`, edit the JSON, then
 `gcloud secrets versions add API_SECRETS --data-file=edited.json`) — the script only ever adds or overwrites keys,
 it never drops one on its own. A key removed this way comes back on the next run of the script if its legacy
-individual secret still exists: the script's source order is exported, then the bundle, then the legacy secret of
+individual secret still exists: the script's source order is `.env.production`, then the bundle, then the legacy secret of
 the same name, so a hand-removed key is still "absent" only until that legacy secret is deleted too (the
 confirmation prompt shows `legacy` as its source when this happens).
 
