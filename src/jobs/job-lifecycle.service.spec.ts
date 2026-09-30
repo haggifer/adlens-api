@@ -19,6 +19,7 @@ import { QuotaService } from '../quota/quota.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { JobLifecycle } from './job-lifecycle.service'
+import { buildModelCall, usageOf } from '../testing/model-call'
 
 const USER = new Types.ObjectId().toString()
 const OTHER_USER = new Types.ObjectId().toString()
@@ -41,7 +42,7 @@ const ANALYSIS: Analysis = {
     advisories: [],
     completedAt: '2026-09-29T10:00:00.000Z',
 }
-const USAGE = { promptTokens: 1, outputTokens: 1, totalTokens: 2 }
+const CALL = buildModelCall()
 const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
 const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
 // JobLifecycle's own thresholds: a verification or an analysis idle for longer than these was abandoned.
@@ -287,11 +288,11 @@ describe('JobLifecycle', () => {
 
             await lifecycle.startAttempt(jobId)
 
-            expect(await lifecycle.complete(jobId, ANALYSIS, USAGE)).toBe(true)
+            expect(await lifecycle.complete(jobId, ANALYSIS, CALL)).toBe(true)
             expect(await findJob(jobId)).toMatchObject({
                 status: JobStatus.Analyzed,
                 analysis: ANALYSIS,
-                usage: USAGE,
+                usage: usageOf(CALL),
                 chargedRunId: expect.any(String),
                 chargedIpRunId: expect.any(String),
             })
@@ -306,8 +307,8 @@ describe('JobLifecycle', () => {
             await lifecycle.startAttempt(expired)
             await lifecycle.fail(expired, JobErrorCode.AnalysisTimedOut, 'expired')
 
-            expect(await lifecycle.complete(queued, ANALYSIS, USAGE)).toBe(false)
-            expect(await lifecycle.complete(expired, ANALYSIS, USAGE)).toBe(false)
+            expect(await lifecycle.complete(queued, ANALYSIS, CALL)).toBe(false)
+            expect(await lifecycle.complete(expired, ANALYSIS, CALL)).toBe(false)
             const job = await findJob(expired)
 
             expect(job?.status).toBe(JobStatus.Error)
@@ -337,7 +338,7 @@ describe('JobLifecycle', () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 
             await lifecycle.startAttempt(jobId)
-            await lifecycle.complete(jobId, ANALYSIS, USAGE)
+            await lifecycle.complete(jobId, ANALYSIS, CALL)
 
             expect(await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'late')).toBe(false)
             expect((await findJob(jobId))?.status).toBe(JobStatus.Analyzed)

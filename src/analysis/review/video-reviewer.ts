@@ -1,5 +1,5 @@
 import type { AnalysisSettings } from 'adlens-shared'
-import type { TokenUsage } from '../../database/job.doc'
+import type { ModelCall } from '../../database/job.doc'
 import type { AdvisoryProjection, ModelFinding, RuleProjection } from '../../rules'
 
 export interface VideoReviewRequest {
@@ -19,7 +19,8 @@ export interface VideoReview {
     findings: ModelFinding[]
     // The advisories the model found relevant; ids outside the request's are ignored.
     advisoryIds: string[]
-    usage: TokenUsage
+    // The billed call behind this review.
+    call: ModelCall
 }
 
 // Watches the video and judges the content rules against it. Implementations throw RetryableError for transient

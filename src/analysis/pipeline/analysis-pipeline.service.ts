@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { type Analysis, JobErrorCode } from 'adlens-shared'
 import { gcsUri } from '../../common/paths'
-import type { StoredJob, TokenUsage } from '../../database/job.doc'
+import type { ModelCall, StoredJob } from '../../database/job.doc'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import {
     buildAdvisories,
@@ -47,8 +47,8 @@ export class AnalysisPipeline {
         }
 
         try {
-            const { analysis, usage } = await this.analyze(job)
-            const isCompleted = await this.lifecycle.complete(jobId, analysis, usage)
+            const { analysis, call } = await this.analyze(job)
+            const isCompleted = await this.lifecycle.complete(jobId, analysis, call)
 
             return isCompleted ? 'analyzed' : 'skipped'
         } catch (err) {
@@ -56,7 +56,7 @@ export class AnalysisPipeline {
             const isModelAnswer = err instanceof ModelAnswerError
 
             if (isModelAnswer) {
-                await this.lifecycle.addUsage(jobId, err.usage)
+                await this.lifecycle.addUsage(jobId, err.call)
             }
 
             const isAnswerRetryUsed = isModelAnswer && job.attempts >= MAX_ANSWER_ATTEMPTS
@@ -73,7 +73,7 @@ export class AnalysisPipeline {
         }
     }
 
-    private async analyze(job: StoredJob): Promise<{ analysis: Analysis; usage: TokenUsage }> {
+    private async analyze(job: StoredJob): Promise<{ analysis: Analysis; call: ModelCall }> {
         if (!job.media) {
             throw new Error('Job has no verified media')
         }
@@ -103,7 +103,7 @@ export class AnalysisPipeline {
                 ),
                 completedAt: new Date().toISOString(),
             },
-            usage: review.usage,
+            call: review.call,
         }
     }
 }

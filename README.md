@@ -252,7 +252,9 @@ selected by some settings. Selected rules are then routed by `modality`:
   falls under (`advisories` in its output), and only those are stored. Content rules reach the model ordered by
   importance (blocker policies first, best-practice advice last).
 
-Every analysis records `model`, `promptVersion` and `rulesetVersion`, plus token usage on the job for cost tracking.
+Every analysis records `model`, `promptVersion` and `rulesetVersion`. For pricing, the job keeps every billed Gemini
+call in `usage.calls` (time, model, location, traffic type, finish reason, and prompt, cached, tool-use, answer and
+thinking tokens with their split by modality), failed attempts included, plus totals across them.
 
 ## Sample ads
 

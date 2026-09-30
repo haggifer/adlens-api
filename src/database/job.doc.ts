@@ -13,10 +13,39 @@ import { zodToMongoose } from '../common/zod-to-mongoose'
 
 export const JOB_MODEL = 'Job'
 
+const tokenCountSchema = z.number().int().nonnegative()
+
+// Token counts per modality (TEXT, IMAGE, VIDEO, AUDIO, DOCUMENT): some models price audio input apart.
+const tokensByModalitySchema = z.record(z.string(), tokenCountSchema)
+
+// One billed Gemini call with everything its price depends on: the model, the endpoint (Vertex prices regional
+// endpoints above global), the date (list prices change), the traffic type (on-demand, priority, flex or provisioned)
+// and the tokens by kind and modality; a request's own size decides long-context tiers.
+export const modelCallSchema = z.object({
+    at: z.date(),
+    model: z.string(),
+    location: z.string(),
+    trafficType: z.string().optional(),
+    finishReason: z.string().optional(),
+    promptTokens: tokenCountSchema,
+    cachedTokens: tokenCountSchema,
+    toolUsePromptTokens: tokenCountSchema,
+    candidatesTokens: tokenCountSchema,
+    thoughtsTokens: tokenCountSchema,
+    totalTokens: tokenCountSchema,
+    promptTokensByModality: tokensByModalitySchema,
+    cachedTokensByModality: tokensByModalitySchema,
+    candidatesTokensByModality: tokensByModalitySchema,
+    toolUsePromptTokensByModality: tokensByModalitySchema,
+})
+
+// Every billed call of the job, and totals across them (output = answer + thinking, which bill at one rate). Jobs from
+// before the calls were recorded have the totals only.
 export const tokenUsageSchema = z.object({
-    promptTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative(),
-    totalTokens: z.number().int().nonnegative(),
+    promptTokens: tokenCountSchema,
+    outputTokens: tokenCountSchema,
+    totalTokens: tokenCountSchema,
+    calls: z.array(modelCallSchema).optional(),
 })
 
 // The stored job: the public shape plus server-only fields (owner, storage location, execution, accounting). Built
@@ -45,6 +74,7 @@ export const jobDocSchema = z.object({
 
 export type JobDoc = z.infer<typeof jobDocSchema>
 export type TokenUsage = z.infer<typeof tokenUsageSchema>
+export type ModelCall = z.infer<typeof modelCallSchema>
 
 export interface StoredJob extends JobDoc {
     _id: Types.ObjectId

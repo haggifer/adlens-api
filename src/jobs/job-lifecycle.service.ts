@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import { type Analysis, JobErrorCode, type JobMedia, JobStatus, RequestErrorCode } from 'adlens-shared'
 import { type FilterQuery, Model } from 'mongoose'
 import { ApiException } from '../common/api-exception'
-import { JOB_MODEL, type JobDoc, type StoredJob, type TokenUsage } from '../database/job.doc'
+import { JOB_MODEL, type JobDoc, type ModelCall, type StoredJob } from '../database/job.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
@@ -14,10 +14,14 @@ const ANALYSIS_STALE_MS = 60 * 60 * 1000
 
 const IN_FLIGHT = [JobStatus.Queued, JobStatus.Analyzing]
 
-const incUsage = ({ promptTokens, outputTokens, totalTokens }: TokenUsage) => ({
-    'usage.promptTokens': promptTokens,
-    'usage.outputTokens': outputTokens,
-    'usage.totalTokens': totalTokens,
+// Adds a billed call to the job: to the totals across all its attempts, and to the list of calls kept for pricing.
+const recordCall = (call: ModelCall) => ({
+    $inc: {
+        'usage.promptTokens': call.promptTokens,
+        'usage.outputTokens': call.candidatesTokens + call.thoughtsTokens,
+        'usage.totalTokens': call.totalTokens,
+    },
+    $push: { 'usage.calls': call },
 })
 
 export interface FailOptions {
@@ -120,21 +124,21 @@ export class JobLifecycle {
             .lean<StoredJob>()
     }
 
-    // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale). The usage is
+    // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale). The call is
     // added to what earlier, failed attempts recorded, so the job holds everything its analysis was billed for.
-    async complete(jobId: string, analysis: Analysis, usage: TokenUsage): Promise<boolean> {
+    async complete(jobId: string, analysis: Analysis, call: ModelCall): Promise<boolean> {
         const done = await this.model.findOneAndUpdate(
             { _id: jobId, status: JobStatus.Analyzing },
-            { $set: { status: JobStatus.Analyzed, analysis }, $inc: incUsage(usage) },
+            { $set: { status: JobStatus.Analyzed, analysis }, ...recordCall(call) },
             { new: true },
         )
 
         return done !== null
     }
 
-    // The tokens of an attempt whose answer couldn't be used: billed all the same.
-    async addUsage(jobId: string, usage: TokenUsage): Promise<void> {
-        await this.model.updateOne({ _id: jobId }, { $inc: incUsage(usage) })
+    // The call of an attempt whose answer couldn't be used: billed all the same.
+    async addUsage(jobId: string, call: ModelCall): Promise<void> {
+        await this.model.updateOne({ _id: jobId }, recordCall(call))
     }
 
     // queued / analyzing → error, refunding the charge at most once.

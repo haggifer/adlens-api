@@ -15,14 +15,15 @@ import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
 import { AnalysisPipeline } from './analysis-pipeline.service'
 import { ModelAnswerError } from './model-answer-error'
 import { RetryableError } from './retryable-error'
+import { buildModelCall, usageOf } from '../../testing/model-call'
 
 const USER = new Types.ObjectId().toString()
-const USAGE = { promptTokens: 20000, outputTokens: 800, totalTokens: 20800 }
+const CALL = buildModelCall()
 const NETWORK: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
 
-const cutOff = () => new ModelAnswerError('The model output was cut off at the token limit', USAGE)
+const cutOff = () => new ModelAnswerError('The model output was cut off at the token limit', CALL)
 
-const malformed = () => new ModelAnswerError('The model returned malformed output', USAGE, true)
+const malformed = () => new ModelAnswerError('The model returned malformed output', CALL, true)
 
 class FakeReviewer extends VideoReviewer {
     next: () => Promise<VideoReview> = async () => ({
@@ -31,7 +32,7 @@ class FakeReviewer extends VideoReviewer {
         transcript: 'Buy now',
         findings: [],
         advisoryIds: [],
-        usage: USAGE,
+        call: CALL,
     })
 
     review = jest.fn(() => this.next())
@@ -123,7 +124,7 @@ describe('AnalysisPipeline', () => {
                 { id: 'invented.rule_id', verdict: 'fail', evidence: 'hallucinated' },
             ],
             advisoryIds: [],
-            usage: USAGE,
+            call: CALL,
         })
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
@@ -131,7 +132,7 @@ describe('AnalysisPipeline', () => {
         const job = await findJob(jobId)
 
         expect(job?.status).toBe(JobStatus.Analyzed)
-        expect(job?.usage).toEqual(USAGE)
+        expect(job?.usage).toEqual(usageOf(CALL))
         expect(job?.analysis?.rulesetVersion).toBe(ruleSet.meta.version)
         expect(job?.analysis?.findings).toEqual([
             expect.objectContaining({ id: contentRule.id, time: { startS: 1, endS: 3 }, quote: contentRule.quote }),
@@ -210,7 +211,7 @@ describe('AnalysisPipeline', () => {
         reviewer.next = () => Promise.reject(cutOff())
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
-        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: USAGE })
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: usageOf(CALL) })
         expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
     })
@@ -223,11 +224,7 @@ describe('AnalysisPipeline', () => {
         await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(ModelAnswerError)
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(2)
-        expect((await findJob(jobId))?.usage).toEqual({
-            promptTokens: 2 * USAGE.promptTokens,
-            outputTokens: 2 * USAGE.outputTokens,
-            totalTokens: 2 * USAGE.totalTokens,
-        })
+        expect((await findJob(jobId))?.usage).toEqual(usageOf(CALL, CALL))
     })
 
     it("adds a failed attempt's tokens to those of the attempt that succeeds", async () => {
@@ -238,7 +235,7 @@ describe('AnalysisPipeline', () => {
         reviewer.next = new FakeReviewer().next
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
-        expect((await findJob(jobId))?.usage?.totalTokens).toBe(2 * USAGE.totalTokens)
+        expect((await findJob(jobId))?.usage).toEqual(usageOf(CALL, CALL))
     })
 
     it('keeps a failed answer counted once the network used up its refunded failures', async () => {
