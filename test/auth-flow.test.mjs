@@ -551,7 +551,7 @@ test('deleting an account also deletes the videos it adopted from an anonymous s
     assert.equal(purgedPrefixes.at(-1), `users/${linker._id.toString()}/`)
 })
 
-test('signing in from an anonymous session merges its runs into the existing account', async () => {
+test('signing in from an anonymous session moves its analyses and runs to the account, and deletes it', async () => {
     const { ObjectId } = require('mongodb')
     const email = 'returning@example.com'
 
@@ -559,8 +559,10 @@ test('signing in from an anonymous session merges its runs into the existing acc
     await confirmEmail(email)
 
     const anonymous = await signInAnonymously()
+    const anonymousUpload = `users/${anonymous.user.id}/jobs/before-sign-in/video`
 
     await withDb(async (db) => {
+        await db.collection('jobs').insertOne(storedJob(anonymous.user.id, anonymousUpload))
         await db.collection('user').updateOne({ email }, { $set: { runs: [run('own-run')] } })
         await db
             .collection('user')
@@ -568,15 +570,17 @@ test('signing in from an anonymous session merges its runs into the existing acc
     })
 
     const signIn = await post('/api/auth/sign-in/email', { email, password: 'first-password' }, anonymous.cookie)
-    const [returning, anonymousAfter] = await withDb((db) =>
+    const [returning, anonymousAfter, movedJob] = await withDb((db) =>
         Promise.all([
             db.collection('user').findOne({ email }),
             db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+            db.collection('jobs').findOne({ 'file.path': anonymousUpload }),
         ]),
     )
 
     assert.equal(signIn.status, 200)
     assert.deepEqual(returning.runs.map((stored) => stored.id).sort(), ['anonymous-run', 'own-run'])
+    assert.equal(movedJob.userId, returning._id.toString())
     assert.equal(anonymousAfter, null)
 })
 
