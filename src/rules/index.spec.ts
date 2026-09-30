@@ -1,6 +1,6 @@
 import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
 import { TEST_RULESET } from '../testing/test-ruleset'
-import { evaluateMetadataRules, selectRules } from './index'
+import { evaluateMetadataRules, projectForModel, selectRules } from './index'
 import type { Rule } from './schema'
 
 const ruleSet = TEST_RULESET
@@ -69,6 +69,35 @@ describe('selectRules', () => {
 
         expect(selectedIds(settingsFor({ platforms: [Platform.YouTube] })).has(googleOnly.id)).toBe(true)
         expect(selectedIds(settingsFor({ platforms: [Platform.Meta] })).has(googleOnly.id)).toBe(false)
+    })
+})
+
+describe('projectForModel', () => {
+    const base = ruleSet.rules.find((rule) => rule.id === 'meta.prohibited.adult_nudity_imagery')!
+    const ruleOf = (id: string, scope: Rule['scope'], severity: Rule['severity']): Rule => ({
+        ...base,
+        id,
+        scope,
+        severity,
+    })
+
+    // With a long list the model worked through it in order and skipped blocker policies listed after best-practice
+    // tips (Manforce's adult imagery under Meta and TikTok: 0 of 3 runs in list order, 3 of 3 sorted).
+    it('puts policies that block an ad first and best-practice advice last', () => {
+        const rules = [
+            ruleOf('tip', 'best_practice', 'warning'),
+            ruleOf('note', 'compliance', 'info'),
+            ruleOf('caution', 'compliance', 'warning'),
+            ruleOf('ban', 'compliance', 'blocker'),
+        ]
+
+        expect(projectForModel(rules).map((rule) => rule.id)).toEqual(['ban', 'caution', 'note', 'tip'])
+    })
+
+    it('keeps the given order among rules of equal importance', () => {
+        const rules = [ruleOf('b', 'compliance', 'blocker'), ruleOf('a', 'compliance', 'blocker')]
+
+        expect(projectForModel(rules).map((rule) => rule.id)).toEqual(['b', 'a'])
     })
 })
 

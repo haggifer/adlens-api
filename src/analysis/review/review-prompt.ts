@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { ModelFinding, RuleProjection } from '../../rules'
 
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
-export const PROMPT_VERSION = '6'
+export const PROMPT_VERSION = '7'
 
 // Times are whole seconds: free decimals ran away (`0.000…` or `3.0134…1234567890…`, thousands of digits) until the
 // reply hit the token limit (gemini-3.8-flash, 2026-09-29: 5 of 6 runs of a 60-second ad). The model's schema also caps
@@ -80,4 +80,6 @@ export const buildReviewPrompt = (settings: AnalysisSettings, rules: RuleProject
         '- Return a finding ONLY for rules the ad likely violates (verdict "fail") or where you cannot be sure (verdict "warning" for a probable issue, "unknown" when the video is inconclusive). Omit rules the ad clearly complies with.',
         '- For each finding, cite concrete evidence from the video. When the issue is tied to a moment, give startS (and endS for a range) in whole seconds from the start of the video. When an issue concerns the whole video rather than a moment, use startS 0 and omit endS.',
         '- Use each rule id exactly as given; never invent ids.',
+        '- Rules are ordered by importance: policy rules that block an ad first, best-practice advice last. Give every rule the same care, however long the list.',
+        '- Several rules often state the same policy for different platforms (adult content, weapons, health claims…). When the ad breaks such a policy, return a finding for every one of those rules, not just one.',
     ].join('\n')

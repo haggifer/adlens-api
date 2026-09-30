@@ -11,6 +11,13 @@ describe('buildReviewPrompt', () => {
         expect(prompt).not.toContain('verbatim transcript')
     })
 
+    it("says the rules come most important first, and to report every platform's rule for a breached policy", () => {
+        const prompt = buildReviewPrompt(SETTINGS, [])
+
+        expect(prompt).toContain('Rules are ordered by importance')
+        expect(prompt).toContain('return a finding for every one of those rules')
+    })
+
     it('asks for whole seconds, and startS 0 for an issue that concerns the whole video', () => {
         const prompt = buildReviewPrompt(SETTINGS, [])
 

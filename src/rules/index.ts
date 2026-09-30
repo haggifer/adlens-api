@@ -66,9 +66,19 @@ export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): Selec
     }
 }
 
-// The lean projection sent to the model; quote and ref are attached back by id afterwards.
+const SCOPE_RANK: Record<Rule['scope'], number> = { compliance: 0, best_practice: 1 }
+const SEVERITY_RANK: Record<Rule['severity'], number> = { blocker: 0, warning: 1, info: 2 }
+
+// The lean projection sent to the model; quote and ref are attached back by id afterwards. With a long list the model
+// works through it in order, so policies that block an ad come first and best-practice advice last; rules of equal
+// rank keep their ruleset order.
 export const projectForModel = (rules: Rule[]): RuleProjection[] =>
-    rules.map(({ id, check, severity, modality }) => ({ id, check, severity, modality }))
+    [...rules]
+        .sort(
+            (a, b) =>
+                SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
+        )
+        .map(({ id, check, severity, modality }) => ({ id, check, severity, modality }))
 
 const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string } => ({
     quote: rule.quote,
