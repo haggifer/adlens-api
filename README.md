@@ -125,9 +125,9 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   otherwise both runs stay counted. Without the cap, a video that always fails could be re-run for free until the
   Vertex spend cap stopped every analysis. A cut-off or blocked answer isn't retried, a malformed one once
   (`ModelAnswerError`), and every attempt's tokens are added to the job's `usage`.
-- **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web shows the check to everyone and
-  sends its token with a job creation when it has one. A visitor without an account can't start before the check
-  passes; a member who starts before it's solved sends none. The API calls Cloudflare's `siteverify` only when a rule
+- **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web runs the check when an analysis
+  starts, for visitors without an account, and sends its token with the job creation; members send none unless the
+  API answers `CHALLENGE_REQUIRED`, after which the web runs the check and creates the job again. The API calls Cloudflare's `siteverify` only when a rule
   asks for it (always for anonymous users), ignores a token no rule needs, and records `hasPassedChallenge` on the job
   for analyze. Without `TURNSTILE_SECRET_KEY` a required check never passes.
   A network that crosses the soft limit between creating and analyzing a job made without the check gets
