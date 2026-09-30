@@ -30,6 +30,7 @@ class FakeReviewer extends VideoReviewer {
         promptVersion: 'test',
         transcript: 'Buy now',
         findings: [],
+        advisoryIds: [],
         usage: USAGE,
     })
 
@@ -45,6 +46,8 @@ describe('AnalysisPipeline', () => {
     const ruleSet = TEST_RULESET
     const ruleset = { current: async () => ruleSet } as unknown as RulesetService
     const contentRule = ruleSet.rules.find((r) => r.modality === 'visual' && r.platform.includes(RulePlatform.Meta))!
+    const cryptoAdvisory = ruleSet.rules.find((r) => r.id === 'meta.restricted.crypto_written_permission')!
+    const musicAdvisory = ruleSet.rules.find((r) => r.id === 'meta.ip.music_licensing')!
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
     const used = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
@@ -119,6 +122,7 @@ describe('AnalysisPipeline', () => {
                 { id: contentRule.id, verdict: 'fail', evidence: 'Shown at the start', time: { startS: 1, endS: 3 } },
                 { id: 'invented.rule_id', verdict: 'fail', evidence: 'hallucinated' },
             ],
+            advisoryIds: [],
             usage: USAGE,
         })
 
@@ -133,6 +137,33 @@ describe('AnalysisPipeline', () => {
             expect.objectContaining({ id: contentRule.id, time: { startS: 1, endS: 3 }, quote: contentRule.quote }),
         ])
         expect(await used()).toBe(1)
+    })
+
+    it('offers the reviewer the selected advisories to choose from', async () => {
+        const jobId = await queueJob()
+
+        await pipeline.run(jobId, { isLast: false })
+
+        expect(reviewer.review).toHaveBeenCalledWith(
+            expect.objectContaining({
+                advisories: expect.arrayContaining([
+                    { id: cryptoAdvisory.id, check: cryptoAdvisory.check },
+                    { id: musicAdvisory.id, check: musicAdvisory.check },
+                ]),
+            }),
+        )
+    })
+
+    // Every ad used to list every advisory, e.g. an alcohol-targeting reminder on a condom ad.
+    it('keeps only the advisories the model found relevant to this ad, ignoring ids it invents', async () => {
+        const jobId = await queueJob()
+        const review = await reviewer.next()
+
+        reviewer.next = async () => ({ ...review, advisoryIds: [cryptoAdvisory.id, 'invented.advisory'] })
+
+        await pipeline.run(jobId, { isLast: false })
+
+        expect((await findJob(jobId))?.analysis?.advisories.map((advisory) => advisory.id)).toEqual([cryptoAdvisory.id])
     })
 
     it("gives the reviewer the video's duration, so timestamps can't run past it", async () => {

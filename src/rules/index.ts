@@ -31,6 +31,12 @@ export interface RuleProjection {
     modality: Rule['modality']
 }
 
+// Advisory rules are never judged; the model only says which ones this ad falls under.
+export interface AdvisoryProjection {
+    id: string
+    check: string
+}
+
 export interface ModelFinding {
     id: string
     verdict: Finding['verdict']
@@ -79,6 +85,9 @@ export const projectForModel = (rules: Rule[]): RuleProjection[] =>
                 SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
         )
         .map(({ id, check, severity, modality }) => ({ id, check, severity, modality }))
+
+export const projectAdvisoriesForModel = (rules: Rule[]): AdvisoryProjection[] =>
+    rules.map(({ id, check }) => ({ id, check }))
 
 const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string } => ({
     quote: rule.quote,

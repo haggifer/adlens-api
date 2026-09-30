@@ -63,7 +63,14 @@ export class GeminiVideoReviewer extends VideoReviewer {
         })
     }
 
-    async review({ videoUri, mimeType, durationS, rules, settings }: VideoReviewRequest): Promise<VideoReview> {
+    async review({
+        videoUri,
+        mimeType,
+        durationS,
+        rules,
+        advisories,
+        settings,
+    }: VideoReviewRequest): Promise<VideoReview> {
         let response: GenerateContentResponse
 
         try {
@@ -71,7 +78,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
                 model: this.model,
                 contents: createUserContent([
                     createPartFromUri(videoUri, mimeType),
-                    buildReviewPrompt(settings, rules),
+                    buildReviewPrompt(settings, rules, advisories),
                 ]),
                 config: {
                     responseMimeType: 'application/json',
@@ -113,6 +120,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
             promptVersion: PROMPT_VERSION,
             transcript: output.transcript,
             findings: output.findings,
+            advisoryIds: output.advisoryIds,
             usage,
         }
     }

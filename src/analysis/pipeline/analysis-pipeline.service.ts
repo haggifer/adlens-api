@@ -3,7 +3,14 @@ import { type Analysis, JobErrorCode } from 'adlens-shared'
 import { gcsUri } from '../../common/paths'
 import type { StoredJob, TokenUsage } from '../../database/job.doc'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
-import { buildAdvisories, buildFindings, evaluateMetadataRules, projectForModel, selectRules } from '../../rules'
+import {
+    buildAdvisories,
+    buildFindings,
+    evaluateMetadataRules,
+    projectAdvisoriesForModel,
+    projectForModel,
+    selectRules,
+} from '../../rules'
 import { RulesetService } from '../../rules/ruleset.service'
 import { VideoReviewer } from '../review/video-reviewer'
 import { ModelAnswerError } from './model-answer-error'
@@ -78,6 +85,7 @@ export class AnalysisPipeline {
             mimeType: job.file.contentType,
             durationS: job.media.durationS,
             rules: projectForModel(selected.content),
+            advisories: projectAdvisoriesForModel(selected.advisory),
             settings: job.settings,
         })
 
@@ -89,7 +97,10 @@ export class AnalysisPipeline {
                 transcript: review.transcript,
                 findings: buildFindings(ruleSet, selected.content, review.findings),
                 metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, job.media),
-                advisories: buildAdvisories(ruleSet, selected.advisory),
+                advisories: buildAdvisories(
+                    ruleSet,
+                    selected.advisory.filter((rule) => review.advisoryIds.includes(rule.id)),
+                ),
                 completedAt: new Date().toISOString(),
             },
             usage: review.usage,

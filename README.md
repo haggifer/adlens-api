@@ -245,7 +245,9 @@ selected by some settings. Selected rules are then routed by `modality`:
   (`aspect_ratio_between`, `params.min`/`max`), written as `W:H`;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
   source link are attached back by id, and ids the model invents are dropped;
-- `out_of_creative` → an advisory checklist, never auto-judged.
+- `out_of_creative` → an advisory checklist, never judged: the model only names the advisories whose subject the ad
+  falls under (`advisories` in its output), and only those are stored. Content rules reach the model ordered by
+  importance (blocker policies first, best-practice advice last).
 
 Every analysis records `model`, `promptVersion` and `rulesetVersion`, plus token usage on the job for cost tracking.
 

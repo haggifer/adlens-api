@@ -1,6 +1,6 @@
 import type { AnalysisSettings } from 'adlens-shared'
 import type { TokenUsage } from '../../database/job.doc'
-import type { ModelFinding, RuleProjection } from '../../rules'
+import type { AdvisoryProjection, ModelFinding, RuleProjection } from '../../rules'
 
 export interface VideoReviewRequest {
     videoUri: string
@@ -8,6 +8,7 @@ export interface VideoReviewRequest {
     // Caps the times the model may give.
     durationS: number
     rules: RuleProjection[]
+    advisories: AdvisoryProjection[]
     settings: AnalysisSettings
 }
 
@@ -16,6 +17,8 @@ export interface VideoReview {
     promptVersion: string
     transcript: string
     findings: ModelFinding[]
+    // The advisories the model found relevant; ids outside the request's are ignored.
+    advisoryIds: string[]
     usage: TokenUsage
 }
 

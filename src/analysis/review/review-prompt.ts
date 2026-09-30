@@ -1,6 +1,6 @@
 import type { AnalysisSettings } from 'adlens-shared'
 import { z } from 'zod'
-import type { ModelFinding, RuleProjection } from '../../rules'
+import type { AdvisoryProjection, ModelFinding, RuleProjection } from '../../rules'
 
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
 export const PROMPT_VERSION = '7'
@@ -23,6 +23,9 @@ const buildOutputSchema = (second: z.ZodInt) =>
                 endS: second.optional(),
             }),
         ),
+        // Ids of the advisory rules this ad falls under: every ad used to list every advisory (an alcohol-targeting
+        // reminder on a condom ad).
+        advisories: z.array(z.string()),
     })
 
 const reviewOutputSchema = buildOutputSchema(z.int().nonnegative())
@@ -38,6 +41,7 @@ export const buildReviewOutputJsonSchema = (durationS: number): Record<string, u
 export interface ReviewOutput {
     transcript: string
     findings: ModelFinding[]
+    advisoryIds: string[]
 }
 
 // Throws on anything that isn't valid JSON in the agreed shape; a retry of the same prompt won't fix that reliably.
@@ -50,6 +54,7 @@ export const parseReviewOutput = (text: string | undefined): ReviewOutput => {
             ...finding,
             time: startS === undefined ? undefined : { startS, endS },
         })),
+        advisoryIds: output.advisories,
     }
 }
 
@@ -62,7 +67,11 @@ const describeCampaign = (settings: AnalysisSettings): string =>
         `Markets: ${settings.markets.join(', ') || 'all (none chosen)'}`,
     ].join('\n')
 
-export const buildReviewPrompt = (settings: AnalysisSettings, rules: RuleProjection[]): string =>
+export const buildReviewPrompt = (
+    settings: AnalysisSettings,
+    rules: RuleProjection[],
+    advisories: AdvisoryProjection[],
+): string =>
     [
         'You are an ad-policy compliance reviewer. Watch and listen to the attached video advertisement and evaluate it against the policy rules below.',
         '',
@@ -73,6 +82,9 @@ export const buildReviewPrompt = (settings: AnalysisSettings, rules: RuleProject
         '',
         'Rules (JSON array; each has id, check, severity, modality):',
         JSON.stringify(rules),
+        '',
+        'Advisory rules (JSON array; each has id and check). They concern targeting, licences or permissions, so they are not judged from the video. Return in "advisories" the ids of those whose subject this ad actually falls under (for example an alcohol-targeting rule only for an ad that promotes alcohol), or [] when none do.',
+        JSON.stringify(advisories),
         '',
         'Instructions:',
         '- Return the spoken audio in "transcript" as a list of segments, one per sentence, each with the second it starts at (an empty list if there is no speech).',
