@@ -18,6 +18,14 @@ describe('buildReviewPrompt', () => {
         expect(prompt).toContain('return a finding for every one of those rules')
     })
 
+    // Nadex's "even bitcoin" was a crypto `fail` although Google allows crypto ads with certification.
+    it('keeps "fail" for a direct violation and a restricted category or indirect evidence as a warning', () => {
+        const prompt = buildReviewPrompt(SETTINGS, [])
+
+        expect(prompt).toContain('Verdict "fail" means the video itself directly shows or says what the rule forbids')
+        expect(prompt).toContain('use "warning", even for a rule whose severity is blocker')
+    })
+
     it('asks for whole seconds, and startS 0 for an issue that concerns the whole video', () => {
         const prompt = buildReviewPrompt(SETTINGS, [])
 

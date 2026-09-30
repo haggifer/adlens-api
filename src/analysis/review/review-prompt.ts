@@ -82,4 +82,5 @@ export const buildReviewPrompt = (settings: AnalysisSettings, rules: RuleProject
         '- Use each rule id exactly as given; never invent ids.',
         '- Rules are ordered by importance: policy rules that block an ad first, best-practice advice last. Give every rule the same care, however long the list.',
         '- Several rules often state the same policy for different platforms (adult content, weapons, health claims…). When the ad breaks such a policy, return a finding for every one of those rules, not just one.',
+        '- Verdict "fail" means the video itself directly shows or says what the rule forbids. When the ad only falls into a category the platform allows with certification, a licence, permission or targeting limits, or the evidence is indirect or ambiguous, use "warning", even for a rule whose severity is blocker.',
     ].join('\n')
