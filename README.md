@@ -1,9 +1,9 @@
 # adlens-api
 
-Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against a
-~150-rule ad-policy set with one Gemini pass, and you get cited, timestamped findings pushed to the browser in
-realtime. This repo holds the HTTP API and the analysis worker; the web client and the API contract live in their own
-repos.
+Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against an
+ad-policy ruleset of several hundred rules with one Gemini pass, and you get cited, timestamped findings pushed to the
+browser in realtime. This repo holds the HTTP API and the analysis worker; the web client and the API contract live in
+their own repos.
 
 - Web (Next.js on Vercel): <https://github.com/haggifer/adlens>
 - API contract (Zod schemas, published to npm): [`adlens-shared`](https://github.com/haggifer/adlens-shared)
@@ -124,7 +124,7 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 | Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
 | Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
-| Refunded failures after Gemini answered, per network | `IP_FAILURE_REFUND_LIMIT` (3) | the failed run stays counted, for the user and the network |
+| Refunded failures after a possibly billed Gemini call, per network | `IP_FAILURE_REFUND_LIMIT` (3) | the failed run stays counted, for the user and the network |
 
 - **The network** is the IPv4 address or the IPv6 /64 prefix (an IPv4-mapped address counts as IPv4). The address is
   the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` from the right (1 on Cloud Run: the one Google's front end appends),
@@ -210,8 +210,8 @@ answering is a plain reply; its text isn't stored.
   the plugin deletes the anonymous user; a failed move answers 500 `ACCOUNT_LINK_FAILED` and leaves the history with
   the anonymous user. A confirmation link never links: it never creates a session. `/link-social` is refused (403
   `ACCOUNT_LINK_FAILED`) for an anonymous session (it could attach a provider and stay anonymous forever) and for an
-  unconfirmed account, and so is `/delete-anonymous-user` (it deletes through Better Auth's internal adapter and would
-  skip the purge).
+  unconfirmed account. `/delete-anonymous-user` answers 404: it deletes through Better Auth's internal adapter and
+  would skip the purge.
 - **Abandoned anonymous users are deleted after a week.** Every time an anonymous session is created or refreshed
   (Better Auth refreshes a session at most once a day), a session hook stamps `lastSeenAt` on the user. The daily
   cleanup job ([`AnonymousCleanupService`](src/cleanup/anonymous-cleanup.service.ts)) deletes each anonymous user whose
@@ -347,10 +347,11 @@ Set `"isPublished": false` and publish again to hide a sample.
 ## Layout
 
 ```
-src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs, analysis, rules, quota,
-            ip-quota, challenge, auth, account, mail, storage, realtime, database, config
+src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs,
+            analysis, rules, samples, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
+            realtime, database, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
-infra/      gcloud setup script, bucket CORS policy and lifecycle rule
+infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image repository cleanup policy
 ```
 
 ## Environment
@@ -388,7 +389,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window |
 | `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
-| `IP_FAILURE_REFUND_LIMIT`| `3`                     | Refunds per network of analyses that failed after Gemini answered           |
+| `IP_FAILURE_REFUND_LIMIT`| `3`                     | Refunds per network of analyses that failed after a possibly billed Gemini call |
 | `TRUSTED_PROXY_HOPS`     | `1`                     | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                   |
 | `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
 | `GEMINI_MODEL`           | `gemini-3.8-flash`      | Model id                                                                    |
@@ -446,9 +447,9 @@ every `.env.*` file, and the script refuses to run if it's tracked), then run th
 `.env.local` on purpose: local values such as Turnstile's always-pass test key must never reach production. The script
 prints the source of every key (`.env.production`, the bundle, a legacy secret, or absent — never a value) and asks
 for confirmation before writing, merges the file's values into the `API_SECRETS` bundle (a key the file doesn't set
-keeps its current value), and deploys both the job and the API mounting `API_SECRETS` at `/secrets/api.json`
-(`SECRETS_FILE`). Both processes run as the same runtime service account today, so both mount the whole bundle even
-though the worker only reads `MONGODB_URI` from it. To remove a key from the bundle entirely, edit it by hand
+keeps its current value), and deploys both jobs and the API, each mounting `API_SECRETS` at `/secrets/api.json`
+(`SECRETS_FILE`). All three run as the same runtime service account today, so all mount the whole bundle even though
+the jobs only read `MONGODB_URI` from it. To remove a key from the bundle entirely, edit it by hand
 (`gcloud secrets versions access latest --secret=API_SECRETS`, edit the JSON, then
 `gcloud secrets versions add API_SECRETS --data-file=edited.json`) — the script only ever adds or overwrites keys,
 it never drops one on its own. A key removed this way comes back on the next run of the script if its legacy
@@ -482,8 +483,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **MongoDB (Atlas) over Postgres.** A job is one nested document (settings, media facts, analysis), and Change Streams
   give realtime updates without a separate broker. They need a replica set, which Atlas provides (and Better Auth needs
   for transactions).
-- **Realtime through Socket.IO fed by a Change Stream**, one watcher per API instance. Running several instances
-  behind a load balancer would need a shared Socket.IO adapter.
+- **Realtime through Socket.IO fed by a Change Stream**, one watcher per API instance: every instance sees every
+  update and pushes it to its own sockets, so the instances (up to 3) need no shared Socket.IO adapter while updates
+  come only from the database.
 - **Gemini on Vertex AI with Application Default Credentials**, so no API key exists. Gemini 3 models are served from
   the `global` location.
 
@@ -507,17 +509,18 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **`X-Forwarded-For` read from the right, not `trust proxy`.** One function with a configured hop count, unit-tested,
   picks the entry our own front end appended; Express's `trust proxy` isn't set, because nothing else needs `req.ip`.
 - **Attempt-aware retries.** Cloud Run retries any non-zero exit, so the worker reads its attempt number: transient
-  failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. Only failures without a
-  model answer are retried: a malformed answer used to get one retry (generation is stochastic), but that billed the
-  job twice, so since 2026-10-01 any unusable answer fails the job, refunded within the network's weekly cap.
-  `maxOutputTokens` caps what the one call can cost.
+  failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. A retry calls Gemini again
+  only if no earlier call may have been billed (none was made, or Vertex refused it): a malformed answer used to get
+  one retry (generation is stochastic), but that billed the job twice, so since 2026-10-01 an unusable answer fails
+  the job at once, and a retry after any other possibly billed call fails it too, refunded within the network's weekly
+  cap. `maxOutputTokens` caps what the one call can cost.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
   the signed upload URL binds the exact declared size and can only create the object, never overwrite it. Only a definite problem with the file deletes it; storage or
   network trouble leaves the job pending.
-- **Lazy expiry instead of a scheduler.** Abandoned jobs are expired when their owner next reads their jobs, which
-  needs no Cloud Scheduler.
+- **Lazy expiry instead of a scheduled job.** Abandoned jobs are expired when their owner next reads their jobs, so
+  expiry needs no job of its own; the daily cleanup only deletes their videos.
 - **Tests run against a real MongoDB** (`mongodb-memory-server`), because the guarantees above live in query semantics
   that mocks can't prove. Auth flows run against the real Better Auth, which Jest can't load (ESM), under Node's test
   runner.
@@ -534,7 +537,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
   file isn't kept in this repo: rules are content, maintained outside it, and tests use a small fixture
   (`src/testing/test-ruleset.ts`) copied from real rules.
 - **Rules target placements and markets, not just platforms.** Format caps such as the 6-second bumper apply only to
-  their placement, and UK/EU/US rules only in their market; a test proves every rule is reachable.
+  their placement, and UK/EU/US rules only in their market; the schema refuses a rule whose
+  placements don't belong to its platforms, so every video rule is reachable by some settings.
 
 **Auth and hosting**
 
@@ -565,8 +569,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
   keep its sending reputation separate.
 - **Keyless deploys, one image per commit.** GitHub Actions authenticates through Workload Identity Federation, limited
-  to this repository's `init-setup` branch by numeric ids, so no long-lived key exists. The worker job and the API are
-  rolled to the same digest, the job first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
+  to this repository's `init-setup` branch by numeric ids, so no long-lived key exists. Both jobs and the API are
+  rolled to the same digest, the jobs first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
 - **Infrastructure as a gcloud script.** The infrastructure is a handful of set-once resources, so an idempotent,
   committed script is enough; Terraform or Pulumi would be the step up if it grows.
 - **One Secret Manager secret for all of the API's secrets.** The free tier caps active secret *versions* per billing
