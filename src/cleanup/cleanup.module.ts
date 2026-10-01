@@ -8,7 +8,7 @@ import { AbandonedUploadCleanupService } from './abandoned-upload-cleanup.servic
 import { AnonymousCleanupService } from './anonymous-cleanup.service'
 
 // Composition root of the daily cleanup job (cleanup.ts): the database and storage it deletes from, and the job store
-// whose owed refunds it retries; nothing else.
+// whose abandoned jobs it expires and whose owed refunds it retries; nothing else.
 @Module({
     imports: [appConfigModule, DatabaseModule, StorageModule, AccountModule, JobStoreModule],
     providers: [AnonymousCleanupService, AbandonedUploadCleanupService],

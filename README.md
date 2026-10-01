@@ -31,14 +31,17 @@ their own repos.
   one execution per analysis; the worker analyzes that job once and exits. It has no HTTP layer and no dispatcher, so
   it can never start another worker.
 - **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
-  started by Cloud Scheduler at 03:00 UTC. It deletes anonymous users unused for a week (see Authentication), and the
-  video of every job that backs no results: not `analyzed` and untouched for 6 hours, so never started, failed,
-  rejected or stale ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Every
-  object's path is made from its user and job ids, so the jobs find them all. The job document stays, marked
-  `videoDeletedAt` so it is handled once (with no upper age bound, a missed or failed day is caught up the next), and
-  analyzing it later answers `UPLOAD_INCOMPLETE`. An analyzed job keeps its video, which its findings' timestamps
-  replay, and a sample's shared video is never deleted. It also retries the refunds that ended jobs still owe (see
-  Quota).
+  started by Cloud Scheduler at 03:00 UTC. It first expires every user's abandoned jobs, as a read of one's own jobs
+  does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges. Then
+  it deletes anonymous users unused for a week (see Authentication), and the video of every job that backs no results:
+  not `analyzed` and untouched for 6 hours, so never started, failed, rejected or stale
+  ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Every object's path is made
+  from its user and job ids, so the jobs find them all. The job document stays, marked `videoDeletedAt` so it is
+  handled once (with no upper age bound, a missed or failed day is caught up the next), and analyzing it later answers
+  `UPLOAD_INCOMPLETE`. Expiring a job touches it, so the video of a job expired in a run goes in the next day's. An
+  analyzed job keeps its video, which its findings' timestamps replay, and a sample's shared video is never deleted.
+  Last, it retries the refunds that ended jobs still owe (see Quota), including any the expiry couldn't make. A step
+  that fails for one job or user logs it and goes on; any failure makes the execution exit 1.
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
@@ -88,9 +91,9 @@ conditional update on the expected current status, so two racing callers can nev
    answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which
    Gemini doesn't bill) clears the mark, so those stay retryable. After our own timeout, a dropped connection or any
    other failure Vertex may still have generated, and billed, an answer, so the mark stays.
-5. **Nothing stays in flight forever**: when a user reads their jobs, anything stuck (a worker that crashed or never
-   started) is expired: `verifying` after 10 minutes goes back to `pending`, `queued`/`analyzing` after 60 minutes ends
-   as `ANALYSIS_TIMED_OUT`.
+5. **Nothing stays in flight forever**: when a user reads their jobs, and for every user in the daily cleanup, anything
+   stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes goes back to `pending`,
+   `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded.
 
 **Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
 confirmed account. An anonymous user and an account that hasn't confirmed its email get one
@@ -519,8 +522,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
   the signed upload URL binds the exact declared size and can only create the object, never overwrite it. Only a definite problem with the file deletes it; storage or
   network trouble leaves the job pending.
-- **Lazy expiry instead of a scheduled job.** Abandoned jobs are expired when their owner next reads their jobs, so
-  expiry needs no job of its own; the daily cleanup only deletes their videos.
+- **Lazy expiry, backed by the daily cleanup.** Abandoned jobs are expired when their owner next reads their jobs, so
+  what they see is never stale, and the daily cleanup expires everyone's, so a job whose owner never comes back
+  doesn't keep its charges for the whole 7-day window. Both run the same `JobLifecycle` transitions.
 - **Tests run against a real MongoDB** (`mongodb-memory-server`), because the guarantees above live in query semantics
   that mocks can't prove. Auth flows run against the real Better Auth, which Jest can't load (ESM), under Node's test
   runner.

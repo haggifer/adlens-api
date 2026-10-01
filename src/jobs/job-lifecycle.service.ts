@@ -46,6 +46,11 @@ export interface FailOptions {
     isAfterModelAnswer?: boolean
 }
 
+export interface ExpirySweepResult {
+    expired: number
+    failed: number
+}
+
 export interface RefundSweepResult {
     refunded: number
     failed: number
@@ -193,14 +198,21 @@ export class JobLifecycle {
         )
     }
 
-    // Closes this user's jobs that were abandoned mid-flight (a worker crashed, timed out or never started), so no
-    // job shows progress forever, then retries the refunds their ended jobs still owe, so no charge stays taken for a
-    // run that never finished.
+    // Closes this user's abandoned jobs, then retries the refunds their ended jobs still owe, so no charge stays taken
+    // for a run that never finished.
     async expireStale(userId: string, now = new Date()): Promise<void> {
+        await this.expireStaleJobs(userId, now)
+        await this.refundOwedCharges(userId)
+    }
+
+    // Closes the jobs abandoned mid-flight (a worker crashed, timed out or never started), so no job shows progress
+    // forever: this user's on every read of their jobs, everyone's in the daily cleanup, for owners who never come
+    // back. A job that can't be closed is left for the next run.
+    async expireStaleJobs(userId?: string, now = new Date()): Promise<ExpirySweepResult> {
         const stale = await this.model
             .find(
                 {
-                    userId,
+                    ...(userId ? { userId } : {}),
                     $or: [
                         { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
                         { status: { $in: IN_FLIGHT }, updatedAt: { $lt: new Date(now.getTime() - ANALYSIS_STALE_MS) } },
@@ -209,20 +221,21 @@ export class JobLifecycle {
                 { _id: 1, status: 1 },
             )
             .lean<Pick<StoredJob, '_id' | 'status'>[]>()
+        const result: ExpirySweepResult = { expired: 0, failed: 0 }
 
         for (const job of stale) {
             const jobId = job._id.toString()
 
-            if (job.status === JobStatus.Verifying) {
-                await this.releaseVerification(jobId)
-                continue
+            try {
+                await this.expire(jobId, job.status)
+                result.expired++
+            } catch (err) {
+                result.failed++
+                this.logger.error(`could not expire job ${jobId}: ${describeError(err)}`)
             }
-
-            this.logger.warn(`job ${jobId} expired while ${job.status}`)
-            await this.fail(jobId, JobErrorCode.AnalysisTimedOut, 'No worker finished the analysis in time')
         }
 
-        await this.refundOwedCharges(userId)
+        return result
     }
 
     // Retries the refunds that ended jobs still owe: this user's on every read of their jobs, everyone's in the daily
@@ -251,6 +264,17 @@ export class JobLifecycle {
         }
 
         return result
+    }
+
+    private async expire(jobId: string, status: JobStatus): Promise<void> {
+        if (status === JobStatus.Verifying) {
+            await this.releaseVerification(jobId)
+
+            return
+        }
+
+        this.logger.warn(`job ${jobId} expired while ${status}`)
+        await this.fail(jobId, JobErrorCode.AnalysisTimedOut, 'No worker finished the analysis in time')
     }
 
     private transition(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<StoredJob | null> {

@@ -38,10 +38,12 @@ describe('CleanupModule', () => {
     })
 
     it('starts without the API-only secrets and runs every cleanup against an empty database', async () => {
+        const expired = await cleanup.get(JobLifecycle).expireStaleJobs()
         const anonymous = await cleanup.get(AnonymousCleanupService).run()
         const uploads = await cleanup.get(AbandonedUploadCleanupService).run()
         const refunds = await cleanup.get(JobLifecycle).refundOwedCharges()
 
+        expect(expired).toEqual({ expired: 0, failed: 0 })
         expect(anonymous).toEqual({ deleted: 0, failed: 0 })
         expect(uploads).toEqual({ deleted: 0, failed: 0 })
         expect(refunds).toEqual({ refunded: 0, failed: 0 })

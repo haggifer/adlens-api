@@ -19,11 +19,16 @@ const run = async (): Promise<number> => {
     })
 
     try {
+        const lifecycle = app.get(JobLifecycle)
+        // First, so the steps below see the abandoned jobs ended and refunded: an anonymous user is purged after their
+        // jobs' charges went back, and the last sweep retries the refunds the expiry couldn't make.
+        const expired = await lifecycle.expireStaleJobs()
         const anonymous = await app.get(AnonymousCleanupService).run()
         const uploads = await app.get(AbandonedUploadCleanupService).run()
-        const refunds = await app.get(JobLifecycle).refundOwedCharges()
+        const refunds = await lifecycle.refundOwedCharges()
+        const failed = expired.failed + anonymous.failed + uploads.failed + refunds.failed
 
-        return anonymous.failed + uploads.failed + refunds.failed > 0 ? EXIT_FAILED : EXIT_DONE
+        return failed > 0 ? EXIT_FAILED : EXIT_DONE
     } finally {
         await app.close()
     }

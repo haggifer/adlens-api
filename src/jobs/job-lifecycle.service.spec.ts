@@ -543,6 +543,43 @@ describe('JobLifecycle', () => {
 
             expect((await findJob(othersJob))?.status).toBe(JobStatus.Verifying)
         })
+
+        it("expires every user's abandoned jobs in the daily sweep, and counts them", async () => {
+            const own = await queueJob(NETWORK_CHARGE)
+            const othersJob = await createJob(JobStatus.Analyzing, OTHER_USER)
+
+            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+            await lastTouchedAt(own, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await lastTouchedAt(othersJob, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+
+            expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 2, failed: 0 })
+            expect(await findJob(own)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.AnalysisTimedOut,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect((await findJob(othersJob))?.status).toBe(JobStatus.Error)
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('counts a job the sweep could not expire, and goes on with the others', async () => {
+            const first = await createJob(JobStatus.Verifying)
+            const second = await createJob(JobStatus.Verifying, OTHER_USER)
+
+            await lastTouchedAt(first, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
+            await lastTouchedAt(second, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(jobs, 'findOneAndUpdate').mockImplementationOnce(() => {
+                throw new Error('write failed')
+            })
+
+            expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 1, failed: 1 })
+            expect([(await findJob(first))?.status, (await findJob(second))?.status]).toEqual(
+                expect.arrayContaining([JobStatus.Verifying, JobStatus.Pending]),
+            )
+        })
     })
 
     describe('the daily sweep of owed refunds', () => {
