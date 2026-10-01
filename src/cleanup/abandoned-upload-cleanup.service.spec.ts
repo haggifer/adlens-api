@@ -1,7 +1,14 @@
+import { Logger } from '@nestjs/common'
 import { JobStatus, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
+import { IP_QUOTA_MODEL, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
+import { IpQuotaService } from '../ip-quota/ip-quota.service'
+import { JobLifecycle } from '../jobs/job-lifecycle.service'
+import { IN_PROGRESS_STATUSES } from '../jobs/job-status'
+import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
+import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { AbandonedUploadCleanupService, UNUSED_VIDEO_MS } from './abandoned-upload-cleanup.service'
 
@@ -9,7 +16,7 @@ const NOW = new Date('2026-10-20T03:00:00Z')
 const HOUR_MS = 60 * 60 * 1000
 const USER = new Types.ObjectId().toString()
 
-const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * HOUR_MS)
+const hoursAgo = (hours: number, now = NOW) => new Date(now.getTime() - hours * HOUR_MS)
 
 describe('AbandonedUploadCleanupService', () => {
     let mongo: MemoryMongo
@@ -17,8 +24,8 @@ describe('AbandonedUploadCleanupService', () => {
     let cleanup: AbandonedUploadCleanupService
     const storage = { delete: jest.fn(async (_path: string) => undefined) }
 
-    // Mongoose sets updatedAt itself on create, so the age is written straight to the collection afterwards.
-    const createJob = async (updatedHoursAgo: number, fields: Partial<JobDoc> = {}) => {
+    // Mongoose sets the timestamps itself on create, so the age is written straight to the collection afterwards.
+    const createJob = async (createdHoursAgo: number, fields: Partial<JobDoc> = {}, now = NOW) => {
         const _id = new Types.ObjectId()
         const path = `users/${USER}/jobs/${_id}/video`
 
@@ -32,7 +39,7 @@ describe('AbandonedUploadCleanupService', () => {
             chargedIpRunId: null,
             ...fields,
         })
-        await jobs.collection.updateOne({ _id }, { $set: { updatedAt: hoursAgo(updatedHoursAgo) } })
+        await jobs.collection.updateOne({ _id }, { $set: { createdAt: hoursAgo(createdHoursAgo, now) } })
 
         return { jobId: _id.toString(), path }
     }
@@ -42,10 +49,12 @@ describe('AbandonedUploadCleanupService', () => {
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
+        await mongo.connection.model(IP_QUOTA_MODEL, IpQuotaSchema).init()
         cleanup = new AbandonedUploadCleanupService(jobs, storage as unknown as StorageService)
     })
 
     beforeEach(async () => {
+        jest.restoreAllMocks()
         storage.delete.mockReset()
         storage.delete.mockResolvedValue(undefined)
         await jobs.deleteMany({})
@@ -55,12 +64,12 @@ describe('AbandonedUploadCleanupService', () => {
         await mongo.stop()
     })
 
-    it('waits 6 hours after a job was last touched', () => {
+    it('waits 6 hours after a job was created', () => {
         expect(UNUSED_VIDEO_MS).toBe(6 * HOUR_MS)
     })
 
-    it.each([JobStatus.Pending, JobStatus.Error, JobStatus.Verifying, JobStatus.Queued, JobStatus.Analyzing])(
-        'deletes the video of a %s job untouched for 6 hours, marks it and keeps the job',
+    it.each([JobStatus.Pending, JobStatus.Error])(
+        'deletes the video of a %s job created over 6 hours ago, marks it and keeps the job',
         async (status) => {
             const { jobId, path } = await createJob(7, { status })
 
@@ -78,12 +87,38 @@ describe('AbandonedUploadCleanupService', () => {
         expect(await cleanup.run(NOW)).toEqual({ deleted: 1, failed: 0 })
     })
 
-    it('keeps the video of a job touched within the last 6 hours', async () => {
+    it('keeps the video of a job created within the last 6 hours', async () => {
         await createJob(5)
 
         await cleanup.run(NOW)
 
         expect(storage.delete).not.toHaveBeenCalled()
+    })
+
+    it.each(IN_PROGRESS_STATUSES)(
+        'keeps the video of a %s job however old, since it is still running',
+        async (status) => {
+            await createJob(24 * 30, { status })
+
+            await cleanup.run(NOW)
+
+            expect(storage.delete).not.toHaveBeenCalled()
+        },
+    )
+
+    it('deletes the video of a job the same run expired, although expiring it just touched it', async () => {
+        const now = new Date()
+        const quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
+        const ipQuota = new IpQuotaService(mongo.connection, configStub({}))
+        const lifecycle = new JobLifecycle(jobs, quota, ipQuota)
+        const { jobId, path } = await createJob(7, { status: JobStatus.Analyzing }, now)
+
+        await jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { updatedAt: hoursAgo(2, now) } })
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+        expect(await lifecycle.expireStaleJobs(undefined, now)).toEqual({ expired: 1, failed: 0 })
+        expect(await cleanup.run(now)).toEqual({ deleted: 1, failed: 0 })
+        expect(storage.delete).toHaveBeenCalledWith(path)
     })
 
     it('keeps the video of an analyzed job, which its findings replay', async () => {

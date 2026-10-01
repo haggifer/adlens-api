@@ -34,11 +34,12 @@ their own repos.
   started by Cloud Scheduler at 03:00 UTC. It first expires every user's abandoned jobs, as a read of one's own jobs
   does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges. Then
   it deletes anonymous users unused for a week (see Authentication), and the video of every job that backs no results:
-  not `analyzed` and untouched for 6 hours, so never started, failed, rejected or stale
-  ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Every object's path is made
-  from its user and job ids, so the jobs find them all. The job document stays, marked `videoDeletedAt` so it is
-  handled once (with no upper age bound, a missed or failed day is caught up the next), and analyzing it later answers
-  `UPLOAD_INCOMPLETE`. Expiring a job touches it, so the video of a job expired in a run goes in the next day's. An
+  created over 6 hours ago and `pending` or `error`, so never started, failed, rejected or expired
+  ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Jobs are aged from their
+  creation, not their last update, so a job expired earlier in the same run loses its video in that run; a job still
+  in progress after the expiry is running, and keeps its video. Every object's path is made from its user and job ids,
+  so the jobs find them all. The job document stays, marked `videoDeletedAt` so it is handled once (with no upper age
+  bound, a missed or failed day is caught up the next), and analyzing it later answers `UPLOAD_INCOMPLETE`. An
   analyzed job keeps its video, which its findings' timestamps replay, and a sample's shared video is never deleted.
   Last, it retries the refunds that ended jobs still owe (see Quota), including any the expiry couldn't make. A step
   that fails for one job or user logs it and goes on; any failure makes the execution exit 1.

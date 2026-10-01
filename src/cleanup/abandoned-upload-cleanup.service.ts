@@ -3,18 +3,21 @@ import { InjectModel } from '@nestjs/mongoose'
 import { JobStatus } from 'adlens-shared'
 import { Model } from 'mongoose'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
+import { IN_PROGRESS_STATUSES } from '../jobs/job-status'
 import { StorageService } from '../storage/storage.service'
 import type { CleanupResult } from './types'
 
-// Far past the signed upload URL's lifetime and every in-flight timeout, so no upload or analysis still needs it.
+// Far past the signed upload URL's lifetime, so no upload still needs it; jobs in progress are skipped anyway.
 export const UNUSED_VIDEO_MS = 6 * 60 * 60 * 1000
 
 // Deletes the videos that back no results: a video is kept only while its analysis succeeded, because every finding's
-// timestamp seeks the replay. That covers jobs never started (pending), failed or rejected (error), and stale ones
-// that never left verifying, queued or analyzing. Every uploaded object belongs to a job (its path is made from the
-// user and job ids at creation), so the jobs find them all. The job stays, marked `videoDeletedAt`, so it is handled
-// once, while a failed or missed run is caught up the next day; analyzing it later answers UPLOAD_INCOMPLETE. A
-// sample job's path is the shared sample video, which is never deleted.
+// timestamp seeks the replay. That covers jobs never started (pending) and failed or rejected ones (error). A job in
+// progress keeps its video: the cleanup expires abandoned jobs first, so one still in progress here is running. Jobs
+// are aged from their creation, not their last update, so a job that just ended (expired by this very run, say) loses
+// its video now rather than a day later. Every uploaded object belongs to a job (its path is made from the user and
+// job ids at creation), so the jobs find them all. The job stays, marked `videoDeletedAt`, so it is handled once,
+// while a failed or missed run is caught up the next day; analyzing it later answers UPLOAD_INCOMPLETE. A sample job's
+// path is the shared sample video, which is never deleted.
 @Injectable()
 export class AbandonedUploadCleanupService {
     private readonly logger = new Logger(AbandonedUploadCleanupService.name)
@@ -29,10 +32,10 @@ export class AbandonedUploadCleanupService {
         const unused = await this.jobs
             .find(
                 {
-                    status: { $ne: JobStatus.Analyzed },
+                    status: { $nin: [JobStatus.Analyzed, ...IN_PROGRESS_STATUSES] },
                     sampleId: { $exists: false },
                     videoDeletedAt: { $exists: false },
-                    updatedAt: { $lt: cutoff },
+                    createdAt: { $lt: cutoff },
                 },
                 { 'file.path': 1 },
             )
@@ -54,7 +57,7 @@ export class AbandonedUploadCleanupService {
         }
 
         this.logger.log(
-            `deleted the videos of ${result.deleted} jobs not analyzed since before ${cutoff.toISOString()}`,
+            `deleted the videos of ${result.deleted} ended jobs, not analyzed, created before ${cutoff.toISOString()}`,
         )
 
         return result
