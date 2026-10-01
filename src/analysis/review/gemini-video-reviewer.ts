@@ -9,7 +9,7 @@ import {
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Env } from '../../config/env'
-import { ModelAnswerError } from '../pipeline/model-answer-error'
+import { ModelAnswerError, ModelCallRefusedError } from '../pipeline/model-answer-error'
 import { RetryableError } from '../pipeline/retryable-error'
 import {
     buildReviewOutputJsonSchema,
@@ -31,12 +31,15 @@ const MAX_OUTPUT_TOKENS = 8192
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
 const toReviewError = (err: unknown): Error => {
-    if (err instanceof ApiError && !RETRYABLE_STATUSES.has(err.status)) {
-        return err
+    // The SDK throws ApiError only for a response with an error status; a timeout or a network failure is anything else.
+    const refused = err instanceof ApiError ? new ModelCallRefusedError(err.message, err.status, { cause: err }) : null
+
+    if (refused && !RETRYABLE_STATUSES.has(refused.status)) {
+        return refused
     }
 
     // Provider overload, timeouts and network failures.
-    return new RetryableError(err instanceof Error ? err.message : String(err), { cause: err })
+    return new RetryableError(err instanceof Error ? err.message : String(err), { cause: refused ?? err })
 }
 
 // Gemini on Vertex AI: authenticates with ADC and reads the video straight from its gs:// URI. Temperature stays at the

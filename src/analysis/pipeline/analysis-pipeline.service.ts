@@ -13,7 +13,7 @@ import {
 } from '../../rules'
 import { RulesetService } from '../../rules/ruleset.service'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
-import { ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
+import { isRefusedCall, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
 import { isRetryable } from './retryable-error'
 
 export type RunOutcome = 'analyzed' | 'failed' | 'skipped'
@@ -25,7 +25,7 @@ export interface RunAttempt {
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
 // attempt; any other failure ends the job in `error` with its charge refunded (after an answer from Gemini, only
 // while the network has refunds of those left), and the process exits cleanly. A job is never billed twice: Gemini is
-// called at most once per job, unless the call failed without an answer.
+// called at most once per job, unless Vertex refused the call with an HTTP error status.
 @Injectable()
 export class AnalysisPipeline {
     private readonly logger = new Logger(AnalysisPipeline.name)
@@ -97,8 +97,9 @@ export class AnalysisPipeline {
                 settings: job.settings,
             })
         } catch (err) {
-            // Only an answer is billed: a call that failed without one may be made again.
-            if (!(err instanceof ModelAnswerError)) {
+            // Only a refusal is certainly unbilled. After a timeout or a dropped connection Vertex may still have
+            // generated, and billed, an answer, so the mark stays and no attempt calls again.
+            if (isRefusedCall(err)) {
                 await this.lifecycle.clearModelCall(jobId)
             }
 

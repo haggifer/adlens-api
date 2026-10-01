@@ -24,7 +24,8 @@ export interface VideoReview {
 }
 
 // Watches the video and judges the content rules against it. Implementations throw RetryableError for transient
-// provider failures and anything else for failures a retry can't fix.
+// provider failures and anything else for failures a retry can't fix, and mark a call the provider refused with an
+// HTTP error status as a ModelCallRefusedError (itself, or as the RetryableError's cause): only that one is unbilled.
 export abstract class VideoReviewer {
     abstract review(request: VideoReviewRequest): Promise<VideoReview>
 }

@@ -1,6 +1,6 @@
-import { BlockedReason, FinishReason, type GenerateContentResponse } from '@google/genai'
+import { ApiError, BlockedReason, FinishReason, type GenerateContentResponse } from '@google/genai'
 import { configStub } from '../../testing/config-stub'
-import { ModelAnswerError } from '../pipeline/model-answer-error'
+import { isRefusedCall, ModelAnswerError } from '../pipeline/model-answer-error'
 import { isRetryable } from '../pipeline/retryable-error'
 import { GeminiVideoReviewer } from './gemini-video-reviewer'
 import type { VideoReviewRequest } from './video-reviewer'
@@ -91,5 +91,35 @@ describe('GeminiVideoReviewer', () => {
 
         expect(err).not.toBeInstanceOf(ModelAnswerError)
         expect(isRetryable(err)).toBe(true)
+    })
+
+    it('reports an HTTP error status from Vertex as a refused call, retried when the status is transient', async () => {
+        generateContent.mockRejectedValue(new ApiError({ message: 'overloaded', status: 503 }))
+
+        const transient = await reviewError()
+
+        generateContent.mockRejectedValue(new ApiError({ message: 'bad request', status: 400 }))
+
+        const permanent = await reviewError()
+
+        expect(isRefusedCall(transient)).toBe(true)
+        expect(isRetryable(transient)).toBe(true)
+        expect(isRefusedCall(permanent)).toBe(true)
+        expect(isRetryable(permanent)).toBe(false)
+    })
+
+    it('never reports a timeout or a dropped connection as a refused call, since Vertex may have billed it', async () => {
+        generateContent.mockRejectedValue(new DOMException('This operation was aborted', 'AbortError'))
+
+        const timedOut = await reviewError()
+
+        generateContent.mockRejectedValue(new TypeError('fetch failed', { cause: new Error('ECONNRESET') }))
+
+        const dropped = await reviewError()
+
+        expect(isRefusedCall(timedOut)).toBe(false)
+        expect(isRetryable(timedOut)).toBe(true)
+        expect(isRefusedCall(dropped)).toBe(false)
+        expect(isRetryable(dropped)).toBe(true)
     })
 })

@@ -13,7 +13,7 @@ import { configStub } from '../../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../../testing/memory-mongo'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
 import { AnalysisPipeline } from './analysis-pipeline.service'
-import { ModelAnswerError } from './model-answer-error'
+import { ModelAnswerError, ModelCallRefusedError } from './model-answer-error'
 import { RetryableError } from './retryable-error'
 import { buildModelCall, usageOf } from '../../testing/model-call'
 
@@ -24,6 +24,12 @@ const NETWORK: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPas
 const cutOff = () => new ModelAnswerError('The model output was cut off at the token limit', CALL)
 
 const malformed = () => new ModelAnswerError('The model returned malformed output', CALL)
+
+// What the Gemini reviewer throws when Vertex answers 503: retryable, and never billed.
+const overloaded = () => new RetryableError('overloaded', { cause: new ModelCallRefusedError('overloaded', 503) })
+
+// Our own client timeout: Vertex may still have generated, and billed, the answer.
+const timedOut = () => new RetryableError('This operation was aborted')
 
 // What a crash or a lost database write after Gemini answered looks like to the worker: a retryable failure.
 const mongoBlip = () => Object.assign(new Error('connection reset'), { name: 'MongoNetworkError' })
@@ -244,16 +250,37 @@ describe('AnalysisPipeline', () => {
         expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
     })
 
-    it('calls Gemini again after a provider error without an answer, which is never billed', async () => {
+    it('calls Gemini again after Vertex answered with an HTTP error status, which is never billed', async () => {
         const jobId = await queueJob()
 
-        reviewer.next = () => Promise.reject(new RetryableError('provider overloaded'))
+        reviewer.next = () => Promise.reject(overloaded())
         await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
         expect((await findJob(jobId))?.modelCallStartedAt).toBeUndefined()
         reviewer.next = new FakeReviewer().next
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
         expect(reviewer.review).toHaveBeenCalledTimes(2)
+    })
+
+    it('never calls Gemini again after a call that timed out, which may have been billed, and fails it as answered', async () => {
+        const jobId = await queueJob(NETWORK)
+
+        reviewer.next = () => Promise.reject(timedOut())
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
+        expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect(reviewer.review).toHaveBeenCalledTimes(1)
+        expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
+    })
+
+    it('keeps the mark after an unknown failure of the call', async () => {
+        const jobId = await queueJob()
+
+        reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
+        await pipeline.run(jobId, { isLast: false })
+
+        expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
     })
 
     it('marks the job before calling Gemini', async () => {
@@ -281,7 +308,7 @@ describe('AnalysisPipeline', () => {
     it('still refunds a failure the provider caused, whatever the network used up', async () => {
         reviewer.next = () => Promise.reject(cutOff())
         await pipeline.run(await queueJob(NETWORK), { isLast: false })
-        reviewer.next = () => Promise.reject(new RetryableError('provider overloaded'))
+        reviewer.next = () => Promise.reject(overloaded())
 
         expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
         expect(await used()).toBe(0)

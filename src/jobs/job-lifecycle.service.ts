@@ -156,7 +156,7 @@ export class JobLifecycle {
         return marked.modifiedCount > 0
     }
 
-    // The call failed without an answer (an HTTP or network error), which Gemini doesn't bill: a retry may call again.
+    // Vertex refused the call with an HTTP error status, which Gemini doesn't bill: a retry may call again.
     async clearModelCall(jobId: string): Promise<void> {
         await this.model.updateOne({ _id: jobId }, { $unset: { modelCallStartedAt: 1 } })
     }

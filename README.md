@@ -84,8 +84,9 @@ conditional update on the expected current status, so two racing callers can nev
    the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute timeout, well inside the 15-minute task
    timeout. A job is never billed twice: the worker marks the job (`modelCallStartedAt`, a conditional write) before
    calling Gemini, and an attempt that finds the mark set doesn't call again but fails the job as if Gemini had
-   answered. Only a call that failed without an answer (an HTTP or network error, which Gemini doesn't bill) clears
-   the mark, so those stay retryable.
+   answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which
+   Gemini doesn't bill) clears the mark, so those stay retryable. After our own timeout, a dropped connection or any
+   other failure Vertex may still have generated, and billed, an answer, so the mark stays.
 5. **Nothing stays in flight forever**: when a user reads their jobs, anything stuck (a worker that crashed or never
    started) is expired: `verifying` after 10 minutes goes back to `pending`, `queued`/`analyzing` after 60 minutes ends
    as `ANALYSIS_TIMED_OUT`.
@@ -130,16 +131,16 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
   (`chargedRunId`, `chargedIpRunId`) before charging and clears them once both are refunded, so each is refunded at
   most once and never lost.
-- **Failed analyses**: a failure before Gemini answers (provider errors, timeouts, a stuck worker) is always
-  refunded. Once Gemini has answered, the call is billed even when the answer can't be used (cut off, blocked or
-  malformed), so such a failure is refunded only while the network has refunds of those left
+- **Failed analyses**: a failure before the Gemini call, a call Vertex refused with an HTTP error status, and a stuck
+  worker are always refunded. Once Gemini has answered, the call is billed even when the answer can't be used (cut
+  off, blocked or malformed), so such a failure is refunded only while the network has refunds of those left
   (`IpQuotaService.refundFailure`, one conditional update that records the refund's time in `refundedFailures`);
   otherwise both runs stay counted, and the run is marked so a retry gives the same answer. The job keeps
   `isRefundCapped` with its charges until they are settled, so a retried refund is capped the same way. Without the
   cap, a video that always fails could be re-run for free until the Vertex spend cap stopped every analysis. An
   answer that can't be used (cut off, a blocked prompt, malformed: `ModelAnswerError`) is never retried, since another
   attempt would be billed again, and its tokens are added to the job's `usage`. A job whose earlier attempt may have
-  been billed (`modelCallStartedAt` set) fails the same way.
+  been billed (`modelCallStartedAt` set: the call timed out, lost its connection or got an answer) fails the same way.
 - **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web runs the check when an analysis
   starts, for visitors without an account, and sends its token with the job creation; members send none unless the
   API answers `CHALLENGE_REQUIRED`, after which the web runs the check and creates the job again. The API calls Cloudflare's `siteverify` only when a rule
