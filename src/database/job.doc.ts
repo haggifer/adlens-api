@@ -75,6 +75,8 @@ export const jobDocSchema = z.object({
     // Set at creation when a Turnstile check passed; analyze relies on it for the network rules.
     hasPassedChallenge: z.boolean().default(false),
     usage: tokenUsageSchema.optional(),
+    // When the daily cleanup deleted the job's video, which backed no results (AbandonedUploadCleanupService).
+    videoDeletedAt: z.date().optional(),
     // Set when the job analyzes a published sample; its file then points at the sample's object, never a user upload.
     sampleId: z.string().optional(),
 })

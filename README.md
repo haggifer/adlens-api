@@ -32,10 +32,13 @@ repos.
   it can never start another worker.
 - **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
   started by Cloud Scheduler at 03:00 UTC. It deletes anonymous users unused for a week (see Authentication), and the
-  videos of uploads left `pending` for a week ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)):
-  every object's path is made from its user and job ids, so the jobs find them all. The job document stays, and
-  analyzing it later answers `UPLOAD_INCOMPLETE`. A sample's shared video is never deleted. It also retries the
-  refunds that ended jobs still owe (see Quota).
+  video of every job that backs no results: not `analyzed` and untouched for 6 hours, so never started, failed,
+  rejected or stale ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Every
+  object's path is made from its user and job ids, so the jobs find them all. The job document stays, marked
+  `videoDeletedAt` so it is handled once (with no upper age bound, a missed or failed day is caught up the next), and
+  analyzing it later answers `UPLOAD_INCOMPLETE`. An analyzed job keeps its video, which its findings' timestamps
+  replay, and a sample's shared video is never deleted. It also retries the refunds that ended jobs still owe (see
+  Quota).
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
