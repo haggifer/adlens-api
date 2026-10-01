@@ -164,6 +164,8 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 through Resend with the visitor as Reply-To, so answering is a plain reply; nothing of it is stored.
 
 - **Honeypot**: the form hides a `website` field; a message that fills it in answers 204 and sends nothing.
+- **Turnstile**: every message carries a `challengeToken`, verified with Cloudflare's `siteverify` before anything is
+  counted (403 `CHALLENGE_FAILED` when it doesn't pass), so requests that fail the check can't use up the caps.
 - **Hourly caps** ([`ContactLimits`](src/contact/contact-limits.ts)): at most **3 messages per network**, **3 per
   sender email** and **20 in total**, past which the API answers 429 `RATE_LIMITED`. The network is the one the
   network limits use (`ClientNetworkResolver`). The total is the hard guarantee: senders choose their email and can
@@ -274,7 +276,7 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
 | `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
-| `POST /v1/contact`          | Email a Contact form message to the team (public, rate-limited) | **204**                        |
+| `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked, rate-limited) | **204**                        |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
 
 ## Ad-policy rules

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { getConnectionToken } from '@nestjs/mongoose'
 import type { Db } from 'mongodb'
 import type { Connection } from 'mongoose'
+import { ChallengeModule } from '../challenge/challenge.module'
 import type { Env } from '../config/env'
 import { DatabaseModule } from '../database/database.module'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
@@ -22,7 +23,7 @@ const createContactLimits = (connection: Connection, config: ConfigService<Env, 
 }
 
 @Module({
-    imports: [DatabaseModule, MailModule],
+    imports: [DatabaseModule, MailModule, ChallengeModule],
     controllers: [ContactController],
     providers: [
         ContactService,

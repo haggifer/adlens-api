@@ -490,7 +490,11 @@ describe('Jobs API (e2e)', () => {
     })
 
     describe('contact messages', () => {
-        const MESSAGE = { email: 'visitor@example.com', message: 'Hello, I would like to know more about AdLens.' }
+        const MESSAGE = {
+            email: 'visitor@example.com',
+            message: 'Hello, I would like to know more about AdLens.',
+            challengeToken: 'pass',
+        }
         let networks = 0
 
         // A network of its own per call unless one is given, so only the cap under test is reached.
@@ -525,6 +529,43 @@ describe('Jobs API (e2e)', () => {
             const res = await sendContact({ email: 'nope', message: 'hi' }).expect(400)
 
             expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+        })
+
+        it('checks the Turnstile token against the network address', async () => {
+            await sendContact(MESSAGE, '192.0.2.77').expect(204)
+
+            expect(verifyChallenge).toHaveBeenCalledWith('pass', '192.0.2.77')
+        })
+
+        it('refuses a message whose Turnstile check fails, and sends nothing', async () => {
+            const res = await sendContact({ ...MESSAGE, challengeToken: 'fail' }).expect(403)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.ChallengeFailed)
+            expect(sendMail).not.toHaveBeenCalled()
+        })
+
+        it("doesn't count a message whose Turnstile check failed", async () => {
+            for (let attempt = 0; attempt < 3; attempt++) {
+                await sendContact({ ...MESSAGE, challengeToken: 'fail' }, '192.0.2.60').expect(403)
+            }
+
+            await sendContact(MESSAGE, '192.0.2.60').expect(204)
+        })
+
+        it('needs either a Turnstile token or an upload draft', async () => {
+            const { challengeToken: _challengeToken, ...withoutToken } = MESSAGE
+            const res = await sendContact(withoutToken).expect(400)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+            expect(sendMail).not.toHaveBeenCalled()
+        })
+
+        it('refuses an unknown upload draft', async () => {
+            const { challengeToken: _challengeToken, ...withoutToken } = MESSAGE
+            const res = await sendContact({ ...withoutToken, draftId: 'no-such-draft' }).expect(400)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+            expect(sendMail).not.toHaveBeenCalled()
         })
 
         it('limits how often one sender can write, from any network', async () => {

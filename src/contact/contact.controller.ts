@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common'
-import { contactMessageInputSchema, type ContactMessagePayload } from 'adlens-shared'
+import { sendContactMessageInputSchema, type SendContactMessagePayload } from 'adlens-shared'
 import { RequestIpSource } from '../common/ip-source.decorator'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
 import type { IpSource } from '../ip-quota/client-ip'
@@ -14,7 +14,7 @@ export class ContactController {
     @HttpCode(HttpStatus.NO_CONTENT)
     send(
         @RequestIpSource() ipSource: IpSource,
-        @Body(new ZodValidationPipe(contactMessageInputSchema)) input: ContactMessagePayload,
+        @Body(new ZodValidationPipe(sendContactMessageInputSchema)) input: SendContactMessagePayload,
     ): Promise<void> {
         return this.contact.send(input, ipSource)
     }

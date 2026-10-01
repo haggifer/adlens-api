@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { type ContactMessagePayload, RequestErrorCode } from 'adlens-shared'
+import { RequestErrorCode, type SendContactMessagePayload } from 'adlens-shared'
+import { ChallengeVerifier } from '../challenge/challenge-verifier'
 import { ApiException } from '../common/api-exception'
 import type { Env } from '../config/env'
 import type { IpSource } from '../ip-quota/client-ip'
@@ -16,11 +17,12 @@ export class ContactService {
     constructor(
         private readonly limits: ContactLimits,
         private readonly network: ClientNetworkResolver,
+        private readonly challenge: ChallengeVerifier,
         private readonly mailer: Mailer,
         private readonly config: ConfigService<Env, true>,
     ) {}
 
-    async send(input: ContactMessagePayload, ipSource: IpSource): Promise<void> {
+    async send(input: SendContactMessagePayload, ipSource: IpSource): Promise<void> {
         // A bot filled in the hidden field: answer as if it worked, so it learns nothing.
         if (input.website) {
             this.logger.warn('dropped a contact message that filled in the honeypot')
@@ -37,8 +39,21 @@ export class ContactService {
             )
         }
 
+        const { ip, bucketKey } = this.network.resolve(ipSource)
+
+        // A draft stands in for the check once it exists; until then every draft id is unknown.
+        if (!input.challengeToken) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, RequestErrorCode.ValidationFailed, 'Unknown draft')
+        }
+
+        // Before the caps, so requests that fail the check can't use them up.
+        const isHuman = await this.challenge.verify(input.challengeToken, ip)
+
+        if (!isHuman) {
+            throw new ApiException(HttpStatus.FORBIDDEN, RequestErrorCode.ChallengeFailed, 'The challenge did not pass')
+        }
+
         const email = input.email.toLowerCase()
-        const { bucketKey } = this.network.resolve(ipSource)
         const isAllowed = await this.limits.allowMessage(bucketKey, email)
 
         if (!isAllowed) {
