@@ -23,7 +23,10 @@ const NETWORK: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPas
 
 const cutOff = () => new ModelAnswerError('The model output was cut off at the token limit', CALL)
 
-const malformed = () => new ModelAnswerError('The model returned malformed output', CALL, true)
+const malformed = () => new ModelAnswerError('The model returned malformed output', CALL)
+
+// What a crash or a lost database write after Gemini answered looks like to the worker: a retryable failure.
+const mongoBlip = () => Object.assign(new Error('connection reset'), { name: 'MongoNetworkError' })
 
 class FakeReviewer extends VideoReviewer {
     next: () => Promise<VideoReview> = async () => ({
@@ -105,6 +108,7 @@ describe('AnalysisPipeline', () => {
     })
 
     afterEach(async () => {
+        jest.restoreAllMocks()
         await Promise.all([jobs.deleteMany({}), users().deleteMany({}), networks().deleteMany({})])
     })
 
@@ -216,26 +220,52 @@ describe('AnalysisPipeline', () => {
         expect(await usedByNetwork()).toBe(0)
     })
 
-    it('retries a malformed answer once, then fails it, counting the tokens of both attempts', async () => {
-        const jobId = await queueJob()
+    it('fails a malformed answer at once instead of paying for another, and refunds it', async () => {
+        const jobId = await queueJob(NETWORK)
 
         reviewer.next = () => Promise.reject(malformed())
 
-        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(ModelAnswerError)
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
-        expect(reviewer.review).toHaveBeenCalledTimes(2)
-        expect((await findJob(jobId))?.usage).toEqual(usageOf(CALL, CALL))
+        expect(reviewer.review).toHaveBeenCalledTimes(1)
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: usageOf(CALL) })
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
     })
 
-    it("adds a failed attempt's tokens to those of the attempt that succeeds", async () => {
+    it('never calls Gemini again once an attempt may have been billed, and fails the job as answered', async () => {
+        const jobId = await queueJob(NETWORK)
+
+        jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(mongoBlip())
+
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toThrow('connection reset')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect(reviewer.review).toHaveBeenCalledTimes(1)
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+        expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
+    })
+
+    it('calls Gemini again after a provider error without an answer, which is never billed', async () => {
         const jobId = await queueJob()
 
-        reviewer.next = () => Promise.reject(malformed())
-        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(ModelAnswerError)
+        reviewer.next = () => Promise.reject(new RetryableError('provider overloaded'))
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
+        expect((await findJob(jobId))?.modelCallStartedAt).toBeUndefined()
         reviewer.next = new FakeReviewer().next
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
-        expect((await findJob(jobId))?.usage).toEqual(usageOf(CALL, CALL))
+        expect(reviewer.review).toHaveBeenCalledTimes(2)
+    })
+
+    it('marks the job before calling Gemini', async () => {
+        const jobId = await queueJob()
+
+        reviewer.next = async () => {
+            expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
+
+            return new FakeReviewer().next()
+        }
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
     })
 
     it('keeps a failed answer counted once the network used up its refunded failures', async () => {

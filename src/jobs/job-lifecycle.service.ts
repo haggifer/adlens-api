@@ -145,6 +145,22 @@ export class JobLifecycle {
             .lean<StoredJob>()
     }
 
+    // Marks the attempt's Gemini call as started, so no later attempt makes one again. false when an earlier attempt
+    // already started one (it may have been billed), or the job is no longer being analyzed.
+    async markModelCall(jobId: string, now = new Date()): Promise<boolean> {
+        const marked = await this.model.updateOne(
+            { _id: jobId, status: JobStatus.Analyzing, modelCallStartedAt: { $exists: false } },
+            { $set: { modelCallStartedAt: now } },
+        )
+
+        return marked.modifiedCount > 0
+    }
+
+    // The call failed without an answer (an HTTP or network error), which Gemini doesn't bill: a retry may call again.
+    async clearModelCall(jobId: string): Promise<void> {
+        await this.model.updateOne({ _id: jobId }, { $unset: { modelCallStartedAt: 1 } })
+    }
+
     // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale). The call is
     // added to what earlier, failed attempts recorded, so the job holds everything its analysis was billed for.
     async complete(jobId: string, analysis: Analysis, call: ModelCall): Promise<boolean> {

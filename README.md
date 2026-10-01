@@ -78,7 +78,10 @@ conditional update on the expected current status, so two racing callers can nev
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
    network, timeout) exits 1 so Cloud Run retries it; a permanent failure, or any failure on the last attempt, ends
    the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute timeout, well inside the 15-minute task
-   timeout.
+   timeout. A job is never billed twice: the worker marks the job (`modelCallStartedAt`, a conditional write) before
+   calling Gemini, and an attempt that finds the mark set doesn't call again but fails the job as if Gemini had
+   answered. Only a call that failed without an answer (an HTTP or network error, which Gemini doesn't bill) clears
+   the mark, so those stay retryable.
 5. **Nothing stays in flight forever**: when a user reads their jobs, anything stuck (a worker that crashed or never
    started) is expired: `verifying` after 10 minutes goes back to `pending`, `queued`/`analyzing` after 60 minutes ends
    as `ANALYSIS_TIMED_OUT`.
@@ -128,9 +131,11 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   malformed), so such a failure is refunded only while the network has refunds of those left
   (`IpQuotaService.refundFailure`, one conditional update that records the refund's time in `refundedFailures`);
   otherwise both runs stay counted, and the run is marked so a retry gives the same answer. The job keeps
-  `isRefundCapped` with its charges until they are settled, so a retried refund is capped the same way. Without the cap, a video that always fails could be re-run for free until the
-  Vertex spend cap stopped every analysis. A cut-off or blocked answer isn't retried, a malformed one once
-  (`ModelAnswerError`), and every attempt's tokens are added to the job's `usage`.
+  `isRefundCapped` with its charges until they are settled, so a retried refund is capped the same way. Without the
+  cap, a video that always fails could be re-run for free until the Vertex spend cap stopped every analysis. An
+  answer that can't be used (cut off, a blocked prompt, malformed: `ModelAnswerError`) is never retried, since another
+  attempt would be billed again, and its tokens are added to the job's `usage`. A job whose earlier attempt may have
+  been billed (`modelCallStartedAt` set) fails the same way.
 - **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web runs the check when an analysis
   starts, for visitors without an account, and sends its token with the job creation; members send none unless the
   API answers `CHALLENGE_REQUIRED`, after which the web runs the check and creates the job again. The API calls Cloudflare's `siteverify` only when a rule
@@ -455,8 +460,10 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **`X-Forwarded-For` read from the right, not `trust proxy`.** One function with a configured hop count, unit-tested,
   picks the entry our own front end appended; Express's `trust proxy` isn't set, because nothing else needs `req.ip`.
 - **Attempt-aware retries.** Cloud Run retries any non-zero exit, so the worker reads its attempt number: transient
-  failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. Malformed or truncated model
-  output counts as transient because generation is stochastic, and `maxOutputTokens` caps what an attempt can cost.
+  failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. Only failures without a
+  model answer are retried: a malformed answer used to get one retry (generation is stochastic), but that billed the
+  job twice, so since 2026-10-01 any unusable answer fails the job, refunded within the network's weekly cap.
+  `maxOutputTokens` caps what the one call can cost.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and

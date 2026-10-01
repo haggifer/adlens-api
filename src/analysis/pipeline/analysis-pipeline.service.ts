@@ -12,12 +12,9 @@ import {
     selectRules,
 } from '../../rules'
 import { RulesetService } from '../../rules/ruleset.service'
-import { VideoReviewer } from '../review/video-reviewer'
-import { ModelAnswerError } from './model-answer-error'
+import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
+import { ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
 import { isRetryable } from './retryable-error'
-
-// Every Gemini answer is billed, so an unusable one gets a single retry however many attempts Cloud Run has left.
-const MAX_ANSWER_ATTEMPTS = 2
 
 export type RunOutcome = 'analyzed' | 'failed' | 'skipped'
 
@@ -27,7 +24,8 @@ export interface RunAttempt {
 
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
 // attempt; any other failure ends the job in `error` with its charge refunded (after an answer from Gemini, only
-// while the network has refunds of those left), and the process exits cleanly.
+// while the network has refunds of those left), and the process exits cleanly. A job is never billed twice: Gemini is
+// called at most once per job, unless the call failed without an answer.
 @Injectable()
 export class AnalysisPipeline {
     private readonly logger = new Logger(AnalysisPipeline.name)
@@ -53,21 +51,21 @@ export class AnalysisPipeline {
             return isCompleted ? 'analyzed' : 'skipped'
         } catch (err) {
             const detail = err instanceof Error ? err.message : String(err)
-            const isModelAnswer = err instanceof ModelAnswerError
 
-            if (isModelAnswer) {
+            if (err instanceof ModelAnswerError) {
                 await this.lifecycle.addUsage(jobId, err.call)
             }
 
-            const isAnswerRetryUsed = isModelAnswer && job.attempts >= MAX_ANSWER_ATTEMPTS
-
-            if (isRetryable(err) && !attempt.isLast && !isAnswerRetryUsed) {
+            if (isRetryable(err) && !attempt.isLast) {
                 this.logger.warn(`job ${jobId} failed transiently, leaving it for a retry: ${detail}`)
                 throw err
             }
 
+            // An earlier attempt's call may have been billed even though this attempt never got its answer.
+            const isAfterModelAnswer = err instanceof ModelAnswerError || err instanceof ModelCallRepeatedError
+
             this.logger.error(`job ${jobId} failed: ${detail}`)
-            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail, { isAfterModelAnswer: isModelAnswer })
+            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail, { isAfterModelAnswer })
 
             return 'failed'
         }
@@ -80,14 +78,32 @@ export class AnalysisPipeline {
 
         const ruleSet = await this.ruleset.current()
         const selected = selectRules(ruleSet, job.settings)
-        const review = await this.reviewer.review({
-            videoUri: gcsUri(job.file.bucket, job.file.path),
-            mimeType: job.file.contentType,
-            durationS: job.media.durationS,
-            rules: projectForModel(selected.content),
-            advisories: projectAdvisoriesForModel(selected.advisory),
-            settings: job.settings,
-        })
+        const jobId = job._id.toString()
+        const isMarked = await this.lifecycle.markModelCall(jobId)
+
+        if (!isMarked) {
+            throw new ModelCallRepeatedError()
+        }
+
+        let review: VideoReview
+
+        try {
+            review = await this.reviewer.review({
+                videoUri: gcsUri(job.file.bucket, job.file.path),
+                mimeType: job.file.contentType,
+                durationS: job.media.durationS,
+                rules: projectForModel(selected.content),
+                advisories: projectAdvisoriesForModel(selected.advisory),
+                settings: job.settings,
+            })
+        } catch (err) {
+            // Only an answer is billed: a call that failed without one may be made again.
+            if (!(err instanceof ModelAnswerError)) {
+                await this.lifecycle.clearModelCall(jobId)
+            }
+
+            throw err
+        }
 
         return {
             analysis: {

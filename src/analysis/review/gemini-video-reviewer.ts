@@ -93,6 +93,13 @@ export class GeminiVideoReviewer extends VideoReviewer {
             at: new Date(),
         })
 
+        // A blocked prompt gets no candidates. Blocked content won't change on a retry.
+        const blockReason = response.promptFeedback?.blockReason
+
+        if (blockReason || !response.candidates?.length) {
+            throw new ModelAnswerError(`The prompt was blocked: ${blockReason ?? 'no candidates'}`, call)
+        }
+
         // Every answer is billed. A cut-off one comes from the prompt and video, not chance (the whole-second
         // timestamps stopped the runaways), so another attempt would most likely pay for the same cut-off answer.
         if (finishReason === FinishReason.MAX_TOKENS) {
@@ -111,8 +118,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
         } catch (err) {
             const reason = err instanceof Error ? err.message : String(err)
 
-            // Generation is stochastic: a malformed answer is usually followed by a well-formed one.
-            throw new ModelAnswerError(`The model returned malformed output: ${reason}`, call, true, { cause: err })
+            throw new ModelAnswerError(`The model returned malformed output: ${reason}`, call, { cause: err })
         }
 
         return {

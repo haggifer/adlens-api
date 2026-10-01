@@ -61,6 +61,9 @@ export const jobDocSchema = z.object({
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
     attempts: z.number().int().nonnegative().default(0),
+    // Set just before a worker attempt calls Gemini, and cleared only when that call failed without an answer (never
+    // billed). An attempt that finds it set doesn't call again: the earlier call may have been billed.
+    modelCallStartedAt: z.date().optional(),
     // The quota run this job was charged for, recorded just before the charge; null when none is held (never
     // charged, or refunded). On a job that is neither in flight nor analyzed, a held run is a refund still owed.
     chargedRunId: z.string().nullable(),
