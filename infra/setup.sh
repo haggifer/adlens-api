@@ -82,6 +82,8 @@ echo "== uploads bucket + CORS =="
 gcloud storage buckets describe "gs://$BUCKET" >/dev/null 2>&1 || \
     gcloud storage buckets create "gs://$BUCKET" --location="$REGION" --uniform-bucket-level-access
 gcloud storage buckets update "gs://$BUCKET" --cors-file="$(dirname "$0")/cors.json"
+# Images attached to Contact form messages are only needed until the message is read.
+gcloud storage buckets update "gs://$BUCKET" --lifecycle-file="$(dirname "$0")/lifecycle.json"
 
 echo "== runtime service account =="
 gcloud iam service-accounts describe "$RUNTIME_SA" >/dev/null 2>&1 || \

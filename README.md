@@ -292,7 +292,7 @@ src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cle
             ip-quota, challenge, auth, account, mail, storage, realtime, database, config
 test/       e2e (Supertest) and auth-flow tests
 scripts/    ruleset publishing, dependency guard
-infra/      gcloud setup script and bucket CORS policy
+infra/      gcloud setup script, bucket CORS policy and lifecycle rule
 ```
 
 ## Environment
@@ -373,7 +373,8 @@ only this repository's pushes to `init-setup` are accepted. It builds one image,
 the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, and ends with a health check.
 
 [`infra/setup.sh`](infra/setup.sh) (plain gcloud, see [Design decisions](#design-decisions)) creates
-everything the workflow relies on: the APIs, the bucket and its CORS policy from [`infra/cors.json`](infra/cors.json),
+everything the workflow relies on: the APIs, the bucket, its CORS policy from [`infra/cors.json`](infra/cors.json) and its lifecycle rule from
+[`infra/lifecycle.json`](infra/lifecycle.json) (Contact form attachments are deleted after 30 days),
 the runtime and deploy service accounts, the Workload Identity provider, the `API_SECRETS` bundle, the image
 repository and the Cloud Scheduler job that starts `adlens-cleanup` daily. It also owns the runtime config (env vars,
 secrets, the analysis job's 2 retries and 15-minute timeout, the cleanup job's schedule), which CI
