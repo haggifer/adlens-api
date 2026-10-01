@@ -2,6 +2,5 @@
 // satisfy the imports.
 export const betterAuth = () => ({})
 export const mongodbAdapter = () => ({})
-export const bearer = () => ({})
 export const fromNodeHeaders = (headers: unknown) => headers
 export const toNodeHandler = () => () => undefined
