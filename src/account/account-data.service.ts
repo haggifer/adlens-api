@@ -6,6 +6,8 @@ import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { QuotaService } from '../quota/quota.service'
 import { StorageService } from '../storage/storage.service'
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 // Everything AdLens stores for a user outside Better Auth's own collections: jobs and every uploaded object. The quota
 // runs live on the user document, which Better Auth deletes itself.
 @Injectable()
@@ -35,9 +37,24 @@ export class AccountDataService {
             .filter((job) => !job.sampleId && !job.file.path.startsWith(ownPrefix))
             .map((job) => job.file.path)
 
+        const uploadsAdoptedByOthers = await this.findUploadsAdoptedByOthers(userId)
+
         await Promise.all(adoptedUploads.map((path) => this.storage.delete(path)))
-        await this.storage.deletePrefix(ownPrefix)
+        await this.storage.deletePrefix(ownPrefix, uploadsAdoptedByOthers)
         await this.jobs.deleteMany({ userId })
         this.logger.log(`purged the data of deleted user ${userId}`)
+    }
+
+    // An anonymous user can outlive its link (Better Auth only logs a failed delete of it), and its prefix still holds
+    // the videos the account adopted.
+    private async findUploadsAdoptedByOthers(userId: string): Promise<Set<string>> {
+        const jobs = await this.jobs
+            .find(
+                { userId: { $ne: userId }, 'file.path': { $regex: `^${escapeRegExp(userPrefix(userId))}` } },
+                { file: 1 },
+            )
+            .lean<Pick<StoredJob, 'file'>[]>()
+
+        return new Set(jobs.map((job) => job.file.path))
     }
 }

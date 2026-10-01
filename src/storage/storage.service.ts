@@ -80,7 +80,18 @@ export class StorageService {
         await this.object(path).delete({ ignoreNotFound: true })
     }
 
-    async deletePrefix(prefix: string): Promise<void> {
-        await this.storage.bucket(this.bucketName).deleteFiles({ prefix, force: true })
+    async deletePrefix(prefix: string, keep: ReadonlySet<string> = new Set()): Promise<void> {
+        const bucket = this.storage.bucket(this.bucketName)
+
+        if (keep.size === 0) {
+            await bucket.deleteFiles({ prefix, force: true })
+            return
+        }
+
+        const [files] = await bucket.getFiles({ prefix })
+
+        await Promise.all(
+            files.filter((file) => !keep.has(file.name)).map((file) => file.delete({ ignoreNotFound: true })),
+        )
     }
 }

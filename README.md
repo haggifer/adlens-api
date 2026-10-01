@@ -485,7 +485,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
   where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge
   deletes adopted uploads before the account's own prefix. The purge must stay in `deleteUser.beforeDelete`: the
-  anonymous plugin deletes a linked anonymous user through the internal adapter, which skips it.
+  anonymous plugin deletes a linked anonymous user through the internal adapter, which skips it. That delete only logs
+  a failure, so a linked anonymous user can survive and be purged later by the cleanup: a purge keeps every object
+  under the user's prefix that another user's job still references.
 - **A Better Auth index that can't be built is logged, not fatal.** Without it the API works as it did before, only
   slower and keeping expired rows; failing the start would stop every new instance, and Cloud Run starts one on every
   cold start, so one bad row (a duplicate email) would take the API down until the data was fixed. Each index is

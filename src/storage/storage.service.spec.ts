@@ -53,4 +53,41 @@ describe('StorageService', () => {
             })
         })
     })
+
+    describe('deletePrefix', () => {
+        const fakeFile = (name: string) => ({ name, delete: jest.fn(async () => undefined) })
+
+        const withBucket = (files: ReturnType<typeof fakeFile>[]) => {
+            const bucket = {
+                deleteFiles: jest.fn(async () => undefined),
+                getFiles: jest.fn(async () => [files]),
+            }
+            const service = new StorageService(configStub({ STORAGE_BUCKET: 'bucket' }))
+
+            Object.assign(service, { storage: { bucket: () => bucket } })
+
+            return { service, bucket }
+        }
+
+        it('deletes everything under the prefix when nothing is kept', async () => {
+            const { service, bucket } = withBucket([])
+
+            await service.deletePrefix('users/u1/')
+
+            expect(bucket.deleteFiles).toHaveBeenCalledWith({ prefix: 'users/u1/', force: true })
+        })
+
+        it('deletes every object under the prefix except the kept paths', async () => {
+            const kept = fakeFile('users/u1/jobs/adopted/video')
+            const own = fakeFile('users/u1/jobs/own/video')
+            const { service, bucket } = withBucket([kept, own])
+
+            await service.deletePrefix('users/u1/', new Set([kept.name]))
+
+            expect(bucket.getFiles).toHaveBeenCalledWith({ prefix: 'users/u1/' })
+            expect(bucket.deleteFiles).not.toHaveBeenCalled()
+            expect(kept.delete).not.toHaveBeenCalled()
+            expect(own.delete).toHaveBeenCalledWith({ ignoreNotFound: true })
+        })
+    })
 })

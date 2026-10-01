@@ -22,7 +22,7 @@ describe('AccountDataService', () => {
     let accountData: AccountDataService
     const storage = {
         delete: jest.fn(async (_path: string) => undefined),
-        deletePrefix: jest.fn(async (_prefix: string) => undefined),
+        deletePrefix: jest.fn(async (_prefix: string, _keep?: ReadonlySet<string>) => undefined),
     }
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
@@ -100,8 +100,23 @@ describe('AccountDataService', () => {
         await accountData.purge(MEMBER)
 
         expect(storage.delete.mock.calls).toEqual([[`users/${ANONYMOUS}/jobs/adopted/video`]])
-        expect(storage.deletePrefix.mock.calls).toEqual([[`users/${MEMBER}/`]])
+        expect(storage.deletePrefix.mock.calls).toEqual([[`users/${MEMBER}/`, new Set()]])
         expect(await jobs.countDocuments({ userId: MEMBER })).toBe(0)
         expect(await jobs.exists({ _id: bystanderJobId })).not.toBeNull()
+    })
+
+    // Better Auth only logs a failed delete of a linked anonymous user, so one can outlive its link; its prefix still
+    // holds the videos its jobs took to the account.
+    it("keeps the videos another user's jobs still reference when purging a user's prefix", async () => {
+        const adoptedPath = `users/${ANONYMOUS}/jobs/adopted/video`
+
+        await createJob(MEMBER, { file: fileAt(adoptedPath) })
+        await createJob(ANONYMOUS)
+
+        await accountData.purge(ANONYMOUS)
+
+        expect(storage.deletePrefix.mock.calls).toEqual([[`users/${ANONYMOUS}/`, new Set([adoptedPath])]])
+        expect(await jobs.countDocuments({ userId: ANONYMOUS })).toBe(0)
+        expect(await jobs.countDocuments({ userId: MEMBER })).toBe(1)
     })
 })
