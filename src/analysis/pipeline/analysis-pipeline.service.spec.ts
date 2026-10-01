@@ -111,7 +111,7 @@ describe('AnalysisPipeline', () => {
     beforeEach(async () => {
         reviewer = new FakeReviewer()
         pipeline = new AnalysisPipeline(lifecycle, reviewer, ruleset)
-        await users().insertOne({ _id: new Types.ObjectId(USER), email: 'user@example.com' })
+        await users().insertOne({ _id: new Types.ObjectId(USER), email: 'user@example.com', emailVerified: true })
     })
 
     afterEach(async () => {

@@ -5,11 +5,27 @@ import { type Quota, QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
 import { type Connection, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { countedRuns } from '../common/counted-runs'
+import {
+    getUserAccess,
+    isProvisional,
+    toProvisionalRefusal,
+    USER_ACCESS_PROJECTION,
+    UserAccess,
+} from '../common/user-access'
 import type { Env } from '../config/env'
 import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/user.doc'
 
-export const quotaExceeded = () =>
-    new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.QuotaExceeded, 'Analysis limit reached')
+// What an anonymous user or an unconfirmed account gets before it must sign up or confirm its email. Clearing cookies
+// gets a new anonymous user, so the network's anonymous allowance (IP_ANON_LIMIT) remains the real bound.
+export const PROVISIONAL_QUOTA_LIMIT = 1
+
+// getUserAccess in a pipeline expression, for an account that isn't an admin.
+const IS_PROVISIONAL_EXPR = { $or: [{ $eq: ['$isAnonymous', true] }, { $ne: ['$emailVerified', true] }] }
+
+export const toQuotaRefusal = (access: UserAccess): ApiException =>
+    isProvisional(access)
+        ? toProvisionalRefusal(access)
+        : new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.QuotaExceeded, 'Analysis limit reached')
 
 @Injectable()
 export class QuotaService {
@@ -29,7 +45,7 @@ export class QuotaService {
     // Charges one run for the job and returns the run's id: the one the job recorded before charging, when given. One
     // conditional update on the user's document counts the runs of the last window, drops older ones and appends the
     // new run, so concurrent calls can't overdraw. An admin's charge always matches: their runs are counted but never
-    // capped.
+    // capped. Anonymous users and unconfirmed accounts get PROVISIONAL_QUOTA_LIMIT, read from the same document.
     async consume(
         userId: string,
         jobId: string,
@@ -41,13 +57,28 @@ export class QuotaService {
         const charged = await this.users.findOneAndUpdate(
             {
                 _id: new Types.ObjectId(userId),
-                $expr: { $or: [{ $eq: ['$isAdmin', true] }, { $lt: [{ $size: countedRuns(cutoff) }, this.limit] }] },
+                $expr: {
+                    $or: [
+                        { $eq: ['$isAdmin', true] },
+                        {
+                            $lt: [
+                                { $size: countedRuns(cutoff) },
+                                { $cond: [IS_PROVISIONAL_EXPR, PROVISIONAL_QUOTA_LIMIT, this.limit] },
+                            ],
+                        },
+                    ],
+                },
             },
             [{ $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] } } }],
         )
 
         if (!charged) {
-            throw quotaExceeded()
+            const user = await this.users.findOne(
+                { _id: new Types.ObjectId(userId) },
+                { projection: USER_ACCESS_PROJECTION },
+            )
+
+            throw toQuotaRefusal(getUserAccess(user))
         }
 
         return run.id
@@ -75,15 +106,23 @@ export class QuotaService {
         const cutoff = now.getTime() - QUOTA_WINDOW_MS
         const user = await this.users.findOne(
             { _id: new Types.ObjectId(userId) },
-            { projection: { isAdmin: 1, runs: 1 } },
+            { projection: { ...USER_ACCESS_PROJECTION, runs: 1 } },
         )
         const starts = (user?.runs ?? []).map((run) => run.startedAt.getTime()).filter((start) => start > cutoff)
         const oldest = starts.length ? Math.min(...starts) : null
 
         return {
             used: starts.length,
-            limit: user?.isAdmin ? null : this.limit,
+            limit: this.getLimit(getUserAccess(user)),
             nextFreeAt: oldest === null ? null : new Date(oldest + QUOTA_WINDOW_MS).toISOString(),
         }
+    }
+
+    private getLimit(access: UserAccess): number | null {
+        if (access === UserAccess.Admin) {
+            return null
+        }
+
+        return isProvisional(access) ? PROVISIONAL_QUOTA_LIMIT : this.limit
     }
 }

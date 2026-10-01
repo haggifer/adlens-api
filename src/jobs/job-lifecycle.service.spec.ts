@@ -126,8 +126,8 @@ describe('JobLifecycle', () => {
 
     beforeEach(async () => {
         await users().insertMany([
-            { _id: new Types.ObjectId(USER), email: 'user@example.com' },
-            { _id: new Types.ObjectId(OTHER_USER), email: 'other@example.com' },
+            { _id: new Types.ObjectId(USER), email: 'user@example.com', emailVerified: true },
+            { _id: new Types.ObjectId(OTHER_USER), email: 'other@example.com', emailVerified: true },
         ])
     })
 

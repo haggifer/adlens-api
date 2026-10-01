@@ -73,7 +73,8 @@ conditional update on the expected current status, so two racing callers can nev
      or network problem (503) puts the job back to `pending` and never deletes the user's file. A job on a
      [sample ad](#sample-ads) skips this step: its video was measured when the sample was published;
    - **charge** one run on the user's network, then one on the user, and move to `queued` (429 `QUOTA_EXCEEDED` when
-     the user's window is spent; the [network rules](#abuse-limits) answer with their own codes). If the user charge
+     the user's window is spent, `SIGN_UP_REQUIRED` or `EMAIL_CONFIRMATION_REQUIRED` for an anonymous user or an
+     unconfirmed account; the [network rules](#abuse-limits) answer with their own codes). If the user charge
      fails, the network run is given back;
    - **dispatch** the worker. If that fails, the job goes back to `pending` and the charge is refunded (503).
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
@@ -91,8 +92,11 @@ conditional update on the expected current status, so two racing callers can nev
    started) is expired: `verifying` after 10 minutes goes back to `pending`, `queued`/`analyzing` after 60 minutes ends
    as `ANALYSIS_TIMED_OUT`.
 
-**Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window. Each
-charged run is stored on the user's Better Auth document (`runs: { id, startedAt, jobId }[]`) and stops counting 7
+**Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
+confirmed account. An anonymous user and an account that hasn't confirmed its email get one
+(`PROVISIONAL_QUOTA_LIMIT`), and `GET /v1/me/quota` reports `limit: 1` for them; the runs an anonymous user brings to
+an account at sign-up or sign-in keep counting, so confirming lifts the limit to `QUOTA_LIMIT` without resetting it.
+Each charged run is stored on the user's Better Auth document (`runs: { id, startedAt, jobId }[]`) and stops counting 7
 days after it started; `GET /v1/me/quota` reports `nextFreeAt`, when the oldest counted run does. A charge is one
 conditional pipeline update on that document: it counts the runs still in the window, drops older ones and appends
 the new run, so concurrent requests can't overdraw and the list stays a few entries long. The limit is read from
@@ -115,7 +119,8 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 
 | Rule | Limit per rolling 7 days | When hit |
 | --- | --- | --- |
-| Per user (anonymous or not) | `QUOTA_LIMIT` (3) | 429 `QUOTA_EXCEEDED` |
+| Per confirmed account | `QUOTA_LIMIT` (3) | 429 `QUOTA_EXCEEDED` |
+| Per anonymous user or unconfirmed account | 1 (`PROVISIONAL_QUOTA_LIMIT`) | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
 | Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
@@ -339,7 +344,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `ANALYZE_JOB_NAME`       | `adlens-analyze`        | The Cloud Run Job the API executes                                          |
 | `ANALYZE_LOCAL`          | `0`                     | `1`: run each analysis as a local `node dist/worker` child process          |
 | `ANALYZE_MAX_RETRIES`    | `2`                     | Must equal the job's `--max-retries`, so the worker knows its last attempt  |
-| `QUOTA_LIMIT`            | `3`                     | Analyses per rolling 7-day window                                           |
+| `QUOTA_LIMIT`            | `3`                     | Analyses per rolling 7-day window for a confirmed account (anonymous users and unconfirmed accounts get 1) |
 | `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window |
 | `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
@@ -496,6 +501,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **Anonymous users are real Better Auth users**, created only when a visitor starts an analysis, so every existing
   path (jobs, quota, history, Socket.IO) works unchanged and crawlers create none. Once nobody can reach one (its
   session expired or was signed out), the daily cleanup deletes it a week after it was last seen.
+- **One analysis without an account, then sign up; one without a confirmed email, then confirm.** It's the
+  2026-08-13 design (first analysis anonymous, an account from the second), applied on 2026-10-01; anonymous users
+  had had the members' 3 a week since 2026-09-28. Clearing cookies gets a new anonymous user, so the per-network
+  anonymous allowance (`IP_ANON_LIMIT`, kept at 3 a week so several people on one office or mobile network can each
+  try once) stays the real bound. An unconfirmed account is limited the same way: otherwise signing up with any
+  address, which now signs in at once, would skip both limits.
 - **Linking moves ownership, not objects.** `jobs.userId` is rewritten and the runs are merged, but the GCS objects stay
   where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge

@@ -27,6 +27,7 @@ let auth
 let session
 let freshSession
 let unconfirmedOther
+let sampleId
 let lifecycle
 
 const headers = (cookie) => ({ 'content-type': 'application/json', origin: WEB, ...(cookie ? { cookie } : {}) })
@@ -732,7 +733,7 @@ test('an anonymous sample analysis moves to the account signed up in the same se
     const { ObjectId } = require('mongodb')
     const { JobErrorCode } = require('adlens-shared')
     const email = 'sampler@example.com'
-    const sampleId = await publishSample()
+    sampleId = await publishSample()
     const anonymous = await signInAnonymously()
     const fromNetwork = { ...headers(anonymous.cookie), 'x-forwarded-for': '203.0.113.80' }
     const created = await fetch(`${API}/v1/jobs/from-sample`, {
@@ -787,6 +788,65 @@ test('an anonymous sample analysis moves to the account signed up in the same se
     assert.deepEqual(accountAfter.runs, [])
     assert.deepEqual(networkAfter.runs, [])
     assert.equal((await readQuota()).used, 0)
+})
+
+const fromNetwork = (cookie, address) => ({ ...headers(cookie), 'x-forwarded-for': address })
+
+const createSampleJob = (cookie, address, challengeToken) =>
+    fetch(`${API}/v1/jobs/from-sample`, {
+        method: 'POST',
+        headers: fromNetwork(cookie, address),
+        body: JSON.stringify({ sampleId, settings: SAMPLE_SETTINGS, ...(challengeToken && { challengeToken }) }),
+    })
+
+const analyzeJob = (cookie, address, jobId) =>
+    fetch(`${API}/v1/jobs/${jobId}/analyze`, { method: 'POST', headers: fromNetwork(cookie, address) })
+
+const getQuota = async (cookie) =>
+    (await (await fetch(`${API}/v1/me/quota`, { headers: headers(cookie) })).json()).quota
+
+const pick = ({ used, limit }) => ({ used, limit })
+
+test('an anonymous user gets one analysis, then is asked to sign up', async () => {
+    const anonymous = await signInAnonymously()
+    const created = await createSampleJob(anonymous.cookie, '203.0.113.90', CHALLENGE_PASS)
+    const { job } = await created.json()
+    const analyzed = await analyzeJob(anonymous.cookie, '203.0.113.90', job.id)
+    const next = await createSampleJob(anonymous.cookie, '203.0.113.91', CHALLENGE_PASS)
+
+    assert.equal(created.status, 201)
+    assert.equal(analyzed.status, 202)
+    assert.equal(next.status, 429)
+    assert.equal((await next.json()).errorCode, 'SIGN_UP_REQUIRED')
+    assert.deepEqual(pick(await getQuota(anonymous.cookie)), { used: 1, limit: 1 })
+})
+
+test('an unconfirmed account gets one analysis behind the human check, then is asked to confirm its email', async () => {
+    const email = 'one-try@example.com'
+    const account = await signUp(email)
+    const unchecked = await createSampleJob(account.cookie, '203.0.113.92')
+    const created = await createSampleJob(account.cookie, '203.0.113.92', CHALLENGE_PASS)
+    const { job } = await created.json()
+    const analyzed = await analyzeJob(account.cookie, '203.0.113.92', job.id)
+    const next = await createSampleJob(account.cookie, '203.0.113.93', CHALLENGE_PASS)
+    const network = await withDb((db) => db.collection('ip_quotas').findOne({ 'runs.jobId': job.id }))
+
+    assert.equal(unchecked.status, 403)
+    assert.equal((await unchecked.json()).errorCode, 'CHALLENGE_REQUIRED')
+    assert.equal(created.status, 201)
+    assert.equal(analyzed.status, 202)
+    assert.equal(network.runs[0].anonymous, true)
+    assert.equal(next.status, 429)
+    assert.equal((await next.json()).errorCode, 'EMAIL_CONFIRMATION_REQUIRED')
+    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: 1 })
+
+    // Confirming lifts the limits at once: the next analysis needs no check and the full weekly quota applies.
+    await confirmEmail(email, account.cookie)
+
+    const confirmed = await createSampleJob(account.cookie, '203.0.113.93')
+
+    assert.equal(confirmed.status, 201)
+    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: 3 })
 })
 
 test('an anonymous session cannot link a social provider', async () => {

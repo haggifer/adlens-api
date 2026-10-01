@@ -715,6 +715,32 @@ describe('Jobs API (e2e)', () => {
             expect(verifyChallenge).not.toHaveBeenCalled()
         })
 
+        it('gives an anonymous user one analysis, then asks them to sign up', async () => {
+            const anonymous = await addAnonymous()
+            const created = await createFrom(anonymous, '203.0.113.12', { challengeToken: 'pass' }).expect(201)
+
+            await analyzeFrom(anonymous, '203.0.113.12', created.body.job.id).expect(202)
+
+            const next = await createFrom(anonymous, '203.0.113.13', { challengeToken: 'pass' }).expect(429)
+            const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(anonymous)).expect(200)
+
+            expect(next.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+            expect(quota.body.quota).toMatchObject({ used: 1, limit: 1 })
+        })
+
+        it('gives an unconfirmed account one analysis, then asks it to confirm its email', async () => {
+            const unconfirmed = await addUnconfirmed()
+            const created = await createFrom(unconfirmed, '203.0.113.14', { challengeToken: 'pass' }).expect(201)
+
+            await analyzeFrom(unconfirmed, '203.0.113.14', created.body.job.id).expect(202)
+
+            const next = await createFrom(unconfirmed, '203.0.113.15', { challengeToken: 'pass' }).expect(429)
+            const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(unconfirmed)).expect(200)
+
+            expect(next.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
+            expect(quota.body.quota).toMatchObject({ used: 1, limit: 1 })
+        })
+
         it('refuses a new job once the user has no analyses left', async () => {
             const res = await createFrom(LIMITED, '203.0.113.6').expect(429)
 

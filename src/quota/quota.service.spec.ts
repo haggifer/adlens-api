@@ -21,7 +21,7 @@ describe('QuotaService', () => {
     const addUser = async (fields: Record<string, unknown> = {}): Promise<string> => {
         const _id = new Types.ObjectId()
 
-        await users().insertOne({ _id, email: `${_id.toString()}@example.com`, ...fields })
+        await users().insertOne({ _id, email: `${_id.toString()}@example.com`, emailVerified: true, ...fields })
 
         return _id.toString()
     }
@@ -127,6 +127,49 @@ describe('QuotaService', () => {
         }
 
         expect(await quota.get(adminId, NOW)).toMatchObject({ used: LIMIT + 2, limit: null })
+    })
+
+    it('gives an anonymous user one analysis, then asks them to sign up', async () => {
+        const anonymousId = await addUser({ isAnonymous: true, emailVerified: false })
+
+        await quota.consume(anonymousId, 'job-1', NOW)
+
+        expect(await quota.get(anonymousId, NOW)).toMatchObject({ used: 1, limit: 1 })
+        await expect(quota.consume(anonymousId, 'job-2', NOW)).rejects.toMatchObject({
+            status: HttpStatus.TOO_MANY_REQUESTS,
+            response: { errorCode: RequestErrorCode.SignUpRequired },
+        })
+    })
+
+    it('gives an unconfirmed account one analysis, then asks it to confirm its email', async () => {
+        const unconfirmedId = await addUser({ emailVerified: false })
+
+        await quota.consume(unconfirmedId, 'job-1', NOW)
+
+        expect(await quota.get(unconfirmedId, NOW)).toMatchObject({ used: 1, limit: 1 })
+        await expect(quota.consume(unconfirmedId, 'job-2', NOW)).rejects.toMatchObject({
+            status: HttpStatus.TOO_MANY_REQUESTS,
+            response: { errorCode: RequestErrorCode.EmailConfirmationRequired },
+        })
+    })
+
+    it('never overdraws a provisional user under concurrent runs', async () => {
+        const anonymousId = await addUser({ isAnonymous: true, emailVerified: false })
+        const results = await Promise.allSettled(
+            Array.from({ length: 4 }, (_, i) => quota.consume(anonymousId, `job-${i}`, NOW)),
+        )
+
+        expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    })
+
+    it('gives an account the full limit once it confirms its email, counting the run it already used', async () => {
+        const accountId = await addUser({ emailVerified: false })
+
+        await quota.consume(accountId, 'job-1', NOW)
+        await users().updateOne({ _id: new Types.ObjectId(accountId) }, { $set: { emailVerified: true } })
+
+        await expect(quota.consume(accountId, 'job-2', NOW)).resolves.toEqual(expect.any(String))
+        expect(await quota.get(accountId, NOW)).toMatchObject({ used: 2, limit: LIMIT })
     })
 
     it('charges the run under the id the caller recorded for it', async () => {

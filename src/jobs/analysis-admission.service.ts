@@ -10,7 +10,7 @@ import type { IpSource } from '../ip-quota/client-ip'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import { checkIpRules, type IpCharge, IpVerdict, toIpRefusal } from '../ip-quota/ip-rules'
-import { quotaExceeded, QuotaService } from '../quota/quota.service'
+import { QuotaService, toQuotaRefusal } from '../quota/quota.service'
 
 export interface Admission {
     hasPassedChallenge: boolean
@@ -37,7 +37,7 @@ export class AnalysisAdmission {
         const [quota, access] = await Promise.all([this.quota.get(userId), this.getAccess(userId)])
 
         if (quota.limit !== null && quota.used >= quota.limit) {
-            throw quotaExceeded()
+            throw toQuotaRefusal(access)
         }
 
         if (access === UserAccess.Admin) {
