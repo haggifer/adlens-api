@@ -8,6 +8,7 @@ import type { Env } from '../config/env'
 import { DatabaseModule } from '../database/database.module'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
 import { MailModule } from '../mail/mail.module'
+import { StorageModule } from '../storage/storage.module'
 import { ContactLimits } from './contact-limits'
 import { ContactController } from './contact.controller'
 import { ContactService } from './contact.service'
@@ -23,7 +24,7 @@ const createContactLimits = (connection: Connection, config: ConfigService<Env, 
 }
 
 @Module({
-    imports: [DatabaseModule, MailModule, ChallengeModule],
+    imports: [DatabaseModule, MailModule, ChallengeModule, StorageModule],
     controllers: [ContactController],
     providers: [
         ContactService,

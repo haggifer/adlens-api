@@ -11,6 +11,11 @@ export interface ObjectInfo {
     contentType: string
 }
 
+export interface ObjectContent {
+    contentType: string
+    content: Buffer
+}
+
 export interface SignedReadUrl {
     url: string
     expiresAt: Date
@@ -67,6 +72,23 @@ export class StorageService {
             const [metadata] = await this.object(path).getMetadata()
 
             return { sizeBytes: Number(metadata.size), contentType: metadata.contentType ?? '' }
+        } catch (err) {
+            if (isNotFound(err)) {
+                return null
+            }
+
+            throw err
+        }
+    }
+
+    // null when the object doesn't exist. Reads the whole object into memory, so only for small ones.
+    async readObject(path: string): Promise<ObjectContent | null> {
+        const file = this.object(path)
+
+        try {
+            const [[metadata], [content]] = await Promise.all([file.getMetadata(), file.download()])
+
+            return { contentType: metadata.contentType ?? '', content }
         } catch (err) {
             if (isNotFound(err)) {
                 return null

@@ -13,6 +13,7 @@ import { AuthService } from '../src/auth/auth.service'
 import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { UserAccess } from '../src/common/user-access'
+import { CONTACT_DRAFT_MODEL, type ContactDraftDoc } from '../src/database/contact-draft.doc'
 import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { RATE_LIMIT_COLLECTION } from '../src/database/rate-limit.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
@@ -22,7 +23,7 @@ import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { JobEventsService } from '../src/realtime/job-events.service'
-import { type ObjectInfo, StorageService } from '../src/storage/storage.service'
+import { type ObjectContent, type ObjectInfo, StorageService } from '../src/storage/storage.service'
 
 const OWNER = new Types.ObjectId().toString()
 const STRANGER = new Types.ObjectId().toString()
@@ -39,6 +40,8 @@ describe('Jobs API (e2e)', () => {
     let probe: ProbeResult
     const dispatch = jest.fn(async () => 'executions/exec-1')
     const deleteObject = jest.fn(async (_path: string) => undefined)
+    // The Contact form's uploaded images, by path; an Error: storage can't be reached.
+    const contactObjects = new Map<string, ObjectContent | Error>()
     const sendMail = jest.fn(async (_message: MailMessage) => undefined)
     // 'pass' passes; any other token fails. Nothing reaches Cloudflare.
     const verifyChallenge = jest.fn(async (token: string, _remoteIp: string | null) => token === 'pass')
@@ -79,6 +82,15 @@ describe('Jobs API (e2e)', () => {
                     return storedObject
                 },
                 delete: deleteObject,
+                readObject: async (path: string) => {
+                    const object = contactObjects.get(path)
+
+                    if (object instanceof Error) {
+                        throw object
+                    }
+
+                    return object ?? null
+                },
             })
             .overrideProvider(MediaProber)
             .useValue({ probe: async () => probe })
@@ -498,7 +510,13 @@ describe('Jobs API (e2e)', () => {
         let networks = 0
 
         // A network of its own per call unless one is given, so only the cap under test is reached.
-        const sendContact = (body: Record<string, unknown>, network = `203.0.113.${++networks}`) =>
+        const nextNetwork = () => {
+            networks++
+
+            return `10.${Math.floor(networks / 250)}.${networks % 250}.1`
+        }
+
+        const sendContact = (body: Record<string, unknown>, network = nextNetwork()) =>
             request(app.getHttpServer()).post('/v1/contact').set({ 'x-forwarded-for': network }).send(body)
 
         beforeEach(async () => {
@@ -608,6 +626,179 @@ describe('Jobs API (e2e)', () => {
 
             expect(responses.filter((res) => res.status === 204)).toHaveLength(3)
             expect(sendMail).toHaveBeenCalledTimes(3)
+        })
+
+        describe('with images', () => {
+            const PNG = { name: 'screenshot.png', contentType: 'image/png', size: 1200 }
+            const JPEG = { name: 'photo', contentType: 'image/jpeg', size: 800 }
+            const { challengeToken: _challengeToken, ...VISITOR } = MESSAGE
+            let contactDrafts: Model<ContactDraftDoc>
+
+            const createUploads = (body: Record<string, unknown>, network = nextNetwork()) =>
+                request(app.getHttpServer()).post('/v1/contact/uploads').set({ 'x-forwarded-for': network }).send(body)
+
+            // Uploads the declared files as the browser would, then answers the draft id.
+            const uploadDraft = async (files = [PNG, JPEG]): Promise<string> => {
+                const res = await createUploads({ files, challengeToken: 'pass' }).expect(201)
+                const draft = await contactDrafts.findById(res.body.draftId).lean()
+
+                draft?.files.forEach((file, index) => {
+                    contactObjects.set(file.path, {
+                        contentType: file.contentType,
+                        content: Buffer.alloc(files[index].size, index + 1),
+                    })
+                })
+
+                return res.body.draftId
+            }
+
+            beforeAll(() => {
+                contactDrafts = app.get(getModelToken(CONTACT_DRAFT_MODEL))
+            })
+
+            beforeEach(async () => {
+                await contactDrafts.deleteMany({})
+                contactObjects.clear()
+            })
+
+            it('answers a draft and one signed upload per image, in order, under the draft folder', async () => {
+                const res = await createUploads({ files: [PNG, JPEG], challengeToken: 'pass' }).expect(201)
+
+                expect(res.body.uploads).toHaveLength(2)
+                expect(res.body.uploads[0].headers).toMatchObject({
+                    'Content-Type': PNG.contentType,
+                    'x-goog-content-length-range': `${PNG.size},${PNG.size}`,
+                })
+                expect(res.body.uploads[1].headers).toMatchObject({ 'Content-Type': JPEG.contentType })
+
+                const draft = await contactDrafts.findById(res.body.draftId).lean()
+
+                expect(draft?.files).toEqual([
+                    { ...PNG, path: `contact/${res.body.draftId}/0.png` },
+                    { ...JPEG, path: `contact/${res.body.draftId}/1.jpg` },
+                ])
+                expect(draft?.usedAt).toBeNull()
+                expect(draft?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 59 * 60 * 1000)
+                expect(draft?.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 60 * 60 * 1000)
+            })
+
+            it('refuses uploads whose Turnstile check fails', async () => {
+                const res = await createUploads({ files: [PNG], challengeToken: 'fail' }).expect(403)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.ChallengeFailed)
+                expect(await contactDrafts.countDocuments()).toBe(0)
+            })
+
+            it('refuses images the contract does not allow', async () => {
+                const gif = { ...PNG, contentType: 'image/gif' }
+                const tooMany = Array.from({ length: 6 }, () => PNG)
+                const tooLarge = Array.from({ length: 4 }, () => ({ ...PNG, size: 7_000_000 }))
+
+                for (const files of [[gif], tooMany, tooLarge, []]) {
+                    const res = await createUploads({ files, challengeToken: 'pass' }).expect(400)
+
+                    expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+                }
+            })
+
+            it('allows 3 upload drafts per network an hour', async () => {
+                for (let draft = 0; draft < 3; draft++) {
+                    await createUploads({ files: [PNG], challengeToken: 'pass' }, '192.0.2.90').expect(201)
+                }
+
+                const res = await createUploads({ files: [PNG], challengeToken: 'pass' }, '192.0.2.90').expect(429)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.RateLimited)
+            })
+
+            it('attaches the uploaded images, and the draft stands in for the Turnstile check', async () => {
+                const draftId = await uploadDraft()
+
+                verifyChallenge.mockClear()
+                await sendContact({ ...VISITOR, draftId }).expect(204)
+
+                expect(verifyChallenge).not.toHaveBeenCalled()
+                expect(sendMail).toHaveBeenCalledTimes(1)
+                expect(sendMail.mock.calls[0][0].attachments).toEqual([
+                    { filename: 'screenshot.png', content: Buffer.alloc(PNG.size, 1) },
+                    { filename: 'photo.jpg', content: Buffer.alloc(JPEG.size, 2) },
+                ])
+            })
+
+            it('uses a draft only once, even when it is sent twice at once', async () => {
+                const draftId = await uploadDraft()
+                const responses = await Promise.all([
+                    sendContact({ ...VISITOR, draftId }),
+                    sendContact({ ...VISITOR, draftId }),
+                ])
+
+                expect(responses.map((res) => res.status).sort()).toEqual([204, 400])
+                expect(sendMail).toHaveBeenCalledTimes(1)
+
+                const res = await sendContact({ ...VISITOR, draftId }).expect(400)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+            })
+
+            it('refuses an expired draft', async () => {
+                const draftId = await uploadDraft()
+
+                await contactDrafts.updateOne({ _id: draftId }, { $set: { expiresAt: new Date(Date.now() - 1000) } })
+
+                const res = await sendContact({ ...VISITOR, draftId }).expect(400)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+                expect(sendMail).not.toHaveBeenCalled()
+            })
+
+            it('refuses a draft whose image never arrived, and sends nothing', async () => {
+                const draftId = await uploadDraft()
+
+                contactObjects.delete(`contact/${draftId}/1.jpg`)
+
+                const res = await sendContact({ ...VISITOR, draftId }).expect(400)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+                expect(sendMail).not.toHaveBeenCalled()
+            })
+
+            it('refuses a draft whose image differs from the one declared', async () => {
+                const smaller = await uploadDraft()
+
+                contactObjects.set(`contact/${smaller}/0.png`, {
+                    contentType: PNG.contentType,
+                    content: Buffer.alloc(PNG.size - 1),
+                })
+                await sendContact({ ...VISITOR, draftId: smaller }).expect(400)
+
+                const retyped = await uploadDraft()
+
+                contactObjects.set(`contact/${retyped}/0.png`, {
+                    contentType: 'image/gif',
+                    content: Buffer.alloc(PNG.size),
+                })
+                await sendContact({ ...VISITOR, draftId: retyped }).expect(400)
+
+                expect(sendMail).not.toHaveBeenCalled()
+            })
+
+            it('answers 503 and sends nothing when storage fails', async () => {
+                const draftId = await uploadDraft()
+
+                contactObjects.set(`contact/${draftId}/0.png`, new Error('GCS 503'))
+
+                const res = await sendContact({ ...VISITOR, draftId }).expect(503)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.Unavailable)
+                expect(sendMail).not.toHaveBeenCalled()
+            })
+
+            it('refuses a message with both a Turnstile token and a draft', async () => {
+                const draftId = await uploadDraft()
+                const res = await sendContact({ ...MESSAGE, draftId }).expect(400)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+            })
         })
     })
 

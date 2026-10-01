@@ -160,14 +160,31 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 
 ## Contact form
 
-`POST /v1/contact` is public: anyone can write to the team, signed in or not. The message goes to `CONTACT_EMAIL`
-through Resend with the visitor as Reply-To, so answering is a plain reply; nothing of it is stored.
+`POST /v1/contact` is public: anyone can write to the team, signed in or not. The message (at most 2,000 characters,
+adlens-shared `CONTACT_MESSAGE_MAX_LENGTH`) goes to `CONTACT_EMAIL` through Resend with the visitor as Reply-To, so
+answering is a plain reply; its text isn't stored.
 
 - **Honeypot**: the form hides a `website` field; a message that fills it in answers 204 and sends nothing.
-- **Turnstile**: every message carries a `challengeToken`, verified with Cloudflare's `siteverify` before anything is
-  counted (403 `CHALLENGE_FAILED` when it doesn't pass), so requests that fail the check can't use up the caps.
+- **Turnstile**: a message carries either a `challengeToken` or the `draftId` of its images (exactly one, else 400
+  `VALIDATION_FAILED`). The token is verified with Cloudflare's `siteverify` before anything is counted (403
+  `CHALLENGE_FAILED` when it doesn't pass), so requests that fail the check can't use up the caps.
+- **Images**: up to 5 PNG, JPEG or WebP images, at most 8 MB each and 25 MB together (adlens-shared's `CONTACT_*`
+  limits; 25 MB is about 33 MB once base64-encoded, under Resend's 40 MB per email). `POST /v1/contact/uploads`
+  takes the declared files and a `challengeToken`, verifies it, counts the network's upload drafts (below), and
+  answers `{ draftId, uploads }`: one signed, create-only upload per file, in order, bound to its declared size and
+  type, at `contact/<draftId>/<index><ext>`. The draft (`contact_drafts`: the files' paths, names, types and sizes)
+  lives an hour (TTL `expiresAt`) and stands in for the check **once**: sending it marks it used in one conditional
+  update (`usedAt` null and not expired), so of two concurrent sends only one gets it; an unknown, used or expired
+  draft answers 400 `VALIDATION_FAILED`. The API then reads every declared object from the bucket; one missing or
+  differing in size or type answers 400 `VALIDATION_FAILED` and nothing is sent (503 `UNAVAILABLE` when storage
+  can't be read). The images go out as attachments named after the visitor's file names, with the extension of their
+  verified type. A draft is used up even when the message is then refused or can't be sent; the web uploads again.
+- **What is kept**: the images stay in the bucket for **30 days** after upload (the `contact/` lifecycle rule in
+  [`infra/lifecycle.json`](infra/lifecycle.json)), then are deleted; a draft is deleted an hour after it was made.
+  Neither records the visitor's email or address.
 - **Hourly caps** ([`ContactLimits`](src/contact/contact-limits.ts)): at most **3 messages per network**, **3 per
-  sender email** and **20 in total**, past which the API answers 429 `RATE_LIMITED`. The network is the one the
+  sender email** and **20 in total**, and **3 upload drafts per network**, past which the API answers 429
+  `RATE_LIMITED`. The network is the one the
   network limits use (`ClientNetworkResolver`). The total is the hard guarantee: senders choose their email and can
   switch networks, and the Resend quota is shared with confirmation and reset emails. Each cap is a counter in
   `rate_limits`, counted like Better Auth's rate limits by [`createRateLimitStorage`](src/auth/rate-limit-storage.ts):
@@ -260,7 +277,7 @@ through Resend with the visitor as Reply-To, so answering is a plain reply; noth
 
 ## API
 
-Every `/v1/*` route except `GET /v1/samples` and `POST /v1/contact` requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
+Every `/v1/*` route except `GET /v1/samples` and `POST /v1/contact` (and `/uploads`) requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
 
@@ -276,7 +293,8 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
 | `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
-| `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked, rate-limited) | **204**                        |
+| `POST /v1/contact/uploads`  | Signed uploads for a Contact form message's images (public, Turnstile-checked, rate-limited) | **201** `{ draftId, uploads }` |
+| `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited) | **204**                        |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
 
 ## Ad-policy rules

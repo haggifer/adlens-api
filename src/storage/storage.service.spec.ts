@@ -90,4 +90,49 @@ describe('StorageService', () => {
             expect(own.delete).toHaveBeenCalledWith({ ignoreNotFound: true })
         })
     })
+
+    describe('readObject', () => {
+        const withFile = (file: { getMetadata: () => Promise<unknown>; download: () => Promise<unknown> }) => {
+            const service = new StorageService(configStub({ STORAGE_BUCKET: 'bucket' }))
+
+            Object.assign(service, { storage: { bucket: () => ({ file: () => file }) } })
+
+            return service
+        }
+
+        it('answers the stored content type and bytes', async () => {
+            const content = Buffer.from('image bytes')
+            const service = withFile({
+                getMetadata: async () => [{ contentType: 'image/png', size: String(content.length) }],
+                download: async () => [content],
+            })
+
+            expect(await service.readObject('contact/d1/0.png')).toEqual({ contentType: 'image/png', content })
+        })
+
+        it("answers null when the object doesn't exist", async () => {
+            const notFound = Object.assign(new Error('No such object'), { code: 404 })
+            const service = withFile({
+                getMetadata: async () => {
+                    throw notFound
+                },
+                download: async () => {
+                    throw notFound
+                },
+            })
+
+            expect(await service.readObject('contact/d1/0.png')).toBeNull()
+        })
+
+        it('throws when storage fails otherwise', async () => {
+            const service = withFile({
+                getMetadata: async () => {
+                    throw Object.assign(new Error('Service Unavailable'), { code: 503 })
+                },
+                download: async () => [Buffer.alloc(0)],
+            })
+
+            await expect(service.readObject('contact/d1/0.png')).rejects.toThrow('Service Unavailable')
+        })
+    })
 })

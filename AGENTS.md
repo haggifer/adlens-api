@@ -41,6 +41,9 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - A confirmation link confirms only in the session of the account it was sent to (the `/verify-email` before hook:
   `SIGN_IN_REQUIRED` without one or with an anonymous one, `EMAIL_MISMATCH` for another account) and never creates a
   session (`autoSignInAfterVerification: false`): a link reaches whoever it is forwarded to.
+- The Contact form's caps are atomic counters in `rate_limits` (`ContactLimits` over `createRateLimitStorage`, hashed
+  keys), counted only after the Turnstile check or the draft passed; never count-then-insert. A Contact draft stands in
+  for one Turnstile check: it is used by one conditional update (`usedAt` null, not expired) and never reused.
 - An account's purge runs in Better Auth's `user.deleteUser.beforeDelete`, never in `databaseHooks.user.delete`: the
   anonymous plugin deletes a linked anonymous user through the internal adapter after its jobs moved to the account,
   and their videos still sit under the anonymous user's prefix.
