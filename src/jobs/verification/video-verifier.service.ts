@@ -52,7 +52,7 @@ export class VideoVerifier {
         let probe: ProbeResult
 
         try {
-            probe = await this.prober.probe(url)
+            probe = await this.probeTwiceIfUndecodable(url)
         } catch (err) {
             if (err instanceof UndecodableMediaError) {
                 return reject(JobErrorCode.VideoUnreadable)
@@ -79,6 +79,22 @@ export class VideoVerifier {
                 sizeBytes: info.sizeBytes,
                 contentType: info.contentType,
             },
+        }
+    }
+
+    // A range read cut off by the network makes a good file look broken ("end of file", "moov atom not found"), and a
+    // rejection deletes the upload, so only a second read that fails the same way counts as a bad file.
+    private async probeTwiceIfUndecodable(url: string): Promise<ProbeResult> {
+        try {
+            return await this.prober.probe(url)
+        } catch (err) {
+            if (!(err instanceof UndecodableMediaError)) {
+                throw err
+            }
+
+            this.logger.warn(`probing again after an undecodable read: ${err.message}`)
+
+            return this.prober.probe(url)
         }
     }
 }
