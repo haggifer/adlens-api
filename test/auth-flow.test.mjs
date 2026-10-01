@@ -26,6 +26,7 @@ let app
 let auth
 let session
 let freshSession
+let unconfirmedOther
 let lifecycle
 
 const headers = (cookie) => ({ 'content-type': 'application/json', origin: WEB, ...(cookie ? { cookie } : {}) })
@@ -74,6 +75,20 @@ const confirmEmail = (email, cookie) => {
 
     return fetch(`${API}/api/auth/verify-email?token=${encodeURIComponent(token)}`, { headers: headers(cookie) })
 }
+
+const signUp = async (email, password = 'first-password', cookie) => {
+    const res = await post('/api/auth/sign-up/email', { name: 'Flow', email, password }, cookie)
+
+    return { status: res.status, cookie: cookieOf(res) }
+}
+
+const sessionUser = async (cookie) => {
+    const res = await fetch(`${API}/api/auth/get-session`, { headers: headers(cookie) })
+
+    return (await res.json())?.user ?? null
+}
+
+const storedUser = (email) => withDb((db) => db.collection('user').findOne({ email }))
 
 before(async () => {
     const { MongoMemoryReplSet } = require('mongodb-memory-server')
@@ -162,52 +177,98 @@ after(async () => {
     await mongo?.stop()
 })
 
-test('sign-up sends a verification email and creates no session yet', async () => {
+test('sign-up sends a confirmation email and signs the unconfirmed user in with an httpOnly SameSite=Lax cookie', async () => {
     const res = await post('/api/auth/sign-up/email', {
         name: 'Flow',
         email: EMAIL,
         password: 'first-password',
     })
 
-    assert.equal(res.status, 200)
-    assert.ok(!cookieOf(res).includes('session_token'))
-    assert.equal(outbox.length, 1)
-})
-
-test('an unverified account cannot sign in', async () => {
-    const res = await post('/api/auth/sign-in/email', { email: EMAIL, password: 'first-password' })
-
-    assert.equal(res.status, 403)
-})
-
-test('confirmation emails to one address stop at 3 an hour, however often someone signs in', async () => {
-    const email = 'flooded@example.com'
-    const signUp = await post('/api/auth/sign-up/email', { email, password: 'flood-password', name: 'Flooded' })
-
-    assert.equal(signUp.status, 200)
-
-    for (let i = 0; i < 4; i++) {
-        const signIn = await post('/api/auth/sign-in/email', { email, password: 'flood-password' })
-
-        assert.equal(signIn.status, 403)
-    }
-
-    assert.equal(outbox.filter((message) => message.to === email).length, 3)
-})
-
-test('the emailed link opens the web app, which confirms the email and gets an httpOnly SameSite=Lax cookie', async () => {
-    const link = linkIn(outbox[0])
-    const token = link.searchParams.get('token')
-    const res = await fetch(`${API}/api/auth/verify-email?token=${encodeURIComponent(token)}`, { headers: headers() })
-
     session = cookieOf(res)
-    assert.equal(link.origin + link.pathname, `${WEB}/confirm-email`)
+
+    const user = await sessionUser(session)
+
     assert.equal(res.status, 200)
     assert.ok(
         res.headers
             .getSetCookie()
             .some((c) => /session_token/.test(c) && /HttpOnly/i.test(c) && /SameSite=Lax/i.test(c)),
     )
+    assert.equal(user.email, EMAIL)
+    assert.equal(user.emailVerified, false)
+    assert.equal(outbox.length, 1)
+})
+
+test('an unconfirmed account can sign in, and signing in sends no email', async () => {
+    const res = await post('/api/auth/sign-in/email', { email: EMAIL, password: 'first-password' })
+
+    assert.equal(res.status, 200)
+    assert.ok(cookieOf(res).includes('session_token'))
+    assert.equal(outbox.length, 1)
+})
+
+test('a duplicate sign-up answers that the address is in use', async () => {
+    const res = await post('/api/auth/sign-up/email', { name: 'Again', email: EMAIL, password: 'other-password' })
+
+    assert.equal(res.status, 422)
+    assert.ok(!cookieOf(res).includes('session_token'))
+})
+
+test('confirmation emails to one address stop at 3 an hour, however often they are resent', async () => {
+    const email = 'flooded@example.com'
+    const signedUp = await signUp(email, 'flood-password')
+
+    assert.equal(signedUp.status, 200)
+
+    for (let i = 0; i < 4; i++) {
+        const resent = await post('/api/auth/send-verification-email', { email }, signedUp.cookie)
+
+        assert.equal(resent.status, 200)
+    }
+
+    assert.equal(outbox.filter((message) => message.to === email).length, 3)
+})
+
+test('a confirmation link opened without a session asks to sign in, and sets no cookie', async () => {
+    const res = await confirmEmail(EMAIL)
+    const body = await res.json()
+
+    assert.equal(res.status, 401)
+    assert.equal(body.code, 'SIGN_IN_REQUIRED')
+    assert.deepEqual(res.headers.getSetCookie(), [])
+    assert.equal((await storedUser(EMAIL)).emailVerified, false)
+})
+
+test('a confirmation link opened by another account is refused and changes no session', async () => {
+    const other = await signUp('other-account@example.com')
+    const res = await confirmEmail(EMAIL, other.cookie)
+    const body = await res.json()
+
+    unconfirmedOther = other.cookie
+    assert.equal(res.status, 403)
+    assert.equal(body.code, 'EMAIL_MISMATCH')
+    assert.deepEqual(res.headers.getSetCookie(), [])
+    assert.equal((await sessionUser(other.cookie)).email, 'other-account@example.com')
+    assert.equal((await storedUser(EMAIL)).emailVerified, false)
+})
+
+test("an invalid confirmation link keeps Better Auth's own error", async () => {
+    const res = await fetch(`${API}/api/auth/verify-email?token=not-a-token`, { headers: headers(session) })
+    const body = await res.json()
+
+    assert.equal(res.status, 401)
+    assert.equal(body.code, 'INVALID_TOKEN')
+})
+
+test('the emailed link opens the web app, which confirms the signed-in account without a new session', async () => {
+    const link = linkIn(outbox[0])
+    const res = await confirmEmail(EMAIL, session)
+
+    assert.equal(link.origin + link.pathname, `${WEB}/confirm-email`)
+    assert.equal(res.status, 200)
+    assert.ok(!cookieOf(res).includes('session_token'))
+    assert.equal((await sessionUser(session)).emailVerified, true)
+    assert.equal((await storedUser(EMAIL)).emailVerified, true)
 })
 
 test('the API accepts the session cookie', async () => {
@@ -472,7 +533,7 @@ test('sign-up refuses a disposable email address', async () => {
     assert.equal(outbox.length, sentBefore)
 })
 
-test('confirming a sign-up in the same browser moves the anonymous history to the new account', async () => {
+test('signing up from an anonymous session moves its history to the new, unconfirmed account', async () => {
     const { ObjectId } = require('mongodb')
     const email = 'linker@example.com'
     const anonymous = await signInAnonymously()
@@ -486,32 +547,22 @@ test('confirming a sign-up in the same browser moves the anonymous history to th
     })
 
     const purgedBefore = purgedPrefixes.length
-    const signUp = await post(
-        '/api/auth/sign-up/email',
-        { name: 'Linker', email, password: 'first-password' },
-        anonymous.cookie,
-    )
+    const signedUp = await signUp(email, 'first-password', anonymous.cookie)
 
-    const beforeConfirming = await withDb((db) =>
-        db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
-    )
-    const confirmed = await confirmEmail(email, anonymous.cookie)
-
-    linkerSession = cookieOf(confirmed)
+    linkerSession = signedUp.cookie
 
     const listed = await fetch(`${API}/v1/jobs`, { headers: headers(linkerSession) })
     const { jobs } = await listed.json()
-    const [linker, afterConfirming] = await withDb((db) =>
+    const [linker, anonymousAfter] = await withDb((db) =>
         Promise.all([
             db.collection('user').findOne({ email }),
             db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
         ]),
     )
 
-    assert.equal(signUp.status, 200)
-    assert.ok(beforeConfirming, 'sign-up alone creates no session, so nothing is linked yet')
-    assert.equal(confirmed.status, 200)
-    assert.equal(afterConfirming, null)
+    assert.equal(signedUp.status, 200)
+    assert.equal(linker.emailVerified, false)
+    assert.equal(anonymousAfter, null)
     assert.deepEqual(
         linker.runs.map((stored) => stored.id),
         ['anonymous-run'],
@@ -519,27 +570,6 @@ test('confirming a sign-up in the same browser moves the anonymous history to th
     assert.equal(jobs.length, 1)
     assert.equal(purgedPrefixes.length, purgedBefore)
     assert.deepEqual(deletedPaths, [])
-})
-
-test("a corrected second sign-up doesn't stop the first sign-up's link from moving the history", async () => {
-    const { ObjectId } = require('mongodb')
-    const first = 'first-try@example.com'
-    const anonymous = await signInAnonymously()
-
-    await post('/api/auth/sign-up/email', { name: 'First', email: first, password: 'first-password' }, anonymous.cookie)
-    await post(
-        '/api/auth/sign-up/email',
-        { name: 'Second', email: 'second-try@example.com', password: 'second-password' },
-        anonymous.cookie,
-    )
-
-    const confirmed = await confirmEmail(first, anonymous.cookie)
-    const afterConfirming = await withDb((db) =>
-        db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
-    )
-
-    assert.equal(confirmed.status, 200)
-    assert.equal(afterConfirming, null)
 })
 
 test('deleting an account also deletes the videos it adopted from an anonymous session', async () => {
@@ -551,12 +581,11 @@ test('deleting an account also deletes the videos it adopted from an anonymous s
     assert.equal(purgedPrefixes.at(-1), `users/${linker._id.toString()}/`)
 })
 
-test('signing in from an anonymous session moves its analyses and runs to the account, and deletes it', async () => {
+test('signing in to an unconfirmed account from an anonymous session moves its analyses and runs, and deletes it', async () => {
     const { ObjectId } = require('mongodb')
     const email = 'returning@example.com'
 
-    await post('/api/auth/sign-up/email', { name: 'Returning', email, password: 'first-password' })
-    await confirmEmail(email)
+    await signUp(email)
 
     const anonymous = await signInAnonymously()
     const anonymousUpload = `users/${anonymous.user.id}/jobs/before-sign-in/video`
@@ -584,43 +613,43 @@ test('signing in from an anonymous session moves its analyses and runs to the ac
     assert.equal(anonymousAfter, null)
 })
 
-test('a verification link for a different email, opened with an anonymous cookie, moves nothing', async () => {
+test('a confirmation link opened with an anonymous session asks to sign in, and moves nothing', async () => {
     const { ObjectId } = require('mongodb')
-    const attackerEmail = 'attacker@example.com'
-    const victim = await signInAnonymously()
-    const victimJobPath = `users/${victim.user.id}/jobs/own/video`
+    const otherEmail = 'stranger@example.com'
+    const visitor = await signInAnonymously()
+    const visitorJobPath = `users/${visitor.user.id}/jobs/own/video`
 
     await withDb(async (db) => {
-        await db.collection('jobs').insertOne(storedJob(victim.user.id, victimJobPath))
+        await db.collection('jobs').insertOne(storedJob(visitor.user.id, visitorJobPath))
         await db
             .collection('user')
-            .updateOne({ _id: new ObjectId(victim.user.id) }, { $set: { runs: [run('victim-run')] } })
+            .updateOne({ _id: new ObjectId(visitor.user.id) }, { $set: { runs: [run('visitor-run')] } })
     })
 
-    // The attacker signs up with their own address, then mails that confirmation link to the victim instead of
-    // opening it themselves. The victim opens it while still holding their own anonymous session cookie.
-    await post('/api/auth/sign-up/email', { name: 'Attacker', email: attackerEmail, password: 'first-password' })
+    // Someone signs up with their own address and mails that confirmation link to the visitor, who opens it while
+    // still holding their anonymous session cookie.
+    await signUp(otherEmail)
 
-    const opened = await confirmEmail(attackerEmail, victim.cookie)
+    const opened = await confirmEmail(otherEmail, visitor.cookie)
     const body = await opened.json()
-    const [victimAfter, attacker] = await withDb((db) =>
+    const [visitorAfter, stranger] = await withDb((db) =>
         Promise.all([
-            db.collection('user').findOne({ _id: new ObjectId(victim.user.id) }),
-            db.collection('user').findOne({ email: attackerEmail }),
+            db.collection('user').findOne({ _id: new ObjectId(visitor.user.id) }),
+            db.collection('user').findOne({ email: otherEmail }),
         ]),
     )
-    const victimJobs = await withDb((db) => db.collection('jobs').find({ userId: victim.user.id }).toArray())
-    const attackerJobs = await withDb((db) => db.collection('jobs').find({ userId: attacker._id.toString() }).toArray())
+    const visitorJobs = await withDb((db) => db.collection('jobs').find({ userId: visitor.user.id }).toArray())
 
-    assert.equal(opened.status, 403)
-    assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
-    assert.ok(victimAfter, "the victim's anonymous user wasn't deleted")
+    assert.equal(opened.status, 401)
+    assert.equal(body.code, 'SIGN_IN_REQUIRED')
+    assert.deepEqual(opened.headers.getSetCookie(), [])
+    assert.ok(visitorAfter, "the visitor's anonymous user wasn't deleted")
     assert.deepEqual(
-        victimAfter.runs.map((stored) => stored.id),
-        ['victim-run'],
+        visitorAfter.runs.map((stored) => stored.id),
+        ['visitor-run'],
     )
-    assert.equal(victimJobs.length, 1)
-    assert.equal(attackerJobs.length, 0)
+    assert.equal(visitorJobs.length, 1)
+    assert.equal(stranger.emailVerified, false)
 })
 
 test('a failed move leaves the anonymous user and its data in place', async () => {
@@ -636,17 +665,19 @@ test('a failed move leaves the anonymous user and its data in place', async () =
             .updateOne({ _id: new ObjectId(anonymous.user.id) }, { $set: { runs: [run('anonymous-run')] } })
     })
 
-    await post('/api/auth/sign-up/email', { name: 'Unlucky Link', email, password: 'first-password' }, anonymous.cookie)
-
     isAdoptDown = true
 
-    let confirmed
+    let signedUp
     try {
-        confirmed = await confirmEmail(email, anonymous.cookie)
+        signedUp = await post(
+            '/api/auth/sign-up/email',
+            { name: 'Unlucky Link', email, password: 'first-password' },
+            anonymous.cookie,
+        )
     } finally {
         isAdoptDown = false
     }
-    const body = await confirmed.json()
+    const body = await signedUp.json()
     const [anonymousAfter, linked] = await withDb((db) =>
         Promise.all([
             db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
@@ -655,7 +686,7 @@ test('a failed move leaves the anonymous user and its data in place', async () =
     )
     const anonymousJobs = await withDb((db) => db.collection('jobs').find({ userId: anonymous.user.id }).toArray())
 
-    assert.equal(confirmed.status, 500)
+    assert.equal(signedUp.status, 500)
     assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
     assert.ok(linked, 'the account being linked to still exists')
     assert.ok(anonymousAfter, "the anonymous user wasn't deleted")
@@ -697,7 +728,7 @@ const publishSample = () =>
         return insertedId.toString()
     })
 
-test('an anonymous sample analysis moves to the account confirmed in the same session, and a later failure refunds its runs', async () => {
+test('an anonymous sample analysis moves to the account signed up in the same session, and a later failure refunds its runs', async () => {
     const { ObjectId } = require('mongodb')
     const { JobErrorCode } = require('adlens-shared')
     const email = 'sampler@example.com'
@@ -713,10 +744,8 @@ test('an anonymous sample analysis moves to the account confirmed in the same se
     const analyzed = await fetch(`${API}/v1/jobs/${job.id}/analyze`, { method: 'POST', headers: fromNetwork })
     const charged = await withDb((db) => db.collection('jobs').findOne({ _id: new ObjectId(job.id) }))
 
-    await post('/api/auth/sign-up/email', { name: 'Sampler', email, password: 'first-password' }, anonymous.cookie)
-
-    const confirmed = await confirmEmail(email, anonymous.cookie)
-    const accountSession = cookieOf(confirmed)
+    const signedUp = await signUp(email, 'first-password', anonymous.cookie)
+    const accountSession = signedUp.cookie
     const readState = () =>
         withDb((db) =>
             Promise.all([
@@ -732,7 +761,7 @@ test('an anonymous sample analysis moves to the account confirmed in the same se
 
     assert.equal(created.status, 201)
     assert.equal(analyzed.status, 202)
-    assert.equal(confirmed.status, 200)
+    assert.equal(signedUp.status, 200)
     assert.equal(anonymousAfter, null)
     assert.equal(adopted.userId, account._id.toString())
     assert.deepEqual(
@@ -771,6 +800,23 @@ test('an anonymous session cannot link a social provider', async () => {
 
     assert.equal(res.status, 403)
     assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
+})
+
+test('an unconfirmed account cannot link a social provider, and a confirmed one can', async () => {
+    const linkSocial = (cookie) =>
+        post('/api/auth/link-social', { provider: 'google', callbackURL: `${WEB}/history` }, cookie)
+    const unconfirmed = await linkSocial(unconfirmedOther)
+    const body = await unconfirmed.json()
+    const member = await signUp('social-linker@example.com')
+
+    await confirmEmail('social-linker@example.com', member.cookie)
+
+    const confirmed = await linkSocial(member.cookie)
+
+    assert.equal(unconfirmed.status, 403)
+    assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
+    assert.equal(confirmed.status, 200)
+    assert.equal(new URL((await confirmed.json()).url).host, 'accounts.google.com')
 })
 
 const signInAnonymouslyFrom = (address) =>

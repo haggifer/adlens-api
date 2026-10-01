@@ -38,6 +38,9 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - Better Auth's collections get their indexes only from `AUTH_INDEXES` in `src/auth/auth-indexes.ts` (its adapter
   creates none), created on API start and logged, never fatal, on failure. Keep Better Auth's index names, and never
   log a MongoDB error message there: a duplicate-key message quotes the value, an email address.
+- A confirmation link confirms only in the session of the account it was sent to (the `/verify-email` before hook:
+  `SIGN_IN_REQUIRED` without one or with an anonymous one, `EMAIL_MISMATCH` for another account) and never creates a
+  session (`autoSignInAfterVerification: false`): a link reaches whoever it is forwarded to.
 - An account's purge runs in Better Auth's `user.deleteUser.beforeDelete`, never in `databaseHooks.user.delete`: the
   anonymous plugin deletes a linked anonymous user through the internal adapter after its jobs moved to the account,
   and their videos still sit under the anonymous user's prefix.

@@ -106,6 +106,20 @@ describe('AnonymousCleanupService', () => {
         expect(await exists(linked)).toBe(true)
     })
 
+    it('never deletes an unconfirmed account, however long it was unused', async () => {
+        const unconfirmed = await insertUser({
+            email: 'carol@example.com',
+            isAnonymous: false,
+            emailVerified: false,
+            createdAt: daysAgo(100),
+        })
+
+        await cleanup.run(NOW)
+
+        expect(purge).not.toHaveBeenCalled()
+        expect(await exists(unconfirmed)).toBe(true)
+    })
+
     it('keeps a user whose data could not be purged, for the next run, and goes on with the others', async () => {
         const failing = await insertUser({ isAnonymous: true, lastSeenAt: daysAgo(9) })
         const other = await insertUser({ isAnonymous: true, lastSeenAt: daysAgo(9) })

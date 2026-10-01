@@ -3,6 +3,7 @@ import { MIN_PASSWORD_LENGTH, RequestErrorCode } from 'adlens-shared'
 import { betterAuth } from 'better-auth'
 import { mongodbAdapter } from 'better-auth/adapters/mongodb'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import { verifyJWT } from 'better-auth/crypto'
 import { anonymous } from 'better-auth/plugins/anonymous'
 import { type Db, type MongoClient, ObjectId } from 'mongodb'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -11,6 +12,7 @@ import { allowedWebOrigins } from '../config/web-origins'
 import { USER_COLLECTION } from '../database/user.doc'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
+import { ACCOUNT_LINK_FAILED, EMAIL_MISMATCH, EMAIL_NOT_SENT, SIGN_IN_REQUIRED } from './auth-error-codes'
 import { isDisposableEmail } from './disposable-email'
 import { createRateLimitStorage } from './rate-limit-storage'
 import type { SocialProviderOptions } from './social-providers'
@@ -28,10 +30,6 @@ const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 3 }
 
 type AuthEmailKind = 'confirmation' | 'reset'
 
-// Sign-ups one anonymous session may still confirm: a visitor who fixes a typo and signs up again keeps the first
-// link working.
-const MAX_PENDING_LINK_EMAILS = 5
-
 // Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
 const NO_PROVIDER_TOKENS = {
     accessToken: null,
@@ -40,10 +38,6 @@ const NO_PROVIDER_TOKENS = {
     accessTokenExpiresAt: null,
     refreshTokenExpiresAt: null,
 }
-
-// The client maps these Better Auth error codes to its own copy.
-export const EMAIL_NOT_SENT = 'EMAIL_NOT_SENT'
-const ACCOUNT_LINK_FAILED = 'ACCOUNT_LINK_FAILED'
 
 // The anonymous plugin gives anonymous users `<id>@anonymous.placeholder.invalid` (createPlaceholderEmail in
 // @better-auth/core); the .invalid TLD can never receive mail.
@@ -117,6 +111,18 @@ const toWebLink = (webOrigin: string, path: string, token: string) =>
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase()
 
+// The address a confirmation token was issued for, read the way Better Auth's /verify-email reads it. null for a token
+// it will refuse (malformed, expired or signed with another secret), so its own error answers.
+const getTokenEmail = async (token: unknown, secret: string): Promise<string | null> => {
+    if (typeof token !== 'string') {
+        return null
+    }
+
+    const payload = await verifyJWT(token, secret)
+
+    return typeof payload?.email === 'string' ? normalizeEmail(payload.email) : null
+}
+
 const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
     const messages = outbox.getStore()?.splice(0) ?? []
 
@@ -142,9 +148,6 @@ export const createAuth = ({
     onDeleteUser,
     onLinkAnonymous,
 }: AuthOptions) => {
-    // Not a Better Auth field (no endpoint can set or return it): the emails an anonymous session signed up with,
-    // so onLinkAccount can check a /verify-email confirmation against them before linking.
-    const pendingLinks = db.collection<{ pendingLinkEmails?: string[] }>(USER_COLLECTION)
     const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
     const rateLimits = createRateLimitStorage(db, secret)
 
@@ -163,9 +166,10 @@ export const createAuth = ({
         }
     }
 
-    // Each sign-in to an unconfirmed account resends its link, so without a cap anyone could flood an inbox and use up
-    // the day's sending quota. Counted like the rate limits, under a keyed hash of the address; past the cap nothing
-    // is sent and the request still answers as usual, so the cap reveals nothing about the account.
+    // Anyone can ask for an unconfirmed account's link again (/send-verification-email), so without a cap anyone could
+    // flood an inbox and use up the day's sending quota. Counted like the rate limits, under a keyed hash of the
+    // address; past the cap nothing is sent and the request still answers as usual, so the cap reveals nothing about
+    // the account.
     const queueCappedMail = async (kind: AuthEmailKind, message: MailMessage): Promise<void> => {
         if (isPlaceholderAddress(message.to)) {
             return
@@ -219,7 +223,9 @@ export const createAuth = ({
         },
         emailAndPassword: {
             enabled: true,
-            requireEmailVerification: true,
+            // An unconfirmed account signs in (and is signed in at sign-up) but is limited like an anonymous user
+            // until it confirms.
+            requireEmailVerification: false,
             minPasswordLength: MIN_PASSWORD_LENGTH,
             resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_S,
             revokeSessionsOnPasswordReset: true,
@@ -232,8 +238,9 @@ export const createAuth = ({
         socialProviders,
         emailVerification: {
             sendOnSignUp: true,
-            sendOnSignIn: true,
-            autoSignInAfterVerification: true,
+            // A confirmation link never creates a session: anyone the link reaches could otherwise be signed in to
+            // the account. The /verify-email hook below only lets the account's own session confirm it.
+            autoSignInAfterVerification: false,
             sendVerificationEmail: async ({ user, token }) =>
                 queueCappedMail(
                     'confirmation',
@@ -275,27 +282,9 @@ export const createAuth = ({
                 // Runs before the plugin deletes the anonymous user. That delete goes through the internal adapter,
                 // which skips deleteUser.beforeDelete and so never purges the videos the moved jobs still point at.
                 // An APIError stops the delete, so a failed move leaves the anonymous user and its data in place.
-                onLinkAccount: async ({ anonymousUser, newUser, ctx }) => {
-                    // A verify-email confirmation can be opened by anyone who has the link, not just the visitor who
-                    // requested it: an attacker can sign up with their own address and mail the confirmation link to
-                    // a visitor, hijacking that visitor's anonymous history if we linked unconditionally. Password
-                    // and social sign-in need the visitor's own credentials or the OAuth state, so they keep linking
-                    // as designed.
-                    if (ctx.path === '/verify-email') {
-                        const pending = await pendingLinks.findOne({ _id: new ObjectId(anonymousUser.user.id) })
-                        const confirmedEmail = normalizeEmail(newUser.user.email)
-
-                        if (!pending?.pendingLinkEmails?.includes(confirmedEmail)) {
-                            logger.error(
-                                `refused to link anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: the confirmed email does not match the sign-up that started the anonymous session`,
-                            )
-                            throw new APIError('FORBIDDEN', {
-                                code: ACCOUNT_LINK_FAILED,
-                                message: 'This confirmation link does not match the analyses you started',
-                            })
-                        }
-                    }
-
+                // Sign-up and sign-in link (they need the visitor's new password or own credentials); /verify-email
+                // never does, since it never creates a session.
+                onLinkAccount: async ({ anonymousUser, newUser }) => {
                     try {
                         await onLinkAnonymous(anonymousUser.user.id, newUser.user.id)
                     } catch (err) {
@@ -319,51 +308,52 @@ export const createAuth = ({
                 }
 
                 // Otherwise an anonymous user could attach a provider and stay anonymous forever, with no email or
-                // password of their own to ever link their history to a real account.
+                // password of their own to ever link their history to a real account; an unconfirmed account is
+                // limited the same way until it confirms.
                 if (ctx.path === '/link-social') {
                     const session = await getSessionFromCtx(ctx)
 
-                    if (session?.user.isAnonymous) {
+                    if (session && (session.user.isAnonymous || !session.user.emailVerified)) {
                         throw new APIError('FORBIDDEN', {
                             code: ACCOUNT_LINK_FAILED,
-                            message: 'Sign up or sign in before linking a provider',
+                            message: 'Sign up or sign in, and confirm your email, before linking a provider',
                         })
                     }
                 }
 
-                if (ctx.path === '/sign-up/email') {
-                    const email = String(ctx.body?.email ?? '')
+                // Only the account's own session may confirm its email: anyone the link reaches (a forwarded mail, a
+                // link mailed to a visitor on purpose) could otherwise confirm an address, or act in a session, that
+                // isn't theirs. With no account session the web asks the visitor to sign in and opens the link again.
+                if (ctx.path === '/verify-email') {
+                    const tokenEmail = await getTokenEmail(ctx.query?.token, ctx.context.secret)
 
-                    if (isDisposableEmail(email)) {
-                        throw new APIError('BAD_REQUEST', {
-                            code: RequestErrorCode.DisposableEmail,
-                            message: 'Sign up with a permanent email address',
+                    if (!tokenEmail) {
+                        return
+                    }
+
+                    // No refresh, so a refused request never sets a cookie.
+                    const session = await getSessionFromCtx(ctx, { disableRefresh: true })
+
+                    if (!session || session.user.isAnonymous) {
+                        throw new APIError('UNAUTHORIZED', {
+                            code: SIGN_IN_REQUIRED,
+                            message: 'Sign in to confirm your email',
                         })
                     }
 
-                    const session = await getSessionFromCtx(ctx)
-
-                    // Recorded so onLinkAccount can check a later /verify-email confirmation against it.
-                    if (session?.user.isAnonymous) {
-                        const normalized = normalizeEmail(email)
-                        const others = {
-                            $filter: {
-                                input: { $ifNull: ['$pendingLinkEmails', []] },
-                                cond: { $ne: ['$$this', normalized] },
-                            },
-                        }
-
-                        // The newest last, without repeats, keeping only the latest few.
-                        await pendingLinks.updateOne({ _id: new ObjectId(session.user.id) }, [
-                            {
-                                $set: {
-                                    pendingLinkEmails: {
-                                        $slice: [{ $concatArrays: [others, [normalized]] }, -MAX_PENDING_LINK_EMAILS],
-                                    },
-                                },
-                            },
-                        ])
+                    if (normalizeEmail(session.user.email) !== tokenEmail) {
+                        throw new APIError('FORBIDDEN', {
+                            code: EMAIL_MISMATCH,
+                            message: 'This link is for a different account',
+                        })
                     }
+                }
+
+                if (ctx.path === '/sign-up/email' && isDisposableEmail(String(ctx.body?.email ?? ''))) {
+                    throw new APIError('BAD_REQUEST', {
+                        code: RequestErrorCode.DisposableEmail,
+                        message: 'Sign up with a permanent email address',
+                    })
                 }
             }),
             after: createAuthMiddleware(async () => sendQueuedMail(mailer)),

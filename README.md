@@ -160,15 +160,13 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
 - **Anonymous sessions** (Better Auth's `anonymous` plugin): the web signs a visitor in anonymously right before their
   first analysis, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
   `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
-  work unchanged. When they sign up or in, `onLinkAccount` moves their jobs (`userId`) and quota runs to the account
-  ([`AccountDataService.adopt`](src/account/account-data.service.ts)), then the plugin deletes the anonymous user.
-  `/verify-email` links only when the anonymous session confirming it is the one that started that sign-up: the
-  address is added to `pendingLinkEmails` on the anonymous user document (the last 5, so a sign-up corrected for a typo
-  keeps the first link working; written straight to the collection, never through a Better Auth field), and a mismatch
-  answers 403 `ACCOUNT_LINK_FAILED` and leaves the history with the
-  anonymous user — otherwise a confirmation link mailed to someone else could hijack a visitor's analyses.
-  `/link-social` is refused for an anonymous session (it could attach a provider and stay anonymous forever), and so
-  is `/delete-anonymous-user` (it deletes through Better Auth's internal adapter and would skip the purge).
+  work unchanged. When they sign up or sign in (`/sign-up/email`, `/sign-in/*`), `onLinkAccount` moves their jobs
+  (`userId`) and quota runs to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts)), then
+  the plugin deletes the anonymous user; a failed move answers 500 `ACCOUNT_LINK_FAILED` and leaves the history with
+  the anonymous user. A confirmation link never links: it never creates a session. `/link-social` is refused (403
+  `ACCOUNT_LINK_FAILED`) for an anonymous session (it could attach a provider and stay anonymous forever) and for an
+  unconfirmed account, and so is `/delete-anonymous-user` (it deletes through Better Auth's internal adapter and would
+  skip the purge).
 - **Abandoned anonymous users are deleted after a week.** Every time an anonymous session is created or refreshed
   (Better Auth refreshes a session at most once a day), a session hook stamps `lastSeenAt` on the user. The daily
   cleanup job ([`AnonymousCleanupService`](src/cleanup/anonymous-cleanup.service.ts)) deletes each anonymous user whose
@@ -178,7 +176,11 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   deletes the session.
 - **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
   `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
-- **Email verification is required** before the first sign-in; signing in unverified resends the link.
+- **Unconfirmed accounts sign in.** Sign-up signs the user in straight away and mails a confirmation link, and an
+  unconfirmed account can sign in again. Until it confirms its email (`emailVerified` on the user document) it can't
+  link a provider, but unlike an anonymous user it's never deleted for inactivity. A sign-up with an address
+  already registered answers Better Auth's 422 "user already exists": accepted, since signing in at sign-up can't
+  hide it.
 - **Google and GitHub sign-in** (OAuth, callbacks on this API: `/api/auth/callback/{google,github}`). A provider is
   on when both its client id and secret are set; half a pair stops the API at startup. A social sign-in links to an
   existing user with the same email only when the provider reports that email as verified **and** the user's own
@@ -187,8 +189,17 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
 - **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
 - **Emailed links open the web app** (`/confirm-email`, `/reset-password`), never the API: users only see the site's
   domain, and the confirmation page calls `verify-email` from the browser once it loads, so mail scanners that fetch
-  links without running JavaScript can't use the token up. Confirming signs the user in (Better Auth sets the session
-  cookie on that response).
+  links without running JavaScript can't use the token up. **Only the account's own session confirms it**: a
+  `hooks.before` on `/verify-email` reads the token's address the way Better Auth does (`verifyJWT` with the auth
+  secret) and answers 401 `SIGN_IN_REQUIRED` without a session or with an anonymous one (the web asks the visitor to
+  sign in and opens the link again), and 403 `EMAIL_MISMATCH` in another account's session; neither sets a cookie. A
+  token Better Auth would refuse keeps its own error (`INVALID_TOKEN`, `TOKEN_EXPIRED`). Confirming creates no session
+  (`autoSignInAfterVerification: false`), so a forwarded link can't sign anyone in; sessions aren't cached in the
+  cookie, so the next `get-session` reads `emailVerified: true`.
+- **Auth error codes**: besides adlens-shared's `RequestErrorCode`s (such as `DISPOSABLE_EMAIL`), Better Auth answers
+  a few codes of AdLens's own that only the web reads, in its own error body (`code`):
+  [`auth-error-codes.ts`](src/auth/auth-error-codes.ts) holds `EMAIL_NOT_SENT`, `ACCOUNT_LINK_FAILED`,
+  `SIGN_IN_REQUIRED` and `EMAIL_MISMATCH`.
 - **Account deletion** (password-confirmed, or within a day of signing in for users without a password) purges the
   user's jobs and every uploaded object (including videos of jobs adopted from an anonymous session, which stay under
   that session's prefix) before Better Auth removes the account; the quota runs live on the user document, so Better
@@ -198,8 +209,9 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
   forever. The cost is that a password-reset request for an existing address takes a Resend round trip longer than one
   for an unknown address.
-- **At most 3 confirmation and 3 reset emails per address per hour**, whoever asks. Each sign-in to an unconfirmed
-  account resends its link, so without a cap anyone could flood an inbox and use up the day's Resend quota. The count
+- **At most 3 confirmation and 3 reset emails per address per hour**, whoever asks. Anyone can ask for an unconfirmed
+  account's link again (`/send-verification-email`), so without a cap anyone could flood an inbox and use up the day's
+  Resend quota. The count
   lives in `rate_limits` under a keyed hash of `email|<kind>|<address>`, never the address. Past the cap nothing is
   sent and the request answers as usual; a failed count lets the email through.
 - **Better Auth's rate limits** (its defaults, plus 10 anonymous sign-ins an hour per client) are counted in MongoDB,
