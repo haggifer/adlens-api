@@ -36,13 +36,13 @@ const envSchema = z.object({
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
     QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
-    // Weekly caps per network (an IPv4 address or an IPv6 /64): analyses by anonymous users; analyses by anyone
-    // before a Turnstile check is required; analyses by anyone at all.
+    // Weekly caps per network (an IPv4 address or an IPv6 /64): analyses by anonymous users and unconfirmed accounts;
+    // analyses by anyone before a Turnstile check is required; analyses by anyone at all.
     IP_ANON_LIMIT: z.coerce.number().int().positive().default(3),
     IP_SOFT_LIMIT: z.coerce.number().int().positive().default(10),
     IP_HARD_LIMIT: z.coerce.number().int().positive().default(30),
-    // Analyses that fail after Gemini answered are refunded, but at most this many per network per week: each one
-    // was billed, so unlimited refunds would let a failing video be re-run for free.
+    // Analyses that fail after a Gemini call that may have been billed are refunded, but at most this many per network
+    // per week, so unlimited refunds can't let a failing video be re-run for free.
     IP_FAILURE_REFUND_LIMIT: z.coerce.number().int().nonnegative().default(3),
     // Cloudflare Turnstile. Unset, a required check can never pass.
     TURNSTILE_SECRET_KEY: z.string().optional(),

@@ -6,7 +6,7 @@ export interface AuthenticatedRequest extends Request {
     userId: string
 }
 
-// Verifies the Better Auth session on every /v1 request; uid comes from the session, never the body.
+// Verifies the Better Auth session on every guarded /v1 request; the user id comes from the session, never the body.
 @Injectable()
 export class SessionGuard implements CanActivate {
     constructor(private readonly auth: AuthService) {}

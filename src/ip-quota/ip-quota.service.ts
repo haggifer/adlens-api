@@ -90,10 +90,11 @@ export class IpQuotaService {
         await this.buckets.updateOne({ 'runs.id': runId }, { $pull: { runs: { id: runId } } })
     }
 
-    // Refunds the run of an analysis that failed after Gemini answered, unless the network already had its allowance
-    // of such refunds this window; then the run stays counted, marked so that asking again gives the same answer. One
-    // conditional update, so concurrent failures can't both take the last refund. Safe to repeat: true whenever the run
-    // no longer counts (refunded now or earlier, or out of the window), false while it stays counted.
+    // Refunds the run of an analysis that failed after a Gemini call that may have been billed, unless the network
+    // already had its allowance of such refunds this window; then the run stays counted, marked so that asking again
+    // gives the same answer. One conditional update, so concurrent failures can't both take the last refund. Safe to
+    // repeat: true whenever the run no longer counts (refunded now or earlier, or out of the window), false while it
+    // stays counted.
     async refundFailure(runId: string, now = new Date()): Promise<boolean> {
         const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
         const refunded = await this.buckets.updateOne(

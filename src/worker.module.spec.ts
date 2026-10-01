@@ -8,7 +8,8 @@ import { IpQuotaService } from './ip-quota/ip-quota.service'
 import { JobLifecycle } from './jobs/job-lifecycle.service'
 import { type MemoryMongo, startMemoryMongo } from './testing/memory-mongo'
 
-// Secrets only the API holds. The Cloud Run Job gets none of them, so the worker must start without them.
+// Secrets only the API needs. The jobs mount the same bundle today, since they share the API's service account, but
+// the worker must start without them so it can get an identity of its own.
 const API_ONLY_SECRETS = ['BETTER_AUTH_SECRET', 'TURNSTILE_SECRET_KEY', 'RESEND_API_KEY']
 
 describe('WorkerModule', () => {

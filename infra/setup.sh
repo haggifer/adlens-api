@@ -5,10 +5,10 @@
 #
 # The analysis runs as an on-demand Cloud Run Job (adlens-analyze) launched by the API — there is no
 # always-on worker service and no Redis. A second job (adlens-cleanup), started daily by Cloud Scheduler, deletes
-# anonymous users unused for a week.
+# anonymous users unused for a week and the videos of jobs not analyzed within 6 hours, and retries owed refunds.
 #
 # Day-to-day deploys don't use this script: every push to init-setup that passes CI is built into one image and rolled
-# out to the job and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
+# out to both jobs and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
 # owns the runtime config (env vars, secrets, limits); it also deploys the current checkout the same way CI does.
 #
 # Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, put any subset of the bundle keys
@@ -381,7 +381,7 @@ gcloud iam workload-identity-pools providers describe adlens-api --location=glob
 gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" --role="roles/iam.workloadIdentityUser" \
     --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository_id/$GITHUB_REPO_ID"
 
-echo "== build one image for the job and the API =="
+echo "== build one image for both jobs and the API =="
 TAG="manual-$(git rev-parse --short HEAD)"
 gcloud builds submit --tag "$IMAGE:$TAG" .
 IMAGE_REF="$IMAGE@$(gcloud artifacts docker images describe "$IMAGE:$TAG" --format='value(image_summary.digest)')"

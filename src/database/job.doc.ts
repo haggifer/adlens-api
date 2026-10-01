@@ -61,16 +61,16 @@ export const jobDocSchema = z.object({
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
     attempts: z.number().int().nonnegative().default(0),
-    // Set just before a worker attempt calls Gemini, and cleared only when that call failed without an answer (never
-    // billed). An attempt that finds it set doesn't call again: the earlier call may have been billed.
+    // Set just before a worker attempt calls Gemini, and cleared only when Vertex refused that call with an HTTP error
+    // status (never billed). An attempt that finds it set doesn't call again: the earlier call may have been billed.
     modelCallStartedAt: z.date().optional(),
     // The quota run this job was charged for, recorded just before the charge; null when none is held (never
     // charged, or refunded). On a job that is neither in flight nor analyzed, a held run is a refund still owed.
     chargedRunId: z.string().nullable(),
     // The network's run (IpQuotaService), likewise; null when none is held (admins are never charged).
     chargedIpRunId: z.string().nullable(),
-    // The run failed after Gemini answered, so its refund counts against the network's allowance of them. Kept with
-    // the charges until they are refunded, so a retry decides the same way.
+    // The run failed after a Gemini call that may have been billed, so its refund counts against the network's
+    // allowance of them. Kept with the charges until they are refunded, so a retry decides the same way.
     isRefundCapped: z.boolean().optional(),
     // Set at creation when a Turnstile check passed; analyze relies on it for the network rules.
     hasPassedChallenge: z.boolean().default(false),

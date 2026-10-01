@@ -41,7 +41,8 @@ const recordCall = (call: ModelCall) => ({
 })
 
 export interface FailOptions {
-    // Gemini answered, so the attempt was billed: the refund then counts against the network's allowance of them.
+    // The job kept the Gemini call mark, so a call may have been billed: the refund then counts against the network's
+    // allowance of them.
     isAfterModelAnswer?: boolean
 }
 

@@ -105,7 +105,8 @@ const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> =>
 }
 
 // Emailed links open the web app, not Better Auth's own endpoints, so users only ever see the site's domain. The
-// confirmation page confirms on load: a mail scanner that runs JavaScript could use the token up first.
+// confirmation page confirms from the browser once it loads, and only in the account's own session (the /verify-email
+// hook below), so a mail scanner that fetches the link confirms nothing.
 const toWebLink = (webOrigin: string, path: string, token: string) =>
     `${webOrigin}${path}?token=${encodeURIComponent(token)}`
 
