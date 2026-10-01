@@ -4,8 +4,9 @@ import { zodToMongoose } from '../common/zod-to-mongoose'
 export const RATE_LIMIT_MODEL = 'RateLimit'
 export const RATE_LIMIT_COLLECTION = 'rate_limits'
 
-// Better Auth's rate-limit counters (createRateLimitStorage), one per client and path, keyed by an HMAC of Better
-// Auth's "<ip>|<path>" key so no address is stored. MongoDB deletes each one when its window ends.
+// Rate-limit counters (createRateLimitStorage): Better Auth's, one per client and path, the per-address email caps and
+// the Contact form's caps (ContactLimits). Each is keyed by an HMAC of its raw key ("<ip>|<path>", an email, a network
+// key), so no address is stored. MongoDB deletes each one when its window ends.
 export const rateLimitDocSchema = z.object({
     _id: z.string(),
     count: z.number(),

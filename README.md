@@ -158,6 +158,22 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
   `CHALLENGE_REQUIRED` at analyze, and the user starts again.
 - **Admins** (`isAdmin: true`) skip every network rule.
 
+## Contact form
+
+`POST /v1/contact` is public: anyone can write to the team, signed in or not. The message goes to `CONTACT_EMAIL`
+through Resend with the visitor as Reply-To, so answering is a plain reply; nothing of it is stored.
+
+- **Honeypot**: the form hides a `website` field; a message that fills it in answers 204 and sends nothing.
+- **Hourly caps** ([`ContactLimits`](src/contact/contact-limits.ts)): at most **3 messages per network**, **3 per
+  sender email** and **20 in total**, past which the API answers 429 `RATE_LIMITED`. The network is the one the
+  network limits use (`ClientNetworkResolver`). The total is the hard guarantee: senders choose their email and can
+  switch networks, and the Resend quota is shared with confirmation and reset emails. Each cap is a counter in
+  `rate_limits`, counted like Better Auth's rate limits by [`createRateLimitStorage`](src/auth/rate-limit-storage.ts):
+  one atomic pipeline upsert, so concurrent messages can't exceed a cap, under `HMAC-SHA256` of the email or the
+  network key, never the address, deleted by a TTL index when its hour ends. The hour starts with a counter's first
+  message. The caps are counted narrowest first and only while each passes, so a message the network or sender cap
+  refuses doesn't use up the total.
+
 ## Authentication
 
 [Better Auth](src/auth/auth.instance.ts) on the app's own Mongo connection: email and password, plus Google and GitHub:
@@ -374,7 +390,7 @@ key; 2x0000000000000000000000000000000AA always fails.
 ## Tests
 
 ```bash
-npm test          # unit: quota, network quota, job lifecycle, pipeline, verification, client IP, Better Auth indexes (real MongoDB via mongodb-memory-server)
+npm test          # unit: quota, network quota, Contact limits, job lifecycle, pipeline, verification, client IP, Better Auth indexes (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
 npm run test:auth # after a build: sign-up, verification, reset, deletion, anonymous linking and rate limits against the real Better Auth
 ```

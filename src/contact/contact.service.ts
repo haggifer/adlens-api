@@ -1,30 +1,26 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { InjectModel } from '@nestjs/mongoose'
 import { type ContactMessagePayload, RequestErrorCode } from 'adlens-shared'
-import { Model } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import type { Env } from '../config/env'
-import { CONTACT_MESSAGE_MODEL, type ContactMessageDoc } from '../database/contact-message.doc'
+import type { IpSource } from '../ip-quota/client-ip'
+import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
 import { Mailer } from '../mail/mailer'
 import { contactEmail } from './contact-email'
-
-const WINDOW_MS = 60 * 60 * 1000
-const MAX_PER_SENDER = 3
-// Client IPs can't be trusted behind the proxy, so the hard guarantee against a flooded inbox is a global cap.
-const MAX_TOTAL = 20
+import { ContactLimits } from './contact-limits'
 
 @Injectable()
 export class ContactService {
     private readonly logger = new Logger(ContactService.name)
 
     constructor(
-        @InjectModel(CONTACT_MESSAGE_MODEL) private readonly model: Model<ContactMessageDoc>,
+        private readonly limits: ContactLimits,
+        private readonly network: ClientNetworkResolver,
         private readonly mailer: Mailer,
         private readonly config: ConfigService<Env, true>,
     ) {}
 
-    async send(input: ContactMessagePayload): Promise<void> {
+    async send(input: ContactMessagePayload, ipSource: IpSource): Promise<void> {
         // A bot filled in the hidden field: answer as if it worked, so it learns nothing.
         if (input.website) {
             this.logger.warn('dropped a contact message that filled in the honeypot')
@@ -42,17 +38,12 @@ export class ContactService {
         }
 
         const email = input.email.toLowerCase()
-        const since = new Date(Date.now() - WINDOW_MS)
-        const [total, fromSender] = await Promise.all([
-            this.model.countDocuments({ createdAt: { $gte: since } }),
-            this.model.countDocuments({ email, createdAt: { $gte: since } }),
-        ])
+        const { bucketKey } = this.network.resolve(ipSource)
+        const isAllowed = await this.limits.allowMessage(bucketKey, email)
 
-        if (total >= MAX_TOTAL || fromSender >= MAX_PER_SENDER) {
+        if (!isAllowed) {
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.RateLimited, 'Too many messages')
         }
-
-        await this.model.create({ email })
 
         try {
             await this.mailer.send(contactEmail(to, { ...input, email }))

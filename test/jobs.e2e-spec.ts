@@ -13,8 +13,8 @@ import { AuthService } from '../src/auth/auth.service'
 import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { UserAccess } from '../src/common/user-access'
-import { CONTACT_MESSAGE_MODEL, type ContactMessageDoc } from '../src/database/contact-message.doc'
 import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
+import { RATE_LIMIT_COLLECTION } from '../src/database/rate-limit.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { USER_COLLECTION } from '../src/database/user.doc'
 import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
@@ -491,18 +491,18 @@ describe('Jobs API (e2e)', () => {
 
     describe('contact messages', () => {
         const MESSAGE = { email: 'visitor@example.com', message: 'Hello, I would like to know more about AdLens.' }
-        let contactMessages: Model<ContactMessageDoc>
+        let networks = 0
 
-        beforeAll(() => {
-            contactMessages = app.get(getModelToken(CONTACT_MESSAGE_MODEL))
-        })
+        // A network of its own per call unless one is given, so only the cap under test is reached.
+        const sendContact = (body: Record<string, unknown>, network = `203.0.113.${++networks}`) =>
+            request(app.getHttpServer()).post('/v1/contact').set({ 'x-forwarded-for': network }).send(body)
 
         beforeEach(async () => {
-            await contactMessages.deleteMany({})
+            await app.get<Connection>(getConnectionToken()).collection(RATE_LIMIT_COLLECTION).deleteMany({})
         })
 
         it('emails the message to the team without a session, replying to the sender', async () => {
-            await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(204)
+            await sendContact(MESSAGE).expect(204)
 
             expect(sendMail).toHaveBeenCalledTimes(1)
             expect(sendMail.mock.calls[0][0]).toMatchObject({ to: 'team@adlens.test', replyTo: MESSAGE.email })
@@ -510,52 +510,63 @@ describe('Jobs API (e2e)', () => {
         })
 
         it('escapes the message in the HTML version', async () => {
-            await request(app.getHttpServer())
-                .post('/v1/contact')
-                .send({ ...MESSAGE, message: '<script>alert(1)</script> hello there' })
-                .expect(204)
+            await sendContact({ ...MESSAGE, message: '<script>alert(1)</script> hello there' }).expect(204)
 
             expect(sendMail.mock.calls[0][0].html).not.toContain('<script>')
         })
 
         it('accepts but drops a message that filled in the honeypot', async () => {
-            await request(app.getHttpServer())
-                .post('/v1/contact')
-                .send({ ...MESSAGE, website: 'https://spam.example' })
-                .expect(204)
+            await sendContact({ ...MESSAGE, website: 'https://spam.example' }).expect(204)
 
             expect(sendMail).not.toHaveBeenCalled()
         })
 
         it('rejects an invalid message', async () => {
-            const res = await request(app.getHttpServer())
-                .post('/v1/contact')
-                .send({ email: 'nope', message: 'hi' })
-                .expect(400)
+            const res = await sendContact({ email: 'nope', message: 'hi' }).expect(400)
 
             expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
         })
 
-        it('limits how often one sender can write', async () => {
+        it('limits how often one sender can write, from any network', async () => {
             for (let sent = 0; sent < 3; sent++) {
-                await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(204)
+                await sendContact(MESSAGE).expect(204)
             }
 
-            const res = await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(429)
+            const res = await sendContact(MESSAGE).expect(429)
 
             expect(res.body.errorCode).toBe(RequestErrorCode.RateLimited)
             expect(sendMail).toHaveBeenCalledTimes(3)
         })
 
-        it('caps the total number of messages per hour', async () => {
-            await contactMessages.insertMany(
-                Array.from({ length: 20 }, (_, index) => ({ email: `sender${index}@example.com` })),
-            )
+        it('limits how often one network can write, whoever sends it', async () => {
+            for (let sent = 0; sent < 3; sent++) {
+                await sendContact({ ...MESSAGE, email: `writer${sent}@example.com` }, '192.0.2.50').expect(204)
+            }
 
-            const res = await request(app.getHttpServer()).post('/v1/contact').send(MESSAGE).expect(429)
+            const res = await sendContact({ ...MESSAGE, email: 'writer9@example.com' }, '192.0.2.50').expect(429)
 
             expect(res.body.errorCode).toBe(RequestErrorCode.RateLimited)
-            expect(sendMail).not.toHaveBeenCalled()
+            expect(sendMail).toHaveBeenCalledTimes(3)
+        })
+
+        it('caps the total number of messages per hour, even when they arrive at once', async () => {
+            const responses = await Promise.all(
+                Array.from({ length: 24 }, (_, index) =>
+                    sendContact({ ...MESSAGE, email: `sender${index}@example.com` }),
+                ),
+            )
+            const statuses = responses.map((res) => res.status)
+
+            expect(statuses.filter((status) => status === 204)).toHaveLength(20)
+            expect(statuses.filter((status) => status === 429)).toHaveLength(4)
+            expect(sendMail).toHaveBeenCalledTimes(20)
+        })
+
+        it("doesn't let one sender's concurrent messages exceed the cap", async () => {
+            const responses = await Promise.all(Array.from({ length: 6 }, () => sendContact(MESSAGE)))
+
+            expect(responses.filter((res) => res.status === 204)).toHaveLength(3)
+            expect(sendMail).toHaveBeenCalledTimes(3)
         })
     })
 
