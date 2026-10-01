@@ -8,7 +8,16 @@ export const IP_QUOTA_COLLECTION = 'ip_quotas'
 // only the runs still inside the window, and MongoDB deletes it a window after its last charge.
 export const ipQuotaDocSchema = z.object({
     _id: z.string(),
-    runs: z.array(z.object({ id: z.string(), startedAt: z.date(), jobId: z.string(), anonymous: z.boolean() })),
+    runs: z.array(
+        z.object({
+            id: z.string(),
+            startedAt: z.date(),
+            jobId: z.string(),
+            anonymous: z.boolean(),
+            // Set when the run's analysis failed after Gemini answered and the network had no refunds of those left.
+            isRefundRefused: z.boolean().optional(),
+        }),
+    ),
     // When each failed analysis of the last window was refunded (IpQuotaService.refundFailure).
     refundedFailures: z.array(z.date()).optional(),
     expiresAt: z.date(),

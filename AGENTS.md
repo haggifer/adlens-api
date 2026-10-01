@@ -28,9 +28,11 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
   API before publishing a ruleset that needs a new one). Other changes don't need this.
 - A job is created `pending`; after that, `JobLifecycle` is the only code that changes its status, and every transition
   is a conditional update on the expected current status. Don't write `status` anywhere else.
-- A quota charge is refunded at most once, by whoever clears `chargedRunId` (and `chargedIpRunId` for the network)
-  in the write that ends the run. Keep the charges, the final status and those fields in one update. Never store a
-  network key or an address on a job.
+- A quota charge is refunded at most once and never lost. The job records the run ids (`chargedRunId`,
+  `chargedIpRunId`) before charging and keeps them until both refunds succeed; every refund is safe to repeat (`$pull`
+  by run id, `refundFailure` per run id), and ended jobs still holding ids are retried by `refundOwedCharges` (on
+  every read of the user's jobs and in the daily cleanup). Never clear those ids before the refunds succeed. Never
+  store a network key or an address on a job.
 - The client's address comes only from `ClientNetworkResolver` (`X-Forwarded-For` read `TRUSTED_PROXY_HOPS` from the
   right). Never store or log an address; networks are stored as an HMAC.
 - Better Auth resolves the address itself for its rate limits and sessions. Keep its counters in

@@ -129,6 +129,11 @@ describe('QuotaService', () => {
         expect(await quota.get(adminId, NOW)).toMatchObject({ used: LIMIT + 2, limit: null })
     })
 
+    it('charges the run under the id the caller recorded for it', async () => {
+        expect(await quota.consume(userId, 'job-1', NOW, 'run-1')).toBe('run-1')
+        expect(await storedRuns(userId)).toEqual([{ id: 'run-1', startedAt: NOW, jobId: 'job-1' }])
+    })
+
     it('refunds exactly the given run', async () => {
         const kept = await quota.consume(userId, 'job-1', NOW)
         const refunded = await quota.consume(userId, 'job-2', NOW)

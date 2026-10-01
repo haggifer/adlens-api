@@ -6,6 +6,7 @@ import { AnonymousCleanupService } from './cleanup/anonymous-cleanup.service'
 import { CleanupModule } from './cleanup/cleanup.module'
 import { createLogger } from './common/cloud-logger'
 import { readLogFormat } from './config/log-format'
+import { JobLifecycle } from './jobs/job-lifecycle.service'
 
 const EXIT_DONE = 0
 const EXIT_FAILED = 1
@@ -20,8 +21,9 @@ const run = async (): Promise<number> => {
     try {
         const anonymous = await app.get(AnonymousCleanupService).run()
         const uploads = await app.get(AbandonedUploadCleanupService).run()
+        const refunds = await app.get(JobLifecycle).refundOwedCharges()
 
-        return anonymous.failed + uploads.failed > 0 ? EXIT_FAILED : EXIT_DONE
+        return anonymous.failed + uploads.failed + refunds.failed > 0 ? EXIT_FAILED : EXIT_DONE
     } finally {
         await app.close()
     }

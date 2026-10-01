@@ -1,6 +1,7 @@
 import type { INestApplicationContext } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import mongoose from 'mongoose'
+import { JobLifecycle } from '../jobs/job-lifecycle.service'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { AbandonedUploadCleanupService } from './abandoned-upload-cleanup.service'
 import { AnonymousCleanupService } from './anonymous-cleanup.service'
@@ -36,11 +37,13 @@ describe('CleanupModule', () => {
         process.env = originalEnv
     })
 
-    it('starts without the API-only secrets and runs both cleanups against an empty database', async () => {
+    it('starts without the API-only secrets and runs every cleanup against an empty database', async () => {
         const anonymous = await cleanup.get(AnonymousCleanupService).run()
         const uploads = await cleanup.get(AbandonedUploadCleanupService).run()
+        const refunds = await cleanup.get(JobLifecycle).refundOwedCharges()
 
         expect(anonymous).toEqual({ deleted: 0, failed: 0 })
         expect(uploads).toEqual({ deleted: 0, failed: 0 })
+        expect(refunds).toEqual({ refunded: 0, failed: 0 })
     })
 })

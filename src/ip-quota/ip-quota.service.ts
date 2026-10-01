@@ -49,16 +49,22 @@ export class IpQuotaService {
         return { total: counted.length, anonymous: counted.filter((run) => run.anonymous).length }
     }
 
-    // Charges one run for the job and returns the run's id. One conditional update counts the network's runs of the
-    // last window, drops older ones and appends the new run, so concurrent calls can't overdraw.
-    async charge(charge: IpCharge, jobId: string, now = new Date()): Promise<string> {
+    // Charges one run for the job and returns the run's id: the one the job recorded before charging, when given. One
+    // conditional update counts the network's runs of the last window, drops older ones and appends the new run, so
+    // concurrent calls can't overdraw.
+    async charge(
+        charge: IpCharge,
+        jobId: string,
+        now = new Date(),
+        runId = new Types.ObjectId().toString(),
+    ): Promise<string> {
         if (charge.isAnonymous && !charge.hasPassedChallenge) {
             throw toIpRefusal(IpVerdict.NeedsChallenge)
         }
 
         const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
         const expiresAt = new Date(now.getTime() + QUOTA_WINDOW_MS)
-        const run: IpRun = { id: new Types.ObjectId().toString(), startedAt: now, jobId, anonymous: charge.isAnonymous }
+        const run: IpRun = { id: runId, startedAt: now, jobId, anonymous: charge.isAnonymous }
 
         await this.ensureBucket(charge.bucketKey, expiresAt)
 
@@ -82,13 +88,14 @@ export class IpQuotaService {
     }
 
     // Refunds the run of an analysis that failed after Gemini answered, unless the network already had its allowance
-    // of such refunds this window; then the run stays counted. One conditional update, so concurrent failures can't
-    // both take the last refund. false when nothing was refunded.
+    // of such refunds this window; then the run stays counted, marked so that asking again gives the same answer. One
+    // conditional update, so concurrent failures can't both take the last refund. Safe to repeat: true whenever the run
+    // no longer counts (refunded now or earlier, or out of the window), false while it stays counted.
     async refundFailure(runId: string, now = new Date()): Promise<boolean> {
         const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
         const refunded = await this.buckets.updateOne(
             {
-                'runs.id': runId,
+                runs: { $elemMatch: { id: runId, isRefundRefused: { $ne: true } } },
                 $expr: { $lt: [{ $size: recentRefundedFailures(cutoff) }, this.failureRefundLimit] },
             },
             [
@@ -101,7 +108,17 @@ export class IpQuotaService {
             ],
         )
 
-        return refunded.modifiedCount > 0
+        if (refunded.modifiedCount > 0) {
+            return true
+        }
+
+        const refused = await this.buckets.updateOne(
+            { 'runs.id': runId },
+            { $set: { 'runs.$[run].isRefundRefused': true } },
+            { arrayFilters: [{ 'run.id': runId }] },
+        )
+
+        return refused.matchedCount === 0
     }
 
     private admits({ isAnonymous, hasPassedChallenge }: IpCharge, cutoff: Date): object[] {

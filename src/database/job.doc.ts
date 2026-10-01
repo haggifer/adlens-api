@@ -61,10 +61,14 @@ export const jobDocSchema = z.object({
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
     attempts: z.number().int().nonnegative().default(0),
-    // The quota run this job was charged for; null when nothing is charged (never charged, or refunded).
+    // The quota run this job was charged for, recorded just before the charge; null when none is held (never
+    // charged, or refunded). On a job that is neither in flight nor analyzed, a held run is a refund still owed.
     chargedRunId: z.string().nullable(),
-    // The network's run (IpQuotaService) this job was charged for; null when none is held (admins are never charged).
+    // The network's run (IpQuotaService), likewise; null when none is held (admins are never charged).
     chargedIpRunId: z.string().nullable(),
+    // The run failed after Gemini answered, so its refund counts against the network's allowance of them. Kept with
+    // the charges until they are refunded, so a retry decides the same way.
+    isRefundCapped: z.boolean().optional(),
     // Set at creation when a Turnstile check passed; analyze relies on it for the network rules.
     hasPassedChallenge: z.boolean().default(false),
     usage: tokenUsageSchema.optional(),

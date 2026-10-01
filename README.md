@@ -34,7 +34,8 @@ repos.
   started by Cloud Scheduler at 03:00 UTC. It deletes anonymous users unused for a week (see Authentication), and the
   videos of uploads left `pending` for a week ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)):
   every object's path is made from its user and job ids, so the jobs find them all. The job document stays, and
-  analyzing it later answers `UPLOAD_INCOMPLETE`. A sample's shared video is never deleted.
+  analyzing it later answers `UPLOAD_INCOMPLETE`. A sample's shared video is never deleted. It also retries the
+  refunds that ended jobs still owe (see Quota).
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
@@ -87,9 +88,11 @@ charged run is stored on the user's Better Auth document (`runs: { id, startedAt
 days after it started; `GET /v1/me/quota` reports `nextFreeAt`, when the oldest counted run does. A charge is one
 conditional pipeline update on that document: it counts the runs still in the window, drops older ones and appends
 the new run, so concurrent requests can't overdraw and the list stays a few entries long. The limit is read from
-config on every charge. The job records its run (`chargedRunId`); ending a run clears that field in the same write
-that sets the final status, and the pre-image decides who refunds (`$pull` of that run), so a refund happens at most
-once. Deleting a job keeps its run counted.
+config on every charge. The job records its run (`chargedRunId`) before the charge and keeps it until the refund
+succeeds, so no charge exists that no job holds. A refund is `$pull` of that run, safe to repeat, so it happens at most
+once however often it is tried; ending a run refunds right away, and a refund that fails or is cut short stays on the
+ended job (`pending` or `error` still holding a run id) until `JobLifecycle.refundOwedCharges` retries it, on every read
+of the user's jobs and in the daily cleanup. Deleting a job keeps its run counted.
 
 **Admins have no limit**: set `isAdmin: true` on the user's document in Better Auth's `user` collection. Their runs
 are still counted but never capped, and `GET /v1/me/quota` reports `limit: null`. The field is declared to Better Auth
@@ -118,12 +121,14 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   by run id, found through an index on `runs.id`, so the worker needs no key.
 - **Order** ([`AnalysisAdmission`](src/jobs/analysis-admission.service.ts)): `POST /v1/jobs` and `/from-sample` check
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
-  (`chargedRunId`, `chargedIpRunId`); the write that ends a run clears both, so each is refunded at most once.
+  (`chargedRunId`, `chargedIpRunId`) before charging and clears them once both are refunded, so each is refunded at
+  most once and never lost.
 - **Failed analyses**: a failure before Gemini answers (provider errors, timeouts, a stuck worker) is always
   refunded. Once Gemini has answered, the call is billed even when the answer can't be used (cut off, blocked or
   malformed), so such a failure is refunded only while the network has refunds of those left
   (`IpQuotaService.refundFailure`, one conditional update that records the refund's time in `refundedFailures`);
-  otherwise both runs stay counted. Without the cap, a video that always fails could be re-run for free until the
+  otherwise both runs stay counted, and the run is marked so a retry gives the same answer. The job keeps
+  `isRefundCapped` with its charges until they are settled, so a retried refund is capped the same way. Without the cap, a video that always fails could be re-run for free until the
   Vertex spend cap stopped every analysis. A cut-off or blocked answer isn't retried, a malformed one once
   (`ModelAnswerError`), and every attempt's tokens are added to the job's `usage`.
 - **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web runs the check when an analysis
@@ -435,10 +440,11 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **One owner for job status.** `JobLifecycle` performs every transition as a conditional update on the expected
   current status. Status written from several places allowed double charges and dispatches, regressions from
   `analyzing` to `queued`, and jobs stuck in progress after a crashed worker.
-- **Charge when queued, refund at most once.** The atomic charge is the gate; charging only after success would let
-  concurrent requests pass a non-consuming check. The job stores the run it was charged for (`chargedRunId`); the
-  write that ends the run clears that field, and the pre-image of that write decides who refunds, by `$pull` of that
-  run, so exactly one caller refunds.
+- **Charge when queued, refund at most once, never lose a refund.** The atomic charge is the gate; charging only after
+  success would let concurrent requests pass a non-consuming check. The job records the run ids before charging and
+  keeps them until both refunds succeed, and every refund is idempotent per run id, so a crash or a transient error
+  anywhere leaves ids on an ended job for a later sweep, and two refunders can never take a run back twice. Clearing
+  the ids in the write that ended the run, as before, lost the refund to any failure after that write.
 - **Rolling quota window on the user document instead of a `quotas` collection.** The limit follows config;
   single-document atomicity; runs pruned to the window, so the document stays small; the runs go away with the
   account.

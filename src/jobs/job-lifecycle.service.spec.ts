@@ -43,7 +43,7 @@ const ANALYSIS: Analysis = {
     completedAt: '2026-09-29T10:00:00.000Z',
 }
 const CALL = buildModelCall()
-const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
+const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30, IP_FAILURE_REFUND_LIMIT: 1 }
 const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
 // JobLifecycle's own thresholds: a verification or an analysis idle for longer than these was abandoned.
 const VERIFY_STALE_MS = 10 * 60 * 1000
@@ -61,13 +61,12 @@ describe('JobLifecycle', () => {
 
     const usedRuns = async () => ((await users().findOne({ _id: new Types.ObjectId(USER) }))?.runs ?? []).length
 
-    const networkRuns = async () => {
-        const bucket = await mongo.connection
-            .collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
-            .findOne({ _id: NETWORK_CHARGE.bucketKey })
+    const network = () =>
+        mongo.connection.collection<IpQuotaDoc>(IP_QUOTA_COLLECTION).findOne({ _id: NETWORK_CHARGE.bucketKey })
 
-        return (bucket?.runs ?? []).length
-    }
+    const networkRuns = async () => ((await network())?.runs ?? []).length
+
+    const refundedFailures = async () => ((await network())?.refundedFailures ?? []).length
 
     const createJob = async (status = JobStatus.Pending, userId = USER): Promise<string> => {
         const job = await jobs.create({
@@ -235,6 +234,63 @@ describe('JobLifecycle', () => {
                 response: { errorCode: RequestErrorCode.QuotaExceeded },
             })
             expect(logError).toHaveBeenCalledWith(expect.stringContaining('network refund failed'))
+            expect((await findJob(jobId))?.chargedIpRunId).toEqual(expect.any(String))
+        })
+
+        it('refunds both runs before rethrowing when queueing the charged job fails', async () => {
+            const jobId = await claimJob()
+
+            jest.spyOn(jobs, 'findOneAndUpdate').mockImplementationOnce(() => {
+                throw new Error('write failed')
+            })
+
+            await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toThrow('write failed')
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Verifying,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('records the runs on the job before charging, so a refund that fails then is retried later', async () => {
+            const jobId = await claimJob()
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(jobs, 'findOneAndUpdate').mockImplementationOnce(() => {
+                throw new Error('write failed')
+            })
+            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+
+            await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toThrow('write failed')
+            expect((await findJob(jobId))?.chargedRunId).toEqual(expect.any(String))
+            expect(await usedRuns()).toBe(1)
+
+            // What the caller does next: the job goes back to pending, where the next sweep finds the charge.
+            await lifecycle.releaseVerification(jobId)
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('refunds what an earlier run of the job still holds before charging it again', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
+            await lifecycle.revertDispatch(jobId)
+            expect(await networkRuns()).toBe(1)
+
+            await lifecycle.claimForVerification(USER, jobId)
+            const queued = await lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)
+
+            expect(queued.status).toBe(JobStatus.Queued)
+            expect(await usedRuns()).toBe(1)
+            expect(await networkRuns()).toBe(1)
+            expect((await network())?.runs[0].id).toBe(queued.chargedIpRunId)
         })
 
         it('refunds both the user run and the network run when the job left verification meanwhile', async () => {
@@ -346,15 +402,78 @@ describe('JobLifecycle', () => {
             expect(await networkRuns()).toBe(1)
         })
 
-        it('still refunds the network run when refunding the user run fails', async () => {
+        it('still refunds the network run when refunding the user run fails, and keeps the user run to retry', async () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
             jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
 
-            await expect(lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')).rejects.toThrow(
-                'user refund failed',
-            )
+            expect(await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')).toBe(true)
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Error,
+                chargedRunId: expect.any(String),
+                chargedIpRunId: expect.any(String),
+            })
+            expect(await usedRuns()).toBe(1)
             expect(await networkRuns()).toBe(0)
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('keeps the charges of a job put back to pending until their refund succeeds', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
+
+            await lifecycle.revertDispatch(jobId)
+
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Pending,
+                chargedIpRunId: expect.any(String),
+            })
+            expect(await networkRuns()).toBe(1)
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+        })
+
+        it('refunds a run that failed after Gemini answered from the allowance once, even when retried', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'malformed', { isAfterModelAnswer: true })
+            expect(await usedRuns()).toBe(1)
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
+            expect(await refundedFailures()).toBe(1)
+        })
+
+        it('keeps both runs counted once the network used its refunds, and clears the job all the same', async () => {
+            const refunded = await queueJob(NETWORK_CHARGE)
+            const kept = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+            await lifecycle.fail(refunded, JobErrorCode.AnalysisFailed, 'malformed', { isAfterModelAnswer: true })
+            await lifecycle.fail(kept, JobErrorCode.AnalysisFailed, 'malformed', { isAfterModelAnswer: true })
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(kept)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(1)
+            expect(await networkRuns()).toBe(1)
         })
     })
 
@@ -398,6 +517,22 @@ describe('JobLifecycle', () => {
             expect(await usedRuns()).toBe(2)
         })
 
+        it('leaves the charges of in-flight and analyzed jobs alone', async () => {
+            const queued = await queueJob(NETWORK_CHARGE)
+            const analyzed = await queueJob(NETWORK_CHARGE)
+
+            await lifecycle.startAttempt(analyzed)
+            await lifecycle.complete(analyzed, ANALYSIS, CALL)
+
+            await lifecycle.expireStale(USER, NOW)
+            await lifecycle.refundOwedCharges()
+
+            expect((await findJob(queued))?.chargedRunId).toEqual(expect.any(String))
+            expect((await findJob(analyzed))?.chargedRunId).toEqual(expect.any(String))
+            expect(await usedRuns()).toBe(2)
+            expect(await networkRuns()).toBe(2)
+        })
+
         it("only expires the given user's jobs", async () => {
             const othersJob = await createJob(JobStatus.Verifying, OTHER_USER)
 
@@ -406,6 +541,32 @@ describe('JobLifecycle', () => {
             await lifecycle.expireStale(USER, NOW)
 
             expect((await findJob(othersJob))?.status).toBe(JobStatus.Verifying)
+        })
+    })
+
+    describe('the daily sweep of owed refunds', () => {
+        it("refunds every user's ended jobs that still hold charges, and counts them", async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisTimedOut, 'expired')
+
+            expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 1, failed: 0 })
+            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(0)
+            expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 0, failed: 0 })
+        })
+
+        it('counts a refund that fails again, and keeps its charges for the next sweep', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(quota, 'refund').mockRejectedValue(new Error('user refund failed'))
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisTimedOut, 'expired')
+
+            expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 0, failed: 1 })
+            expect((await findJob(jobId))?.chargedRunId).toEqual(expect.any(String))
         })
     })
 })

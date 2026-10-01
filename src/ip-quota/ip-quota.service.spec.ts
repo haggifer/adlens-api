@@ -127,6 +127,11 @@ describe('IpQuotaService', () => {
         expect((await buckets().findOne({ _id: NETWORK }))?.runs).toHaveLength(1)
     })
 
+    it('charges the run under the id the caller recorded for it', async () => {
+        expect(await ipQuota.charge(member(), 'job-1', NOW, 'run-1')).toBe('run-1')
+        expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual(['run-1'])
+    })
+
     it('refunds exactly the given run, found by its id alone', async () => {
         const kept = await ipQuota.charge(member(), 'job-1', NOW)
         const refunded = await ipQuota.charge(member(), 'job-2', NOW)
@@ -164,8 +169,35 @@ describe('IpQuotaService', () => {
         expect(await ipQuota.refundFailure(third, later)).toBe(true)
     })
 
-    it("refunds nothing for a run it can't find", async () => {
-        expect(await ipQuota.refundFailure('unknown-run', NOW)).toBe(false)
+    it("reports a run it can't find (refunded earlier, or out of the window) as no longer counted", async () => {
+        expect(await ipQuota.refundFailure('unknown-run', NOW)).toBe(true)
+        expect(await buckets().findOne({ _id: NETWORK })).toBeNull()
+    })
+
+    it('refunds a failed run once, however often it is asked, using one refund of the allowance', async () => {
+        const runId = await ipQuota.charge(member(), 'job-1', NOW)
+
+        expect(await ipQuota.refundFailure(runId, NOW)).toBe(true)
+        expect(await ipQuota.refundFailure(runId, NOW)).toBe(true)
+        expect((await buckets().findOne({ _id: NETWORK }))?.refundedFailures).toEqual([NOW])
+    })
+
+    it('keeps a run it refused to refund counted, even once the allowance frees up', async () => {
+        const later = new Date(NOW.getTime() + QUOTA_WINDOW_MS - 1)
+        const [first, second, third] = [
+            await ipQuota.charge(member(), 'job-1', NOW),
+            await ipQuota.charge(member(), 'job-2', NOW),
+            await ipQuota.charge(member(), 'job-3', later),
+        ]
+
+        await ipQuota.refundFailure(first, NOW)
+        await ipQuota.refundFailure(second, NOW)
+        expect(await ipQuota.refundFailure(third, later)).toBe(false)
+
+        const afterAllowanceFreed = new Date(NOW.getTime() + QUOTA_WINDOW_MS + 1)
+
+        expect(await ipQuota.refundFailure(third, afterAllowanceFreed)).toBe(false)
+        expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([third])
     })
 
     it('pushes the expiry out with every charge', async () => {

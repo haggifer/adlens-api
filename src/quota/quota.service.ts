@@ -26,12 +26,18 @@ export class QuotaService {
         return this.connection.collection<UserExtras>(USER_COLLECTION)
     }
 
-    // Charges one run for the job and returns the run's id. One conditional update on the user's document counts the
-    // runs of the last window, drops older ones and appends the new run, so concurrent calls can't overdraw. An
-    // admin's charge always matches: their runs are counted but never capped.
-    async consume(userId: string, jobId: string, now = new Date()): Promise<string> {
+    // Charges one run for the job and returns the run's id: the one the job recorded before charging, when given. One
+    // conditional update on the user's document counts the runs of the last window, drops older ones and appends the
+    // new run, so concurrent calls can't overdraw. An admin's charge always matches: their runs are counted but never
+    // capped.
+    async consume(
+        userId: string,
+        jobId: string,
+        now = new Date(),
+        runId = new Types.ObjectId().toString(),
+    ): Promise<string> {
         const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
-        const run: QuotaRun = { id: new Types.ObjectId().toString(), startedAt: now, jobId }
+        const run: QuotaRun = { id: runId, startedAt: now, jobId }
         const charged = await this.users.findOneAndUpdate(
             {
                 _id: new Types.ObjectId(userId),
