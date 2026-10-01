@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { OnGatewayConnection, WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
 import type { Job } from 'adlens-shared'
@@ -19,32 +20,46 @@ const roomOf = (userId: string) => `user:${userId}`
 @WebSocketGateway()
 export class JobsGateway implements OnGatewayConnection {
     @WebSocketServer() private readonly server: Server
+    private readonly logger = new Logger(JobsGateway.name)
 
     constructor(
         private readonly auth: AuthService,
         @InjectModel(JOB_MODEL) private readonly jobs: Model<JobDoc>,
     ) {}
 
+    // Nest doesn't await this, so a rejection here would be unhandled and end the process.
     async handleConnection(client: Socket): Promise<void> {
+        try {
+            const isAdmitted = await this.admit(client)
+
+            if (!isAdmitted) {
+                client.disconnect(true)
+            }
+        } catch (err) {
+            this.logger.error(`socket handshake failed: ${err instanceof Error ? err.message : String(err)}`)
+            client.disconnect(true)
+        }
+    }
+
+    // Joins before checking: an update published before the join can't reach the socket, so checking afterwards
+    // guarantees a socket that stays sees the job's next update. The room count then includes this socket.
+    private async admit(client: Socket): Promise<boolean> {
         const userId = await this.auth.getUserId(client.handshake.headers)
 
         if (!userId) {
-            client.disconnect(true)
-            return
+            return false
         }
 
         const room = roomOf(userId)
+
+        await client.join(room)
+
         const [isRunning, sockets] = await Promise.all([
             this.hasJobInProgress(userId),
             this.server.in(room).fetchSockets(),
         ])
 
-        if (!isRunning || sockets.length >= MAX_SOCKETS_PER_USER) {
-            client.disconnect(true)
-            return
-        }
-
-        await client.join(room)
+        return isRunning && sockets.length <= MAX_SOCKETS_PER_USER
     }
 
     // A closing socket sends what it has buffered first, so the update that ends the last running job still arrives.

@@ -18,12 +18,6 @@ interface FakeClient {
     disconnect: jest.Mock
 }
 
-const createClient = (): FakeClient => ({
-    handshake: { headers: { cookie: 'session' } },
-    join: jest.fn(async () => undefined),
-    disconnect: jest.fn(),
-})
-
 describe('JobsGateway', () => {
     let mongo: MemoryMongo
     let jobs: Model<JobDoc>
@@ -47,9 +41,19 @@ describe('JobsGateway', () => {
             chargedIpRunId: null,
         })
 
-    const connect = async () => {
-        const client = createClient()
+    const createClient = (): FakeClient => {
+        const client: FakeClient = {
+            handshake: { headers: { cookie: 'session' } },
+            join: jest.fn(async () => {
+                socketsInRoom.push(client)
+            }),
+            disconnect: jest.fn(),
+        }
 
+        return client
+    }
+
+    const connect = async (client = createClient()) => {
         await gateway.handleConnection(client as unknown as Socket)
 
         return client
@@ -89,7 +93,22 @@ describe('JobsGateway', () => {
 
             const client = await connect()
 
-            expect(client.join).not.toHaveBeenCalled()
+            expect(client.disconnect).toHaveBeenCalledWith(true)
+        })
+
+        it('checks for a running job only after joining, so the update that ends it is never missed', async () => {
+            const job = await createJob(JobStatus.Analyzing)
+            const client = createClient()
+
+            // The final update is published while the socket is joining: it can't reach the socket, so the socket
+            // must see the finished job and leave instead of waiting in the room forever.
+            client.join.mockImplementation(async () => {
+                socketsInRoom.push(client)
+                await jobs.updateOne({ _id: job._id }, { status: JobStatus.Analyzed })
+            })
+
+            await connect(client)
+
             expect(client.disconnect).toHaveBeenCalledWith(true)
         })
 
@@ -108,8 +127,33 @@ describe('JobsGateway', () => {
 
             const client = await connect()
 
-            expect(client.join).not.toHaveBeenCalled()
             expect(client.disconnect).toHaveBeenCalledWith(true)
+        })
+
+        it('lets in the last socket the per-user limit allows', async () => {
+            await createJob(JobStatus.Queued)
+            socketsInRoom = Array.from({ length: MAX_SOCKETS_PER_USER - 1 }, () => ({}))
+
+            const client = await connect()
+
+            expect(client.disconnect).not.toHaveBeenCalled()
+        })
+
+        it('closes the socket instead of crashing the process when the session lookup fails', async () => {
+            auth.getUserId.mockRejectedValue(new Error('database unavailable'))
+
+            const client = await connect()
+
+            expect(client.disconnect).toHaveBeenCalledWith(true)
+        })
+
+        it('closes the socket instead of crashing the process when the job lookup fails', async () => {
+            const exists = jest.spyOn(jobs, 'exists').mockRejectedValueOnce(new Error('database unavailable'))
+
+            const client = await connect()
+
+            expect(client.disconnect).toHaveBeenCalledWith(true)
+            exists.mockRestore()
         })
     })
 
