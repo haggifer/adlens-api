@@ -18,7 +18,6 @@
         "test": "jest",
         "test:e2e": "jest --config test/jest-e2e.json",
         "test:auth": "node --test test/auth-flow.test.mjs",
-        "check:deps": "node scripts/check-no-file-deps.mjs",
         "rules:publish": "ts-node --transpile-only scripts/publish-ruleset.ts",
         "rules:summary": "ts-node --transpile-only scripts/summarize-ruleset.ts",
         "samples:publish": "ts-node --transpile-only scripts/publish-sample.ts"

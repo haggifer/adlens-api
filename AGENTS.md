@@ -49,7 +49,7 @@ npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a s
 - Clients only ever receive the public job shape from `jobs/job.mapper.ts`; owner, storage path, execution and
   accounting fields stay server-side.
 - The request, response and error shapes come from `adlens-shared`. Change the contract there first, publish it, then
-  bump the exact pin here. Never commit a `file:` dependency (`npm run check:deps` fails on it).
+  bump the exact pin here. Never commit a `file:` dependency.
 - All configuration goes through the Zod schema in `src/config/env.ts`. Tests set `NODE_ENV=test`, which stops env
   files from loading, so tests can never reach a real database or bucket.
 - Production secrets go in the `API_SECRETS` Secret Manager bundle, via `infra/setup.sh` (put the key in the git-ignored

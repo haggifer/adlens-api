@@ -306,7 +306,7 @@ Set `"isPublished": false` and publish again to hide a sample.
 src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs, analysis, rules, quota,
             ip-quota, challenge, auth, account, mail, storage, realtime, database, config
 test/       e2e (Supertest) and auth-flow tests
-scripts/    ruleset publishing, dependency guard
+scripts/    ruleset and sample publishing
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule
 ```
 
