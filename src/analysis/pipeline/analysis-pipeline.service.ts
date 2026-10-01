@@ -72,7 +72,7 @@ export class AnalysisPipeline {
             this.logger.error(`job ${jobId} failed: ${detail}`)
             // A kept mark means a call that may have been billed (answered, timed out, dropped, failed unknowably, or
             // made by an earlier attempt), so its refund counts against the network's allowance however it failed.
-            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail, { isAfterModelAnswer: mark.isKept })
+            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail, { isPossiblyBilled: mark.isKept })
 
             return 'failed'
         }

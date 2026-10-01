@@ -446,13 +446,13 @@ describe('JobLifecycle', () => {
             expect(await networkRuns()).toBe(0)
         })
 
-        it('refunds a run that failed after Gemini answered from the allowance once, even when retried', async () => {
+        it('refunds a run that failed after a possibly billed call from the allowance once, even when retried', async () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 
             jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
             jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
 
-            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'malformed', { isAfterModelAnswer: true })
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'malformed', { isPossiblyBilled: true })
             expect(await usedRuns()).toBe(1)
 
             await lifecycle.expireStale(USER, NOW)
@@ -468,8 +468,8 @@ describe('JobLifecycle', () => {
             const kept = await queueJob(NETWORK_CHARGE)
 
             jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-            await lifecycle.fail(refunded, JobErrorCode.AnalysisFailed, 'malformed', { isAfterModelAnswer: true })
-            await lifecycle.fail(kept, JobErrorCode.AnalysisFailed, 'malformed', { isAfterModelAnswer: true })
+            await lifecycle.fail(refunded, JobErrorCode.AnalysisFailed, 'malformed', { isPossiblyBilled: true })
+            await lifecycle.fail(kept, JobErrorCode.AnalysisFailed, 'malformed', { isPossiblyBilled: true })
             await lifecycle.expireStale(USER, NOW)
 
             expect(await findJob(kept)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })

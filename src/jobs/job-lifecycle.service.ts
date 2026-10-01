@@ -41,9 +41,9 @@ const recordCall = (call: ModelCall) => ({
 })
 
 export interface FailOptions {
-    // The job kept the Gemini call mark, so a call may have been billed: the refund then counts against the network's
-    // allowance of them.
-    isAfterModelAnswer?: boolean
+    // The job kept the Gemini call mark, so a call may have been billed, whether or not it answered: the refund then
+    // counts against the network's allowance of refunded failures.
+    isPossiblyBilled?: boolean
 }
 
 export interface ExpirySweepResult {
@@ -189,12 +189,12 @@ export class JobLifecycle {
         jobId: string,
         errorCode: JobErrorCode,
         detail: string,
-        { isAfterModelAnswer = false }: FailOptions = {},
+        { isPossiblyBilled = false }: FailOptions = {},
     ): Promise<boolean> {
         return this.settle(
             { _id: jobId, status: { $in: IN_FLIGHT } },
             { status: JobStatus.Error, errorCode, errorDetail: detail },
-            isAfterModelAnswer,
+            isPossiblyBilled,
         )
     }
 
