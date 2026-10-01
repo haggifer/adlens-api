@@ -10,6 +10,7 @@ import {
     VideoMimeType,
 } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
+import { UserAccess } from '../common/user-access'
 import { IP_QUOTA_COLLECTION, IP_QUOTA_MODEL, type IpQuotaDoc, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
@@ -44,7 +45,7 @@ const ANALYSIS: Analysis = {
 }
 const CALL = buildModelCall()
 const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30, IP_FAILURE_REFUND_LIMIT: 1 }
-const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
+const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', access: UserAccess.Member, hasPassedChallenge: false }
 // JobLifecycle's own thresholds: a verification or an analysis idle for longer than these was abandoned.
 const VERIFY_STALE_MS = 10 * 60 * 1000
 const ANALYSIS_STALE_MS = 60 * 60 * 1000

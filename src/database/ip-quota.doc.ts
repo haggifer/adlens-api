@@ -13,6 +13,7 @@ export const ipQuotaDocSchema = z.object({
             id: z.string(),
             startedAt: z.date(),
             jobId: z.string(),
+            // Counted against the network's anonymous allowance: an anonymous user's or an unconfirmed account's.
             anonymous: z.boolean(),
             // Set when the run's analysis failed after Gemini answered and the network had no refunds of those left.
             isRefundRefused: z.boolean().optional(),

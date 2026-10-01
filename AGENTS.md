@@ -79,6 +79,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - Better Auth only rate-limits when `NODE_ENV` is `production`; `test:auth` switches it on for single tests through
   `auth.$context` (`withRateLimits`).
 - With `ANALYZE_LOCAL=1` the API spawns `node dist/worker`, so `dist/` must be built.
+- A user document without `emailVerified: true` is an unconfirmed account, limited like an anonymous user
+  (`getUserAccess`), so a test member needs `emailVerified: true`.
 - The e2e suite sets `BETTER_AUTH_SECRET` in `test/global-setup.ts`: the network key is derived from it. It fakes the
   Turnstile verifier (`'pass'` passes), and `X-Forwarded-For` picks each test's network.
 - A Better Auth index that fails to build only logs `could not create the Better Auth index <name>` at startup. After

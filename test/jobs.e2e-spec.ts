@@ -12,6 +12,7 @@ import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
 import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
+import { UserAccess } from '../src/common/user-access'
 import { CONTACT_MESSAGE_MODEL, type ContactMessageDoc } from '../src/database/contact-message.doc'
 import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
@@ -103,6 +104,7 @@ describe('Jobs API (e2e)', () => {
                 [OWNER, STRANGER, SAMPLER, DELETER, PAGER].map((id) => ({
                     _id: new Types.ObjectId(id),
                     email: `${id}@example.com`,
+                    emailVerified: true,
                 })),
             )
     })
@@ -558,10 +560,24 @@ describe('Jobs API (e2e)', () => {
     })
 
     describe('analysis without an account and the network limits', () => {
-        const ANON = new Types.ObjectId().toString()
         const MEMBER = new Types.ObjectId().toString()
         const ADMIN = new Types.ObjectId().toString()
         const LIMITED = new Types.ObjectId().toString()
+
+        const addUser = async (fields: Record<string, unknown>): Promise<string> => {
+            const _id = new Types.ObjectId()
+
+            await app
+                .get<Connection>(getConnectionToken())
+                .collection(USER_COLLECTION)
+                .insertOne({ _id, email: `${_id.toString()}@example.com`, ...fields })
+
+            return _id.toString()
+        }
+
+        // A fresh one per test, so no test spends another's analyses.
+        const addAnonymous = () => addUser({ isAnonymous: true, emailVerified: false })
+        const addUnconfirmed = () => addUser({ isAnonymous: false, emailVerified: false })
 
         // The client's own entry comes first; the rightmost one is what Google's front end appends.
         const from = (network: string) => ({ 'x-forwarded-for': `198.51.100.99, ${network}` })
@@ -582,11 +598,11 @@ describe('Jobs API (e2e)', () => {
 
         const usage = (network: string) => app.get(IpQuotaService).usage(networkKey(network))
 
-        const seedNetwork = async (network: string, runs: number, isAnonymous = false) => {
+        const seedNetwork = async (network: string, runs: number, access = UserAccess.Member) => {
             const bucketKey = networkKey(network)
 
             for (let i = 0; i < runs; i++) {
-                await app.get(IpQuotaService).charge({ bucketKey, isAnonymous, hasPassedChallenge: true }, `seed-${i}`)
+                await app.get(IpQuotaService).charge({ bucketKey, access, hasPassedChallenge: true }, `seed-${i}`)
             }
         }
 
@@ -595,42 +611,41 @@ describe('Jobs API (e2e)', () => {
                 .get<Connection>(getConnectionToken())
                 .collection(USER_COLLECTION)
                 .insertMany([
-                    {
-                        _id: new Types.ObjectId(ANON),
-                        email: `${ANON}@anonymous.placeholder.invalid`,
-                        isAnonymous: true,
-                    },
-                    { _id: new Types.ObjectId(MEMBER), email: 'member@example.com' },
-                    { _id: new Types.ObjectId(ADMIN), email: 'admin@example.com', isAdmin: true },
+                    { _id: new Types.ObjectId(MEMBER), email: 'member@example.com', emailVerified: true },
+                    { _id: new Types.ObjectId(ADMIN), email: 'admin@example.com', isAdmin: true, emailVerified: true },
                     {
                         _id: new Types.ObjectId(LIMITED),
                         email: 'limited@example.com',
+                        emailVerified: true,
                         runs: [0, 1, 2].map((i) => ({ id: `run-${i}`, startedAt: new Date(), jobId: `job-${i}` })),
                     },
                 ])
         })
 
         it('lets an anonymous user analyze once the challenge passes, checking it with their address', async () => {
-            const created = await createFrom(ANON, '203.0.113.1', { challengeToken: 'pass' }).expect(201)
+            const anonymous = await addAnonymous()
+            const created = await createFrom(anonymous, '203.0.113.1', { challengeToken: 'pass' }).expect(201)
 
-            await analyzeFrom(ANON, '203.0.113.1', created.body.job.id).expect(202)
+            await analyzeFrom(anonymous, '203.0.113.1', created.body.job.id).expect(202)
 
             expect(verifyChallenge).toHaveBeenCalledWith('pass', '203.0.113.1')
             expect(await usage('203.0.113.1')).toEqual({ total: 1, anonymous: 1 })
         })
 
         it('asks an anonymous user for the challenge and refuses a failed one', async () => {
-            const missing = await createFrom(ANON, '203.0.113.2').expect(403)
-            const failed = await createFrom(ANON, '203.0.113.2', { challengeToken: 'fail' }).expect(403)
+            const anonymous = await addAnonymous()
+            const missing = await createFrom(anonymous, '203.0.113.2').expect(403)
+            const failed = await createFrom(anonymous, '203.0.113.2', { challengeToken: 'fail' }).expect(403)
 
             expect(missing.body.errorCode).toBe(RequestErrorCode.ChallengeRequired)
             expect(failed.body.errorCode).toBe(RequestErrorCode.ChallengeFailed)
         })
 
         it('checks a sample job before looking the sample up', async () => {
+            const anonymous = await addAnonymous()
             const res = await request(app.getHttpServer())
                 .post('/v1/jobs/from-sample')
-                .set({ ...as(ANON), ...from('203.0.113.2') })
+                .set({ ...as(anonymous), ...from('203.0.113.2') })
                 .send({ sampleId: '64b000000000000000000000', settings: SETTINGS })
                 .expect(403)
 
@@ -638,12 +653,33 @@ describe('Jobs API (e2e)', () => {
         })
 
         it('asks for sign-up once the network used its anonymous analyses, but lets members in', async () => {
-            await seedNetwork('203.0.113.3', 3, true)
+            await seedNetwork('203.0.113.3', 3, UserAccess.Anonymous)
 
-            const anonymous = await createFrom(ANON, '203.0.113.3', { challengeToken: 'pass' }).expect(429)
+            const anonymous = await createFrom(await addAnonymous(), '203.0.113.3', { challengeToken: 'pass' }).expect(
+                429,
+            )
 
             await createFrom(MEMBER, '203.0.113.3').expect(201)
             expect(anonymous.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+        })
+
+        it('always asks an unconfirmed account for the challenge, and counts its analysis as anonymous', async () => {
+            const unconfirmed = await addUnconfirmed()
+            const missing = await createFrom(unconfirmed, '203.0.113.10').expect(403)
+            const created = await createFrom(unconfirmed, '203.0.113.10', { challengeToken: 'pass' }).expect(201)
+
+            await analyzeFrom(unconfirmed, '203.0.113.10', created.body.job.id).expect(202)
+
+            expect(missing.body.errorCode).toBe(RequestErrorCode.ChallengeRequired)
+            expect(await usage('203.0.113.10')).toEqual({ total: 1, anonymous: 1 })
+        })
+
+        it('asks an unconfirmed account to confirm its email once the network used its anonymous analyses', async () => {
+            await seedNetwork('203.0.113.11', 3, UserAccess.Anonymous)
+
+            const res = await createFrom(await addUnconfirmed(), '203.0.113.11', { challengeToken: 'pass' }).expect(429)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
         })
 
         it('asks everyone for the challenge once the network passes the soft limit', async () => {

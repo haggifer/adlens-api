@@ -1,5 +1,6 @@
 import { JobErrorCode, JobStatus, Market, Platform, RulePlatform, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
+import { UserAccess } from '../../common/user-access'
 import { IP_QUOTA_COLLECTION, type IpQuotaDoc } from '../../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../../database/job.doc'
 import { USER_COLLECTION } from '../../database/user.doc'
@@ -19,7 +20,7 @@ import { buildModelCall, usageOf } from '../../testing/model-call'
 
 const USER = new Types.ObjectId().toString()
 const CALL = buildModelCall()
-const NETWORK: IpCharge = { bucketKey: 'network-key', isAnonymous: false, hasPassedChallenge: false }
+const NETWORK: IpCharge = { bucketKey: 'network-key', access: UserAccess.Member, hasPassedChallenge: false }
 
 const cutOff = () => new ModelAnswerError('The model output was cut off at the token limit', CALL)
 

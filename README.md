@@ -108,12 +108,15 @@ with `input: false`, so sign-up and profile updates can't set it.
 
 ## Abuse limits
 
-Anyone can analyze without signing up, so free runs are bounded per network as well as per user:
+Anyone can analyze without signing up, so free runs are bounded per network as well as per user. An account that
+hasn't confirmed its email (`emailVerified` false on its user document, read by
+[`getUserAccess`](src/common/user-access.ts)) meets every rule of an anonymous user, and is asked to confirm its
+email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign up (`SIGN_UP_REQUIRED`):
 
 | Rule | Limit per rolling 7 days | When hit |
 | --- | --- | --- |
 | Per user (anonymous or not) | `QUOTA_LIMIT` (3) | 429 `QUOTA_EXCEEDED` |
-| Anonymous users per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` |
+| Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
 | Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
 | Refunded failures after Gemini answered, per network | `IP_FAILURE_REFUND_LIMIT` (3) | the failed run stays counted, for the user and the network |
@@ -124,7 +127,7 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   ([`ClientNetworkResolver`](src/ip-quota/client-network.resolver.ts)). Each lookup logs only the header's entry count.
 - **Storage** ([`IpQuotaService`](src/ip-quota/ip-quota.service.ts)): one `ip_quotas` document per network, keyed by
   `HMAC-SHA256(key, network)`, the key derived from `BETTER_AUTH_SECRET` with HKDF. It holds
-  `runs: { id, startedAt, jobId, anonymous }[]` and a TTL `expiresAt` 7 days after the last charge. The address itself
+  `runs: { id, startedAt, jobId, anonymous }[]` (`anonymous`: counted against the anonymous allowance) and a TTL `expiresAt` 7 days after the last charge. The address itself
   is never stored or logged. A charge is one conditional pipeline update, as for the user quota; a refund is `$pull`
   by run id, found through an index on `runs.id`, so the worker needs no key.
 - **Order** ([`AnalysisAdmission`](src/jobs/analysis-admission.service.ts)): `POST /v1/jobs` and `/from-sample` check
@@ -142,9 +145,9 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
   attempt would be billed again, and its tokens are added to the job's `usage`. A job whose earlier attempt may have
   been billed (`modelCallStartedAt` set: the call timed out, lost its connection or got an answer) fails the same way.
 - **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web runs the check when an analysis
-  starts, for visitors without an account, and sends its token with the job creation; members send none unless the
+  starts, for visitors without a confirmed account, and sends its token with the job creation; members send none unless the
   API answers `CHALLENGE_REQUIRED`, after which the web runs the check and creates the job again. The API calls Cloudflare's `siteverify` only when a rule
-  asks for it (always for anonymous users), ignores a token no rule needs, and records `hasPassedChallenge` on the job
+  asks for it (always for anonymous users and unconfirmed accounts), ignores a token no rule needs, and records `hasPassedChallenge` on the job
   for analyze. Without `TURNSTILE_SECRET_KEY` a required check never passes.
   A network that crosses the soft limit between creating and analyzing a job made without the check gets
   `CHALLENGE_REQUIRED` at analyze, and the user starts again.
@@ -177,8 +180,9 @@ Anyone can analyze without signing up, so free runs are bounded per network as w
 - **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
   `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
 - **Unconfirmed accounts sign in.** Sign-up signs the user in straight away and mails a confirmation link, and an
-  unconfirmed account can sign in again. Until it confirms its email (`emailVerified` on the user document) it can't
-  link a provider, but unlike an anonymous user it's never deleted for inactivity. A sign-up with an address
+  unconfirmed account can sign in again. Until it confirms its email (`emailVerified` on the user document) it's
+  limited like an anonymous user (see [Abuse limits](#abuse-limits)) and can't link a provider, but unlike an
+  anonymous user it's never deleted for inactivity. A sign-up with an address
   already registered answers Better Auth's 422 "user already exists": accepted, since signing in at sign-up can't
   hide it.
 - **Google and GitHub sign-in** (OAuth, callbacks on this API: `/api/auth/callback/{google,github}`). A provider is
@@ -336,7 +340,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `ANALYZE_LOCAL`          | `0`                     | `1`: run each analysis as a local `node dist/worker` child process          |
 | `ANALYZE_MAX_RETRIES`    | `2`                     | Must equal the job's `--max-retries`, so the worker knows its last attempt  |
 | `QUOTA_LIMIT`            | `3`                     | Analyses per rolling 7-day window                                           |
-| `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users per network in a rolling 7-day window           |
+| `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window |
 | `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
 | `IP_FAILURE_REFUND_LIMIT`| `3`                     | Refunds per network of analyses that failed after Gemini answered           |

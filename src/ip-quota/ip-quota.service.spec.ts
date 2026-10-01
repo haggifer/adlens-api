@@ -1,5 +1,6 @@
 import { HttpStatus } from '@nestjs/common'
 import { QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
+import { UserAccess } from '../common/user-access'
 import { IP_QUOTA_COLLECTION, IP_QUOTA_MODEL, type IpQuotaDoc, IpQuotaSchema } from '../database/ip-quota.doc'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
@@ -12,13 +13,16 @@ const NETWORK = 'network-key'
 
 const member = (overrides: Partial<IpCharge> = {}): IpCharge => ({
     bucketKey: NETWORK,
-    isAnonymous: false,
+    access: UserAccess.Member,
     hasPassedChallenge: false,
     ...overrides,
 })
 
 const anonymous = (overrides: Partial<IpCharge> = {}): IpCharge =>
-    member({ isAnonymous: true, hasPassedChallenge: true, ...overrides })
+    member({ access: UserAccess.Anonymous, hasPassedChallenge: true, ...overrides })
+
+const unconfirmed = (overrides: Partial<IpCharge> = {}): IpCharge =>
+    member({ access: UserAccess.Unconfirmed, hasPassedChallenge: true, ...overrides })
 
 describe('IpQuotaService', () => {
     let mongo: MemoryMongo
@@ -68,6 +72,26 @@ describe('IpQuotaService', () => {
             response: { errorCode: RequestErrorCode.SignUpRequired },
         })
         await expect(ipQuota.charge(member(), 'job-member', NOW)).resolves.toEqual(expect.any(String))
+    })
+
+    it("counts unconfirmed accounts' runs against the anonymous allowance, and asks them to confirm at its end", async () => {
+        await chargeTimes(LIMITS.IP_ANON_LIMIT - 1, anonymous())
+        await ipQuota.charge(unconfirmed(), 'job-unconfirmed', NOW)
+
+        expect(await ipQuota.usage(NETWORK, NOW)).toEqual({
+            total: LIMITS.IP_ANON_LIMIT,
+            anonymous: LIMITS.IP_ANON_LIMIT,
+        })
+        await expect(ipQuota.charge(unconfirmed(), 'job-extra', NOW)).rejects.toMatchObject({
+            status: HttpStatus.TOO_MANY_REQUESTS,
+            response: { errorCode: RequestErrorCode.EmailConfirmationRequired },
+        })
+    })
+
+    it('never charges an unconfirmed account that has not passed a challenge', async () => {
+        await expect(ipQuota.charge(unconfirmed({ hasPassedChallenge: false }), 'job-1', NOW)).rejects.toMatchObject({
+            response: { errorCode: RequestErrorCode.ChallengeRequired },
+        })
     })
 
     it("doesn't count members' runs against the anonymous allowance", async () => {

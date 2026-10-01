@@ -4,6 +4,7 @@ import { InjectConnection } from '@nestjs/mongoose'
 import { QUOTA_WINDOW_MS } from 'adlens-shared'
 import { type Connection, Types } from 'mongoose'
 import { countedRuns } from '../common/counted-runs'
+import { isProvisional } from '../common/user-access'
 import type { Env } from '../config/env'
 import { IP_QUOTA_COLLECTION, type IpQuotaDoc, type IpRun } from '../database/ip-quota.doc'
 import { checkIpRules, type IpCharge, type IpLimits, type IpUsage, IpVerdict, toIpRefusal } from './ip-rules'
@@ -58,13 +59,15 @@ export class IpQuotaService {
         now = new Date(),
         runId = new Types.ObjectId().toString(),
     ): Promise<string> {
-        if (charge.isAnonymous && !charge.hasPassedChallenge) {
-            throw toIpRefusal(IpVerdict.NeedsChallenge)
+        const isLimited = isProvisional(charge.access)
+
+        if (isLimited && !charge.hasPassedChallenge) {
+            throw toIpRefusal(IpVerdict.NeedsChallenge, charge.access)
         }
 
         const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
         const expiresAt = new Date(now.getTime() + QUOTA_WINDOW_MS)
-        const run: IpRun = { id: runId, startedAt: now, jobId, anonymous: charge.isAnonymous }
+        const run: IpRun = { id: runId, startedAt: now, jobId, anonymous: isLimited }
 
         await this.ensureBucket(charge.bucketKey, expiresAt)
 
@@ -76,7 +79,7 @@ export class IpQuotaService {
         if (!charged) {
             const usage = await this.usage(charge.bucketKey, now)
 
-            throw toIpRefusal(checkIpRules(usage, charge.isAnonymous, this.limits))
+            throw toIpRefusal(checkIpRules(usage, charge.access, this.limits), charge.access)
         }
 
         return run.id
@@ -121,10 +124,10 @@ export class IpQuotaService {
         return refused.matchedCount === 0
     }
 
-    private admits({ isAnonymous, hasPassedChallenge }: IpCharge, cutoff: Date): object[] {
+    private admits({ access, hasPassedChallenge }: IpCharge, cutoff: Date): object[] {
         const conditions: object[] = [{ $lt: [{ $size: countedRuns(cutoff) }, this.limits.hard] }]
 
-        if (isAnonymous) {
+        if (isProvisional(access)) {
             conditions.push({ $lt: [{ $size: countedAnonymousRuns(cutoff) }, this.limits.anonymous] })
         }
 
