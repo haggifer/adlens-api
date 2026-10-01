@@ -22,9 +22,15 @@ export interface RunAttempt {
     isLast: boolean
 }
 
+// Whether the job holds the Gemini call mark: from the moment an attempt sets it (or finds it set by an earlier one)
+// until a refusal clears it.
+interface CallMark {
+    isKept: boolean
+}
+
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
-// attempt; any other failure ends the job in `error` with its charge refunded (after an answer from Gemini, only
-// while the network has refunds of those left), and the process exits cleanly. A job is never billed twice: Gemini is
+// attempt; any other failure ends the job in `error` with its charge refunded (after a call that may have been
+// billed, only while the network has refunds of those left), and the process exits cleanly. A job is never billed twice: Gemini is
 // called at most once per job, unless Vertex refused the call with an HTTP error status.
 @Injectable()
 export class AnalysisPipeline {
@@ -44,8 +50,10 @@ export class AnalysisPipeline {
             return 'skipped'
         }
 
+        const mark: CallMark = { isKept: false }
+
         try {
-            const { analysis, call } = await this.analyze(job)
+            const { analysis, call } = await this.analyze(job, mark)
             const isCompleted = await this.lifecycle.complete(jobId, analysis, call)
 
             return isCompleted ? 'analyzed' : 'skipped'
@@ -61,17 +69,16 @@ export class AnalysisPipeline {
                 throw err
             }
 
-            // An earlier attempt's call may have been billed even though this attempt never got its answer.
-            const isAfterModelAnswer = err instanceof ModelAnswerError || err instanceof ModelCallRepeatedError
-
             this.logger.error(`job ${jobId} failed: ${detail}`)
-            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail, { isAfterModelAnswer })
+            // A kept mark means a call that may have been billed (answered, timed out, dropped, failed unknowably, or
+            // made by an earlier attempt), so its refund counts against the network's allowance however it failed.
+            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail, { isAfterModelAnswer: mark.isKept })
 
             return 'failed'
         }
     }
 
-    private async analyze(job: StoredJob): Promise<{ analysis: Analysis; call: ModelCall }> {
+    private async analyze(job: StoredJob, mark: CallMark): Promise<{ analysis: Analysis; call: ModelCall }> {
         if (!job.media) {
             throw new Error('Job has no verified media')
         }
@@ -80,6 +87,8 @@ export class AnalysisPipeline {
         const selected = selectRules(ruleSet, job.settings)
         const jobId = job._id.toString()
         const isMarked = await this.lifecycle.markModelCall(jobId)
+
+        mark.isKept = true
 
         if (!isMarked) {
             throw new ModelCallRepeatedError()
@@ -101,6 +110,7 @@ export class AnalysisPipeline {
             // generated, and billed, an answer, so the mark stays and no attempt calls again.
             if (isRefusedCall(err)) {
                 await this.lifecycle.clearModelCall(jobId)
+                mark.isKept = false
             }
 
             throw err

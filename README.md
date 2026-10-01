@@ -141,7 +141,9 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
   most once and never lost.
 - **Failed analyses**: a failure before the Gemini call, a call Vertex refused with an HTTP error status, and a stuck
   worker are always refunded. Once Gemini has answered, the call is billed even when the answer can't be used (cut
-  off, blocked or malformed), so such a failure is refunded only while the network has refunds of those left
+  off, blocked or malformed), and a call that timed out, lost its connection or failed unknowably may have been
+  billed too. So any failure while the job keeps the call mark (`modelCallStartedAt`, cleared only after a refusal),
+  on whichever attempt, is refunded only while the network has refunds of those left
   (`IpQuotaService.refundFailure`, one conditional update that records the refund's time in `refundedFailures`);
   otherwise both runs stay counted, and the run is marked so a retry gives the same answer. The job keeps
   `isRefundCapped` with its charges until they are settled, so a retried refund is capped the same way. Without the

@@ -316,6 +316,50 @@ describe('AnalysisPipeline', () => {
         expect(await usedByNetwork()).toBe(0)
     })
 
+    describe('a call that may have been billed counts against the refunded failures, however it failed', () => {
+        const refundedFailures = async () =>
+            (await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures ?? []
+
+        it('a call that timed out on the last attempt', async () => {
+            const jobId = await queueJob(NETWORK)
+
+            reviewer.next = () => Promise.reject(timedOut())
+
+            expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
+            expect(await refundedFailures()).toHaveLength(1)
+        })
+
+        it('an unknown failure of the call', async () => {
+            const jobId = await queueJob(NETWORK)
+
+            reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
+
+            expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+            expect(await refundedFailures()).toHaveLength(1)
+        })
+
+        it('a failure to store the answer on the last attempt', async () => {
+            const jobId = await queueJob(NETWORK)
+
+            jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(mongoBlip())
+
+            expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
+            expect(await refundedFailures()).toHaveLength(1)
+        })
+
+        it('but not a call Vertex refused, nor a failure before the call', async () => {
+            reviewer.next = () => Promise.reject(overloaded())
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+
+            jest.spyOn(lifecycle, 'markModelCall').mockRejectedValueOnce(new Error('mark failed'))
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+
+            expect(await refundedFailures()).toHaveLength(0)
+            expect(await used()).toBe(0)
+            expect(await usedByNetwork()).toBe(0)
+        })
+    })
+
     it("doesn't store a result for a job that expired while it was analyzed", async () => {
         const jobId = await queueJob()
         const review = reviewer.next
