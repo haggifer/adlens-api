@@ -16,7 +16,8 @@
             "Content-Range",
             "Accept-Ranges",
             "Range",
-            "x-goog-content-length-range"
+            "x-goog-content-length-range",
+            "x-goog-if-generation-match"
         ],
         "maxAgeSeconds": 3600
     }
