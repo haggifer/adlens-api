@@ -106,7 +106,9 @@ describe('Jobs API (e2e)', () => {
 
         app = moduleRef.createNestApplication()
         app.useGlobalFilters(new ApiExceptionFilter())
-        await app.init()
+        // Listening once for the whole suite: given a server that isn't listening, supertest starts it for each request
+        // and closes it when that request ends, which resets concurrent requests still connecting.
+        await app.listen(0)
 
         // Quota runs are stored on Better Auth's user documents, so every test user needs one.
         await app
