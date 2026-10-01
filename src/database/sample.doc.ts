@@ -5,8 +5,8 @@ import { zodToMongoose } from '../common/zod-to-mongoose'
 
 export const SAMPLE_MODEL = 'Sample'
 
-// A sample ad anyone can try, published by scripts/publish-sample.ts. The script uploads the video and measures it
-// once, so jobs that analyze a sample skip upload verification.
+// A sample ad anyone can try, published by the maintainer, who uploads the video and measures it once, so jobs that
+// analyze a sample skip upload verification.
 export const sampleDocSchema = z.object({
     slug: z.string().regex(/^[a-z0-9-]+$/),
     title: z.string().min(1),

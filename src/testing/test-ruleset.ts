@@ -2,7 +2,7 @@ import { type RuleSet, ruleSetSchema } from '../rules/schema'
 
 // A small ruleset for tests, copied from real rules: one of each kind the selection and metadata code handle (per
 // platform, Google-only, placement-scoped, regional, advisory, best-practice). The real ruleset is authored outside
-// the repo and published with `npm run rules:publish -- <file>`.
+// the repo and published by the maintainer.
 export const TEST_RULESET: RuleSet = ruleSetSchema.parse({
     meta: { rulesetId: 'adlens-rules', version: '0.0.0-test', generatedAt: '2026-09-29' },
     sources: {

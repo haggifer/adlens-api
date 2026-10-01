@@ -242,14 +242,12 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 ## Ad-policy rules
 
 Rules are data. The ruleset is authored **outside this repo**, as a JSON file in the shape of
-[`ruleSetSchema`](src/rules/schema.ts), and published to MongoDB as an **immutable version** with
-`npm run rules:publish -- <path/to/rules.json>` (validated by the same Zod schema the worker parses it with; a
-version that already exists is refused). After publishing, the script keeps a copy named `rules_<version>.json` and
-rewrites `rules_current_summary.md` next to the file (`npm run rules:summary` writes the summary alone): which app
-options reach each rule platform, the placements, regions and check types in use, and the sources, so the code's
-options can be checked against every new version. The worker serves the newest published version via
-[`RulesetService`](src/rules/ruleset.service.ts), so a rules update needs no redeploy, and every analysis records the
-`rulesetVersion` it ran with.
+[`ruleSetSchema`](src/rules/schema.ts), and the maintainer publishes it to MongoDB as an **immutable version**
+(validated by the same Zod schema the worker parses it with; a version that already exists is refused). Each published
+version comes with a summary of which app options reach each rule platform and the placements, regions and check types
+in use, so the code's options can be checked against every new version. The worker serves the newest published
+version via [`RulesetService`](src/rules/ruleset.service.ts), so a rules update needs no redeploy, and every analysis
+records the `rulesetVersion` it ran with.
 
 Selection ([`src/rules/index.ts`](src/rules/index.ts)) targets the job's settings: its **platforms** (YouTube also pulls
 in Google Ads policy), its **markets** (global rules always apply; UK/EU/US rules only in their market) and, for
@@ -278,25 +276,9 @@ description, storage path, media facts, suggested settings, display order, publi
 under `samples/` in the uploads bucket. `GET /v1/samples` lists them with short-lived preview URLs; the web app fills
 in the suggested settings, which the user can change, and `POST /v1/jobs/from-sample` creates a job that points at the
 sample's video. Analyzing it skips upload verification (the video was measured when it was published); the only check
-is that a published sample still points at that object. It is charged like any other analysis.
-
-Publish or update a sample from a manifest (the `video` path is relative to the manifest):
-
-```json
-{
-    "slug": "running-shoes",
-    "title": "Running shoes",
-    "description": "A 15-second product spot with a spoken offer",
-    "video": "running-shoes.mp4",
-    "settings": { "platforms": ["YouTube"], "placements": ["youtube_shorts"], "markets": ["US"] },
-    "order": 1
-}
-```
-
-```bash
-npm run samples:publish -- path/to/running-shoes.json --dry-run   # validate and measure only
-npm run samples:publish -- path/to/running-shoes.json             # upload to samples/ and upsert by slug
-```
+is that a published sample still points at that object. It is charged like any other analysis. Samples are
+published by the maintainer: the video is measured with the same `MediaProber`, uploaded under `samples/`, and its
+document upserted by slug.
 
 Set `"isPublished": false` and publish again to hide a sample.
 
@@ -306,7 +288,6 @@ Set `"isPublished": false` and publish again to hide a sample.
 src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs, analysis, rules, quota,
             ip-quota, challenge, auth, account, mail, storage, realtime, database, config
 test/       e2e (Supertest) and auth-flow tests
-scripts/    ruleset and sample publishing
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule
 ```
 
@@ -485,9 +466,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
   schemas. The stored job is composed here from those blocks plus server-only fields (owner, storage path, execution,
   accounting), so they never reach a client. It is published by CI and pinned exactly, because a `file:` link only
   works on one machine.
-- **Rulesets are immutable, versioned data in MongoDB.** `npm run rules:publish -- <file>` validates with the worker's
-  own schema and refuses an existing version, so a rules change needs no deploy and every analysis records its
-  `rulesetVersion`. A script was chosen over an admin endpoint, which would need an admin identity model. The ruleset
+- **Rulesets are immutable, versioned data in MongoDB.** Publishing validates with the worker's own schema and refuses
+  an existing version, so a rules change needs no deploy and every analysis records its `rulesetVersion`. A
+  maintainer's script was chosen over an admin endpoint, which would need an admin identity model. The ruleset
   file isn't kept in this repo: rules are content, maintained outside it, and tests use a small fixture
   (`src/testing/test-ruleset.ts`) copied from real rules.
 - **Rules target placements and markets, not just platforms.** Format caps such as the 6-second bumper apply only to

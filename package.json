@@ -17,10 +17,7 @@
         "format": "prettier --write .",
         "test": "jest",
         "test:e2e": "jest --config test/jest-e2e.json",
-        "test:auth": "node --test test/auth-flow.test.mjs",
-        "rules:publish": "ts-node --transpile-only scripts/publish-ruleset.ts",
-        "rules:summary": "ts-node --transpile-only scripts/summarize-ruleset.ts",
-        "samples:publish": "ts-node --transpile-only scripts/publish-sample.ts"
+        "test:auth": "node --test test/auth-flow.test.mjs"
     },
     "dependencies": {
         "@google-cloud/run": "^4.1.0",
@@ -61,7 +58,6 @@
         "source-map-support": "^0.5.21",
         "supertest": "^7.0.0",
         "ts-jest": "^29.2.5",
-        "ts-node": "^10.9.2",
         "tsconfig-paths": "^4.2.0",
         "typescript": "^5.7.0",
         "typescript-eslint": "^8.0.0"

@@ -13,19 +13,16 @@ npx tsc --noEmit -p tsconfig.json
 npm test                 # unit tests (real MongoDB via mongodb-memory-server)
 npm run test:e2e         # Supertest against the app with fake storage, prober, dispatcher and auth
 npm run test:auth        # after `npm run build`: real Better Auth flows under Node's test runner
-npm run rules:publish -- <rules.json>   # publish a ruleset file (kept outside the repo) as a new immutable version
-npm run rules:summary -- <rules.json>   # (re)write rules_current_summary.md next to a ruleset file, without publishing
-npm run samples:publish -- <manifest.json> [--dry-run]   # publish or update a sample ad
 ```
 
 ## Rules that must not break
 
-- **Ruleset updates start a sync, and only they do.** When a new ruleset version is published, `rules:publish` also
-  keeps `rules_<version>.json` and rewrites `rules_current_summary.md` next to the published file. Then check the
-  summary against the code in the same change set: every rule platform reachable from an app option (`RULE_PLATFORMS`
-  here; the web's `PLATFORM_LABELS`), every placement and region offered as an option (adlens-shared `Placement`,
-  `Market`; the web's `PLACEMENT_LABELS`, `MARKET_LABELS`), every check type supported by the deployed API (deploy the
-  API before publishing a ruleset that needs a new one). Other changes don't need this.
+- **Ruleset updates start a sync, and only they do.** When the maintainer publishes a new ruleset version, it comes
+  with a summary of the options and values it uses. Then check that summary against the code in the same change set:
+  every rule platform reachable from an app option (`RULE_PLATFORMS` here; the web's `PLATFORM_LABELS`), every
+  placement and region offered as an option (adlens-shared `Placement`, `Market`; the web's `PLACEMENT_LABELS`,
+  `MARKET_LABELS`), every check type supported by the deployed API (deploy the API before publishing a ruleset that
+  needs a new one). Other changes don't need this.
 - A job is created `pending`; after that, `JobLifecycle` is the only code that changes its status, and every transition
   is a conditional update on the expected current status. Don't write `status` anywhere else.
 - A quota charge is refunded at most once and never lost. The job records the run ids (`chargedRunId`,
