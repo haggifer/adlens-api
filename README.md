@@ -297,7 +297,7 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch                     | **202** `{ job }`              |
 | `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)    | `{ jobs, nextCursor }`         |
 | `GET /v1/jobs/:id`          | One owned job                                                   | `{ job }`                      |
-| `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload        | `{ url, expiresAt }`           |
+| `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it) | `{ url, expiresAt }`           |
 | `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
 | `POST /v1/contact/uploads`  | Signed uploads for a Contact form message's images (public, Turnstile-checked, rate-limited) | **201** `{ draftId, uploads }` |

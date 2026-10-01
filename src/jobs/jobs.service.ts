@@ -140,11 +140,12 @@ export class JobsService {
         }
     }
 
-    // A short-lived URL for replaying the video; only verified uploads have one worth serving.
+    // A short-lived URL for replaying the video; only verified uploads the cleanup hasn't deleted have one worth
+    // serving.
     async createVideoUrl(userId: string, jobId: string): Promise<JobVideoResponse> {
         const job = await this.findOwned(userId, jobId)
 
-        if (!job.media) {
+        if (!job.media || job.videoDeletedAt) {
             throw notFound()
         }
 

@@ -501,6 +501,38 @@ describe('Jobs API (e2e)', () => {
         })
     })
 
+    describe('replaying the video', () => {
+        const MEDIA = { durationS: 20, width: 1080, height: 1920, hasAudio: true, sizeBytes: FILE.size }
+        let jobs: Model<JobDoc>
+
+        beforeAll(() => {
+            jobs = app.get(getModelToken(JOB_MODEL))
+        })
+
+        it('signs a read URL for a verified upload', async () => {
+            const jobId = await createJob()
+
+            await jobs.updateOne({ _id: jobId }, { $set: { media: { ...MEDIA, contentType: FILE.contentType } } })
+
+            const res = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}/video`).set(as(OWNER)).expect(200)
+
+            expect(res.body.url).toBe('https://storage.googleapis.com/signed-read')
+        })
+
+        it('answers not found once the cleanup deleted the video', async () => {
+            const jobId = await createJob()
+
+            await jobs.updateOne(
+                { _id: jobId },
+                { $set: { media: { ...MEDIA, contentType: FILE.contentType }, videoDeletedAt: new Date() } },
+            )
+
+            const res = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}/video`).set(as(OWNER)).expect(404)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        })
+    })
+
     describe('contact messages', () => {
         const MESSAGE = {
             email: 'visitor@example.com',
