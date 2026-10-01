@@ -123,6 +123,9 @@ const getTokenEmail = async (token: unknown, secret: string): Promise<string | n
     return typeof payload?.email === 'string' ? normalizeEmail(payload.email) : null
 }
 
+// Better Auth answers an after hook's APIError with the endpoint's own response headers merged in, so a sign-up whose
+// confirmation email failed still sets the new account's session cookie: the user is signed in, unconfirmed, and can
+// resend the email (auth-flow tests pin this).
 const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
     const messages = outbox.getStore()?.splice(0) ?? []
 

@@ -254,7 +254,9 @@ answering is a plain reply; its text isn't stored.
   runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
   and an `after` hook sends it: a failed send answers 503 `EMAIL_NOT_SENT` instead of a success the user would wait on
   forever. The cost is that a password-reset request for an existing address takes a Resend round trip longer than one
-  for an unknown address.
+  for an unknown address. The endpoint's work stands: a sign-up whose confirmation email failed has still created the
+  account, and its 503 still sets the session cookie, since Better Auth merges the endpoint's response headers into an
+  after hook's error. The user is signed in, unconfirmed, and can resend the email (`/send-verification-email`).
 - **At most 3 confirmation and 3 reset emails per address per hour**, whoever asks. Anyone can ask for an unconfirmed
   account's link again (`/send-verification-email`), so without a cap anyone could flood an inbox and use up the day's
   Resend quota. The count

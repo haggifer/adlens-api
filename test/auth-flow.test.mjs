@@ -326,22 +326,34 @@ test("deleting the account purges the user's stored files and blocks sign-in", a
     assert.equal(signIn.status, 401)
 })
 
-test('sign-up fails with EMAIL_NOT_SENT when the verification email cannot be sent', async () => {
+test('a sign-up whose confirmation email cannot be sent answers EMAIL_NOT_SENT, still signed in to resend it', async () => {
+    const email = 'mail-down@example.com'
+    let res
+
     isMailDown = true
 
     try {
-        const res = await post('/api/auth/sign-up/email', {
-            name: 'Unlucky',
-            email: 'mail-down@example.com',
-            password: 'first-password',
-        })
-        const body = await res.json()
-
-        assert.equal(res.status, 503)
-        assert.equal(body.code, 'EMAIL_NOT_SENT')
+        res = await post('/api/auth/sign-up/email', { name: 'Unlucky', email, password: 'first-password' })
     } finally {
         isMailDown = false
     }
+
+    const body = await res.json()
+    const cookie = cookieOf(res)
+
+    assert.equal(res.status, 503)
+    assert.equal(body.code, 'EMAIL_NOT_SENT')
+    assert.ok(
+        res.headers
+            .getSetCookie()
+            .some((c) => /session_token/.test(c) && /HttpOnly/i.test(c) && /SameSite=Lax/i.test(c)),
+    )
+    assert.equal((await sessionUser(cookie)).email, email)
+
+    const resent = await post('/api/auth/send-verification-email', { email }, cookie)
+
+    assert.equal(resent.status, 200)
+    assert.ok(lastMailTo(email))
 })
 
 test('a password reset request fails with EMAIL_NOT_SENT when the email cannot be sent', async () => {
