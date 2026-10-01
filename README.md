@@ -57,7 +57,8 @@ conditional update on the expected current status, so two racing callers can nev
 "analyze" can't verify, charge or dispatch twice).
 
 1. **Create** `POST /v1/jobs`: a `pending` job and a V4 signed PUT URL that binds the declared content type **and exact
-   size** (`x-goog-content-length-range`), so the stored object must match the declaration. The
+   size** (`x-goog-content-length-range`), so the stored object must match the declaration, and only creates the object
+   (`x-goog-if-generation-match: 0`), so a verified video can't be replaced by a second PUT. The
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)):
    - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
@@ -453,7 +454,7 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
-  the signed upload URL binds the exact declared size. Only a definite problem with the file deletes it; storage or
+  the signed upload URL binds the exact declared size and can only create the object, never overwrite it. Only a definite problem with the file deletes it; storage or
   network trouble leaves the job pending.
 - **Lazy expiry instead of a scheduler.** Abandoned jobs are expired when their owner next reads their jobs, which
   needs no Cloud Scheduler.

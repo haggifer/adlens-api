@@ -36,18 +36,22 @@ export class StorageService {
         return this.storage.bucket(this.bucketName).file(path)
     }
 
-    // Signs the content type and the exact length, so GCS rejects an upload that differs from what was declared.
+    // Signs the content type and the exact length, so GCS rejects an upload that differs from what was declared, and
+    // a create-only precondition: once verified, the object can't be replaced by a second PUT to the same URL.
     async createUploadTarget(path: string, contentType: string, sizeBytes: number): Promise<UploadTarget> {
-        const lengthRange = `${sizeBytes},${sizeBytes}`
+        const extensionHeaders = {
+            'x-goog-content-length-range': `${sizeBytes},${sizeBytes}`,
+            'x-goog-if-generation-match': '0',
+        }
         const [url] = await this.object(path).getSignedUrl({
             version: 'v4',
             action: 'write',
             expires: Date.now() + SIGNED_URL_TTL_MS,
             contentType,
-            extensionHeaders: { 'x-goog-content-length-range': lengthRange },
+            extensionHeaders,
         })
 
-        return { url, headers: { 'Content-Type': contentType, 'x-goog-content-length-range': lengthRange } }
+        return { url, headers: { 'Content-Type': contentType, ...extensionHeaders } }
     }
 
     async createReadUrl(path: string): Promise<SignedReadUrl> {
