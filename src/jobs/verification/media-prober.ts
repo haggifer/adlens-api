@@ -22,9 +22,22 @@ interface ProbeStream {
     width?: unknown
     height?: unknown
     duration?: unknown
+    tags?: { rotate?: unknown }
+    side_data_list?: { side_data_type?: unknown; rotation?: unknown }[]
 }
 
-const toResult = (stdout: string): ProbeResult => {
+// Phones store a portrait video as landscape frames plus a rotation to apply on playback. Newer ffprobe reports it as
+// the display matrix's rotation; older files and builds as the legacy `rotate` tag.
+const getRotation = (stream: ProbeStream): number => {
+    const matrix = stream.side_data_list?.find((data) => data.side_data_type === 'Display Matrix')
+    const rotation = Number(matrix?.rotation ?? stream.tags?.rotate ?? 0)
+
+    return Number.isFinite(rotation) ? rotation : 0
+}
+
+const isQuarterTurn = (rotation: number) => Math.abs(Math.round(rotation / 90)) % 2 === 1
+
+export const parseProbeOutput = (stdout: string): ProbeResult => {
     const parsed = JSON.parse(stdout) as { streams?: ProbeStream[]; format?: { duration?: unknown } }
     const streams = parsed.streams ?? []
     const video = streams.find((stream) => stream.codec_type === 'video')
@@ -33,10 +46,14 @@ const toResult = (stdout: string): ProbeResult => {
         throw new UndecodableMediaError('No video stream')
     }
 
+    const storedWidth = typeof video.width === 'number' ? video.width : undefined
+    const storedHeight = typeof video.height === 'number' ? video.height : undefined
+    const isSideways = isQuarterTurn(getRotation(video))
+
     return {
         durationS: Number.parseFloat(String(parsed.format?.duration ?? video.duration)),
-        width: typeof video.width === 'number' ? video.width : undefined,
-        height: typeof video.height === 'number' ? video.height : undefined,
+        width: isSideways ? storedHeight : storedWidth,
+        height: isSideways ? storedWidth : storedHeight,
         hasAudio: streams.some((stream) => stream.codec_type === 'audio'),
     }
 }
@@ -71,7 +88,7 @@ export class MediaProber {
                 }
 
                 try {
-                    resolve(toResult(stdout))
+                    resolve(parseProbeOutput(stdout))
                 } catch (err) {
                     reject(err instanceof UndecodableMediaError ? err : new UndecodableMediaError(String(err)))
                 }
