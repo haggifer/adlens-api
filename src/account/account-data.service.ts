@@ -30,19 +30,22 @@ export class AccountDataService {
 
     async purge(userId: string): Promise<void> {
         const ownPrefix = userPrefix(userId)
-        const jobs = await this.jobs
-            .find({ userId }, { sampleId: 1, file: 1 })
-            .lean<Pick<StoredJob, 'sampleId' | 'file'>[]>()
-        const adoptedUploads = jobs
-            .filter((job) => !job.sampleId && !job.file.path.startsWith(ownPrefix))
-            .map((job) => job.file.path)
-
+        const adoptedUploads = await this.findAdoptedUploads(userId, ownPrefix)
         const uploadsAdoptedByOthers = await this.findUploadsAdoptedByOthers(userId)
 
         await Promise.all(adoptedUploads.map((path) => this.storage.delete(path)))
         await this.storage.deletePrefix(ownPrefix, uploadsAdoptedByOthers)
         await this.jobs.deleteMany({ userId })
         this.logger.log(`purged the data of deleted user ${userId}`)
+    }
+
+    // The uploads of jobs this user adopted, still under the prefix of the anonymous user they were uploaded by.
+    private async findAdoptedUploads(userId: string, ownPrefix: string): Promise<string[]> {
+        const jobs = await this.jobs
+            .find({ userId }, { sampleId: 1, file: 1 })
+            .lean<Pick<StoredJob, 'sampleId' | 'file'>[]>()
+
+        return jobs.filter((job) => !job.sampleId && !job.file.path.startsWith(ownPrefix)).map((job) => job.file.path)
     }
 
     // An anonymous user can outlive its link (Better Auth only logs a failed delete of it), and its prefix still holds
