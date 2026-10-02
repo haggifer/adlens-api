@@ -30,7 +30,7 @@
         "@nestjs/platform-express": "^11.0.0",
         "@nestjs/platform-socket.io": "^11.0.0",
         "@nestjs/websockets": "^11.0.0",
-        "adlens-shared": "0.14.1",
+        "adlens-shared": "0.14.2",
         "better-auth": "^1.7.4",
         "disposable-email-domains-js": "^1.26.0",
         "ffprobe-static": "^3.1.0",
