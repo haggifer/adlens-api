@@ -55,23 +55,7 @@ export class QuotaService {
     ): Promise<string> {
         const cutoff = new Date(now.getTime() - QUOTA_WINDOW_MS)
         const run: QuotaRun = { id: runId, startedAt: now, jobId }
-        const charged = await this.users.findOneAndUpdate(
-            {
-                _id: new Types.ObjectId(userId),
-                $expr: {
-                    $or: [
-                        { $eq: ['$isAdmin', true] },
-                        {
-                            $lt: [
-                                { $size: countedRuns(cutoff) },
-                                { $cond: [IS_PROVISIONAL_EXPR, PROVISIONAL_QUOTA_LIMIT, this.limit] },
-                            ],
-                        },
-                    ],
-                },
-            },
-            [{ $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] } } }],
-        )
+        const charged = await this.appendRun(userId, run, cutoff)
 
         if (!charged) {
             const access = await readUserAccess(this.connection, userId)
@@ -113,6 +97,26 @@ export class QuotaService {
             used: starts.length,
             limit: this.getLimit(getUserAccess(user)),
             nextFreeAt: oldest === null ? null : new Date(oldest + QUOTA_WINDOW_MS).toISOString(),
+        }
+    }
+
+    private appendRun(userId: string, run: QuotaRun, cutoff: Date) {
+        return this.users.findOneAndUpdate({ _id: new Types.ObjectId(userId), $expr: this.admits(cutoff) }, [
+            { $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] } } },
+        ])
+    }
+
+    private admits(cutoff: Date): object {
+        return {
+            $or: [
+                { $eq: ['$isAdmin', true] },
+                {
+                    $lt: [
+                        { $size: countedRuns(cutoff) },
+                        { $cond: [IS_PROVISIONAL_EXPR, PROVISIONAL_QUOTA_LIMIT, this.limit] },
+                    ],
+                },
+            ],
         }
     }
 

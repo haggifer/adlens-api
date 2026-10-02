@@ -4,14 +4,14 @@ import type { Env } from '../config/env'
 import { countForwardedEntries, ipBucket, type IpSource, pickClientIp } from './client-ip'
 import { deriveIpKey, hashBucket } from './ip-key'
 
-// Requests whose address can't be read share one network, so they are limited together rather than not at all.
-const UNKNOWN_NETWORK = 'unknown'
-
 export interface ClientNetwork {
     // Only passed to Turnstile's siteverify; never stored or logged.
     ip: string | null
     bucketKey: string
 }
+
+// Requests whose address can't be read share one network, so they are limited together rather than not at all.
+const UNKNOWN_NETWORK = 'unknown'
 
 // The key is derived from BETTER_AUTH_SECRET rather than a secret of its own; rotating that secret resets every
 // network's count.

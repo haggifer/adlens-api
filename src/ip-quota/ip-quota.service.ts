@@ -64,10 +64,7 @@ export class IpQuotaService {
 
         await this.ensureBucket(charge.bucketKey, expiresAt)
 
-        const charged = await this.buckets.findOneAndUpdate(
-            { _id: charge.bucketKey, $expr: { $and: this.admits(charge, cutoff) } },
-            [{ $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] }, expiresAt } }],
-        )
+        const charged = await this.appendRun(charge, run, cutoff, expiresAt)
 
         if (!charged) {
             const usage = await this.usage(charge.bucketKey, now)
@@ -81,6 +78,12 @@ export class IpQuotaService {
     // A run that has already left the window is no longer stored, so refunding it changes nothing.
     async refund(runId: string): Promise<void> {
         await this.buckets.updateOne({ 'runs.id': runId }, { $pull: { runs: { id: runId } } })
+    }
+
+    private appendRun(charge: IpCharge, run: IpRun, cutoff: Date, expiresAt: Date) {
+        return this.buckets.findOneAndUpdate({ _id: charge.bucketKey, $expr: { $and: this.admits(charge, cutoff) } }, [
+            { $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] }, expiresAt } },
+        ])
     }
 
     private admits({ access, hasPassedChallenge }: IpCharge, cutoff: Date): object[] {

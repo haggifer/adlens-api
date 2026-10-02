@@ -15,6 +15,18 @@ const forwardedEntries = (header: string | string[] | undefined): string[] =>
         .map((entry) => entry.trim())
         .filter(Boolean)
 
+// An embedded IPv4 tail (a.b.c.d) fills two hextets.
+const hextetWidth = (part: string) => (part.includes('.') ? 2 : 1)
+
+const expandIpv6 = (address: string): string[] => {
+    const [head, tail] = address.split('::')
+    const headParts = head ? head.split(':') : []
+    const tailParts = tail ? tail.split(':') : []
+    const width = [...headParts, ...tailParts].reduce((sum, part) => sum + hextetWidth(part), 0)
+
+    return [...headParts, ...Array<string>(IPV6_HEXTETS - width).fill('0'), ...tailParts]
+}
+
 export const countForwardedEntries = (header: string | string[] | undefined): number => forwardedEntries(header).length
 
 // Every proxy appends the address it saw, so the entry `trustedHops` from the right is the one our own front end wrote;
@@ -27,18 +39,6 @@ export const pickClientIp = ({ forwardedFor, socketAddress }: IpSource, trustedH
     }
 
     return entries[Math.max(entries.length - trustedHops, 0)]
-}
-
-// An embedded IPv4 tail (a.b.c.d) fills two hextets.
-const hextetWidth = (part: string) => (part.includes('.') ? 2 : 1)
-
-const expandIpv6 = (address: string): string[] => {
-    const [head, tail] = address.split('::')
-    const headParts = head ? head.split(':') : []
-    const tailParts = tail ? tail.split(':') : []
-    const width = [...headParts, ...tailParts].reduce((sum, part) => sum + hextetWidth(part), 0)
-
-    return [...headParts, ...Array<string>(IPV6_HEXTETS - width).fill('0'), ...tailParts]
 }
 
 // What a limit applies to: an IPv4 address, or an IPv6 /64, because a host can pick any address in its /64 for free.
