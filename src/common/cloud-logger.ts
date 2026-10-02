@@ -1,6 +1,13 @@
 import { ConsoleLogger, type LoggerService, type LogLevel } from '@nestjs/common'
 import type { LogFormat } from '../config/log-format'
 
+interface JsonLogOptions {
+    context: string
+    logLevel: LogLevel
+    writeStreamType?: 'stdout' | 'stderr'
+    errorStack?: unknown
+}
+
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity
 const SEVERITY: Record<LogLevel, string> = {
     verbose: 'DEBUG',
@@ -9,13 +16,6 @@ const SEVERITY: Record<LogLevel, string> = {
     warn: 'WARNING',
     error: 'ERROR',
     fatal: 'CRITICAL',
-}
-
-interface JsonLogOptions {
-    context: string
-    logLevel: LogLevel
-    writeStreamType?: 'stdout' | 'stderr'
-    errorStack?: unknown
 }
 
 // Nest's JSON mode, reshaped for Cloud Logging, which reads one JSON object per line: `severity` sets the entry's

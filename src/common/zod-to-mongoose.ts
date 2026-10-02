@@ -12,7 +12,12 @@ interface ZodDef {
     defaultValue?: unknown
 }
 
-const zodDef = (schema: unknown): ZodDef => (schema as { _zod: { def: ZodDef } })._zod.def
+interface UnwrappedField {
+    node: unknown
+    isRequired: boolean
+    isNullable: boolean
+    defaultValue: unknown
+}
 
 const SCALAR_TYPES: Record<string, unknown> = {
     string: String,
@@ -21,70 +26,63 @@ const SCALAR_TYPES: Record<string, unknown> = {
     date: Date,
 }
 
-const buildField = (schema: unknown): unknown => {
-    let node = schema
-    let required = true
-    let nullable = false
-    let defaultValue: unknown
+const zodDef = (schema: unknown): ZodDef => (schema as { _zod: { def: ZodDef } })._zod.def
+
+const unwrap = (schema: unknown): UnwrappedField => {
+    const field: UnwrappedField = { node: schema, isRequired: true, isNullable: false, defaultValue: undefined }
 
     for (;;) {
-        const def = zodDef(node)
+        const def = zodDef(field.node)
 
-        if (def.type === 'optional') {
-            required = false
-            node = def.innerType
-            continue
+        switch (def.type) {
+            case 'optional':
+                field.isRequired = false
+                break
+            case 'nullable':
+                field.isRequired = false
+                field.isNullable = true
+                break
+            case 'default':
+                field.isRequired = false
+                field.defaultValue =
+                    typeof def.defaultValue === 'function' ? (def.defaultValue as () => unknown)() : def.defaultValue
+                break
+            default:
+                return field
         }
 
-        if (def.type === 'nullable') {
-            required = false
-            nullable = true
-            node = def.innerType
-            continue
-        }
-
-        if (def.type === 'default') {
-            required = false
-            defaultValue =
-                typeof def.defaultValue === 'function' ? (def.defaultValue as () => unknown)() : def.defaultValue
-            node = def.innerType
-            continue
-        }
-
-        break
+        field.node = def.innerType
     }
+}
 
-    const def = zodDef(node)
-    const field: Record<string, unknown> = {}
-
-    if (def.type === 'object') {
+const getTypeOptions = (def: ZodDef): Record<string, unknown> => {
+    switch (def.type) {
         // Embedded objects are stored loosely (Mixed): the nested shape is typed in Zod and validated at
         // the API boundary, so leaving Mongoose unopinionated keeps evolving blobs migration-free.
-        field.type = Object
-    } else if (def.type === 'enum') {
-        field.type = String
-        field.enum = Object.values(def.entries ?? {})
-    } else if (def.type === 'array') {
-        field.type = [buildField(def.element)]
-    } else if (SCALAR_TYPES[def.type]) {
-        field.type = SCALAR_TYPES[def.type]
-    } else {
-        throw new Error(`zodToMongoose: unsupported Zod type "${def.type}"`)
-    }
+        case 'object':
+            return { type: Object }
+        case 'enum':
+            return { type: String, enum: Object.values(def.entries ?? {}) }
+        case 'array':
+            return { type: [buildField(def.element)] }
+        default:
+            if (SCALAR_TYPES[def.type]) {
+                return { type: SCALAR_TYPES[def.type] }
+            }
 
-    if (required) {
-        field.required = true
+            throw new Error(`zodToMongoose: unsupported Zod type "${def.type}"`)
     }
+}
 
-    if (defaultValue === undefined && nullable) {
-        defaultValue = null
+const buildField = (schema: unknown): unknown => {
+    const { node, isRequired, isNullable, defaultValue } = unwrap(schema)
+    const storedDefault = defaultValue === undefined && isNullable ? null : defaultValue
+
+    return {
+        ...getTypeOptions(zodDef(node)),
+        ...(isRequired && { required: true }),
+        ...(storedDefault !== undefined && { default: storedDefault }),
     }
-
-    if (defaultValue !== undefined) {
-        field.default = defaultValue
-    }
-
-    return field
 }
 
 const buildDefinition = (shape: Record<string, unknown>): Record<string, unknown> =>
