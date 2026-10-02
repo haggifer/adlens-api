@@ -4,9 +4,9 @@ import { isDuplicateKeyError } from '../common/mongo-errors'
 import { RATE_LIMIT_COLLECTION, type RateLimitDoc } from '../database/rate-limit.doc'
 import { deriveRateLimitKey, hashBucket } from '../ip-quota/ip-key'
 
-const EPOCH = new Date(0)
-
 type Consume = BetterAuthRateLimitStorage['consume']
+
+const EPOCH = new Date(0)
 
 // Better Auth's own database storage keeps its "<ip>|<path>" keys in the clear and never deletes them, so this one
 // stores an HMAC of the key and lets MongoDB delete each counter when its window ends. The counters stay in MongoDB so
