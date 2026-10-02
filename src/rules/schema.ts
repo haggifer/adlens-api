@@ -21,12 +21,6 @@ export const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
     [Platform.Amazon]: [RulePlatform.Amazon],
 }
 
-export const toRatio = (label: string): number => {
-    const [width, height] = label.split(':').map(Number)
-
-    return width / height
-}
-
 // A ratio as the platforms write it, width:height ("9:16", "1.91:1").
 const aspectRatioSchema = z
     .string()
@@ -43,12 +37,6 @@ export const aspectRatioRangeParamsSchema = z
 const RATIO_PARAMS_SCHEMAS: Partial<Record<string, z.ZodType>> = {
     aspect_ratio_one_of: aspectRatioListParamsSchema,
     aspect_ratio_between: aspectRatioRangeParamsSchema,
-}
-
-const hasThreshold = ({ checkType, value, params }: { checkType: string; value?: number; params?: unknown }) => {
-    const paramsSchema = RATIO_PARAMS_SCHEMAS[checkType]
-
-    return paramsSchema ? paramsSchema.safeParse(params).success : value !== undefined
 }
 
 // One rule, as authored in a ruleset file and as stored in every published ruleset version.
@@ -117,6 +105,18 @@ export const ruleSetSchema = z
 export type Rule = z.infer<typeof ruleSchema>
 export type RuleSource = z.infer<typeof ruleSourceSchema>
 export type RuleSet = z.infer<typeof ruleSetSchema>
+
+const hasThreshold = ({ checkType, value, params }: { checkType: string; value?: number; params?: unknown }) => {
+    const paramsSchema = RATIO_PARAMS_SCHEMAS[checkType]
+
+    return paramsSchema ? paramsSchema.safeParse(params).success : value !== undefined
+}
+
+export const toRatio = (label: string): number => {
+    const [width, height] = label.split(':').map(Number)
+
+    return width / height
+}
 
 export const resolveRef = (ref: string, sources: Record<string, RuleSource>): string =>
     ref.replace(/^\{\{([A-Z0-9_]+)\}\}/, (_, key) => sources[key]?.baseUrl ?? `{{${key}}}`)
