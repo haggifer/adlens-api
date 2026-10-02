@@ -1,7 +1,7 @@
 import type { Model } from 'mongoose'
 import { RULESET_MODEL, type RulesetDoc, RulesetSchema } from '../database/ruleset.doc'
-import { TEST_RULESET } from '../testing/test-ruleset'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
+import { TEST_RULESET } from '../testing/test-ruleset'
 import { RulesetService } from './ruleset.service'
 
 const BUNDLED = TEST_RULESET

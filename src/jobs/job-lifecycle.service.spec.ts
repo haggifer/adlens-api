@@ -19,9 +19,9 @@ import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
+import { buildModelCall, usageOf } from '../testing/model-call'
 import { JobLifecycle } from './job-lifecycle.service'
 import { UNSTARTED_JOB_MS } from './job-status'
-import { buildModelCall, usageOf } from '../testing/model-call'
 
 const USER = new Types.ObjectId().toString()
 const OTHER_USER = new Types.ObjectId().toString()

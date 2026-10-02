@@ -1,7 +1,7 @@
 import {
     PLACEMENT_PLATFORM,
-    Platform,
     placementSchema,
+    Platform,
     RulePlatform,
     rulePlatformSchema,
     ruleScopeSchema,

@@ -1,5 +1,4 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common'
-
 import { AuthenticatedRequest } from '../auth/session.guard'
 
 // Only defined behind SessionGuard, which attaches the id.

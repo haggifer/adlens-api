@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config'
 import type { Env } from '../../config/env'
 import { ModelAnswerError, ModelCallRefusedError } from '../pipeline/model-answer-error'
 import { RetryableError } from '../pipeline/retryable-error'
+import { toModelCall } from './model-call'
 import {
     buildReviewOutputJsonSchema,
     buildReviewPrompt,
@@ -18,7 +19,6 @@ import {
     PROMPT_VERSION,
     type ReviewOutput,
 } from './review-prompt'
-import { toModelCall } from './model-call'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from './video-reviewer'
 
 // Well under the Cloud Run task timeout (15 min), so a hung call ends in a handled failure, not a killed task.

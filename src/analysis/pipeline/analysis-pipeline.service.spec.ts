@@ -9,14 +9,14 @@ import type { IpCharge } from '../../ip-quota/ip-rules'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
-import { TEST_RULESET } from '../../testing/test-ruleset'
 import { configStub } from '../../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../../testing/memory-mongo'
+import { buildModelCall, usageOf } from '../../testing/model-call'
+import { TEST_RULESET } from '../../testing/test-ruleset'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
 import { AnalysisPipeline } from './analysis-pipeline.service'
 import { ModelAnswerError, ModelCallRefusedError } from './model-answer-error'
 import { RetryableError } from './retryable-error'
-import { buildModelCall, usageOf } from '../../testing/model-call'
 
 const USER = new Types.ObjectId().toString()
 const CALL = buildModelCall()

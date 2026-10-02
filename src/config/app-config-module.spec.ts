@@ -1,9 +1,9 @@
+import { type INestApplicationContext, Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { NestFactory } from '@nestjs/core'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Module, type INestApplicationContext } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { NestFactory } from '@nestjs/core'
 import type { Env } from './env'
 
 // Proves appConfigModule's `validate` is validateEnvWithSecretsFile, not the plain validateEnv: MONGODB_URI is

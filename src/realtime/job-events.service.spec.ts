@@ -1,5 +1,5 @@
-import { EventEmitter } from 'node:events'
 import type { Connection } from 'mongoose'
+import { EventEmitter } from 'node:events'
 import { JobEventsService } from './job-events.service'
 import type { JobsGateway } from './jobs.gateway'
 

@@ -1,7 +1,7 @@
 import { Types } from 'mongoose'
+import type { AccountDataService } from '../account/account-data.service'
 import { USER_COLLECTION } from '../database/user.doc'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
-import type { AccountDataService } from '../account/account-data.service'
 import { ANONYMOUS_RETENTION_MS, AnonymousCleanupService } from './anonymous-cleanup.service'
 
 const NOW = new Date('2026-10-20T03:00:00Z')
