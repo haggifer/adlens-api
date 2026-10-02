@@ -6,7 +6,7 @@ export const IP_QUOTA_COLLECTION = 'ip_quotas'
 
 // One document per network, keyed by an HMAC of it (ClientNetworkResolver), so the address is never stored. It holds
 // only the runs still inside the window, and MongoDB deletes it a window after its last charge.
-export const ipQuotaDocSchema = z.object({
+const ipQuotaDocSchema = z.object({
     _id: z.string(),
     runs: z.array(
         z.object({

@@ -7,7 +7,7 @@ export const RATE_LIMIT_COLLECTION = 'rate_limits'
 // Rate-limit counters (createRateLimitStorage): Better Auth's, one per client and path, the per-address email caps and
 // the Contact form's caps (ContactLimits). Each is keyed by an HMAC of its raw key ("<ip>|<path>", an email, a network
 // key), so no address is stored. MongoDB deletes each one when its window ends.
-export const rateLimitDocSchema = z.object({
+const rateLimitDocSchema = z.object({
     _id: z.string(),
     count: z.number(),
     windowStart: z.date(),

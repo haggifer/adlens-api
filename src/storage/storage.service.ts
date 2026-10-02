@@ -14,7 +14,7 @@ export interface ObjectContent {
     content: Buffer
 }
 
-export interface SignedReadUrl {
+interface SignedReadUrl {
     url: string
     expiresAt: Date
 }

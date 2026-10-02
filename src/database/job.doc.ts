@@ -21,7 +21,7 @@ const tokensByModalitySchema = z.record(z.string(), tokenCountSchema)
 // One billed Gemini call with everything its price depends on: the model, the endpoint (Vertex prices regional
 // endpoints above global), the date (list prices change), the traffic type (on-demand, priority, flex or provisioned)
 // and the tokens by kind and modality; a request's own size decides long-context tiers.
-export const modelCallSchema = z.object({
+const modelCallSchema = z.object({
     at: z.date(),
     model: z.string(),
     location: z.string(),
@@ -41,7 +41,7 @@ export const modelCallSchema = z.object({
 
 // Every billed call of the job, and totals across them (output = answer + thinking, which bill at one rate). Jobs from
 // before the calls were recorded have the totals only.
-export const tokenUsageSchema = z.object({
+const tokenUsageSchema = z.object({
     promptTokens: tokenCountSchema,
     outputTokens: tokenCountSchema,
     totalTokens: tokenCountSchema,
@@ -50,7 +50,7 @@ export const tokenUsageSchema = z.object({
 
 // The stored job: the public shape plus server-only fields (owner, storage location, execution, accounting). Built
 // from the shared building blocks so field shapes have a single source.
-export const jobDocSchema = z.object({
+const jobDocSchema = z.object({
     userId: z.string(),
     status: jobStatusSchema.default(JobStatus.Pending),
     settings: analysisSettingsSchema,

@@ -4,7 +4,7 @@ import { describeError } from '../../common/error-message'
 import { StorageService } from '../../storage/storage.service'
 import { MediaProber, type ProbeResult, UndecodableMediaError } from './media-prober'
 
-export type VerificationOutcome =
+type VerificationOutcome =
     | { kind: 'verified'; media: JobMedia }
     | { kind: 'rejected'; errorCode: JobErrorCode }
     | { kind: 'upload-incomplete' }

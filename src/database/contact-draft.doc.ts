@@ -7,7 +7,7 @@ export const CONTACT_DRAFT_MODEL = 'ContactDraft'
 // The images a Contact form visitor declared before uploading them, under a random id that stands in for the
 // Turnstile check once (usedAt). MongoDB deletes each draft when it expires; the objects stay until the bucket's
 // lifecycle rule deletes them.
-export const contactDraftDocSchema = z.object({
+const contactDraftDocSchema = z.object({
     _id: z.string(),
     files: z.array(
         z.object({

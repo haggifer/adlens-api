@@ -8,7 +8,7 @@ interface AuthIndex {
     index: mongo.IndexDescription & { name: string }
 }
 
-export interface AuthIndexFailure {
+interface AuthIndexFailure {
     name: string
     reason: string
 }

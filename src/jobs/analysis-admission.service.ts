@@ -9,7 +9,7 @@ import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import { checkIpRules, type IpCharge, IpVerdict, toIpRefusal } from '../ip-quota/ip-rules'
 import { QuotaService, toQuotaRefusal } from '../quota/quota.service'
 
-export interface Admission {
+interface Admission {
     hasPassedChallenge: boolean
 }
 

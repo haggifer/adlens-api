@@ -4,7 +4,7 @@ import type { Env } from '../config/env'
 import { countForwardedEntries, ipBucket, type IpSource, pickClientIp } from './client-ip'
 import { deriveIpKey, hashBucket } from './ip-key'
 
-export interface ClientNetwork {
+interface ClientNetwork {
     // Only passed to Turnstile's siteverify; never stored or logged.
     ip: string | null
     bucketKey: string

@@ -18,7 +18,7 @@ import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/use
 
 // What an anonymous user or an unconfirmed account gets before it must sign up or confirm its email. Clearing cookies
 // gets a new anonymous user, so the network's anonymous allowance (IP_ANON_LIMIT) remains the real bound.
-export const PROVISIONAL_QUOTA_LIMIT = 1
+const PROVISIONAL_QUOTA_LIMIT = 1
 
 // getUserAccess in a pipeline expression, for an account that isn't an admin.
 const IS_PROVISIONAL_EXPR = { $or: [{ $eq: ['$isAnonymous', true] }, { $ne: ['$emailVerified', true] }] }

@@ -84,7 +84,7 @@ export const ruleSchema = z
         { message: "a rule's placements must belong to its platforms" },
     )
 
-export const ruleSourceSchema = z.object({ baseUrl: z.url(), label: z.string(), fetchedAt: z.string() })
+const ruleSourceSchema = z.object({ baseUrl: z.url(), label: z.string(), fetchedAt: z.string() })
 
 export const ruleSetSchema = z
     .object({
@@ -103,7 +103,7 @@ export const ruleSetSchema = z
     })
 
 export type Rule = z.infer<typeof ruleSchema>
-export type RuleSource = z.infer<typeof ruleSourceSchema>
+type RuleSource = z.infer<typeof ruleSourceSchema>
 export type RuleSet = z.infer<typeof ruleSetSchema>
 
 const hasThreshold = ({ checkType, value, params }: { checkType: string; value?: number; params?: unknown }) => {

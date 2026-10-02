@@ -19,9 +19,9 @@ import { type VideoReview, VideoReviewer, type VideoReviewRequest } from '../rev
 import { isRefusedCall, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
 import { isRetryable } from './retryable-error'
 
-export type RunOutcome = 'analyzed' | 'failed' | 'skipped'
+type RunOutcome = 'analyzed' | 'failed' | 'skipped'
 
-export interface RunAttempt {
+interface RunAttempt {
     isLast: boolean
 }
 

@@ -12,12 +12,12 @@ import { UNSTARTED_JOB_MS } from './job-status'
 
 type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
 
-export interface ExpirySweepResult {
+interface ExpirySweepResult {
     expired: number
     failed: number
 }
 
-export interface RefundSweepResult {
+interface RefundSweepResult {
     refunded: number
     failed: number
 }

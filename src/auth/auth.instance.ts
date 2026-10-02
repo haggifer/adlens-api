@@ -22,7 +22,7 @@ type AuthEmailKind = 'confirmation' | 'reset'
 
 type BetterAuthLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
-export interface AuthOptions {
+interface AuthOptions {
     db: Db
     client: MongoClient
     secret: string
