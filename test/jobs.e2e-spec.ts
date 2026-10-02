@@ -163,6 +163,16 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.issues.length).toBeGreaterThan(0)
     })
 
+    it('rejects an option chosen twice', async () => {
+        const res = await request(app.getHttpServer())
+            .post('/v1/jobs')
+            .set(as(OWNER))
+            .send({ settings: { ...SETTINGS, platforms: ['Meta', 'Meta'] }, file: FILE })
+            .expect(400)
+
+        expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
+    })
+
     it('creates a pending job with a signed upload bound to the declared size', async () => {
         const res = await request(app.getHttpServer())
             .post('/v1/jobs')
