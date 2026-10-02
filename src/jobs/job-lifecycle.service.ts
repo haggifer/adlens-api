@@ -89,12 +89,13 @@ export class JobLifecycle {
         media: JobMedia,
         ipCharge: IpCharge | null = null,
     ): Promise<StoredJob> {
+        const runId = newRunId()
+        const ipRunId = newRunId()
+
         // A job put back to pending before 2026-10-02 may still hold charges whose refund failed; recording new ones
         // would lose them.
         await this.refundHeldCharges(jobId)
 
-        const runId = newRunId()
-        const ipRunId = newRunId()
         const reserved = await this.model.updateOne(
             { _id: jobId, status: JobStatus.Verifying, chargedRunId: null, chargedIpRunId: null },
             { $set: { chargedRunId: runId, chargedIpRunId: ipCharge ? ipRunId : null } },
@@ -210,20 +211,7 @@ export class JobLifecycle {
     // on every read of their jobs, everyone's in the daily cleanup, for owners who never come back. A job that can't
     // be closed is left for the next run.
     async expireStaleJobs(userId?: string, now = new Date()): Promise<ExpirySweepResult> {
-        const stale = await this.model
-            .find(
-                {
-                    ...(userId ? { userId } : {}),
-                    $or: [
-                        // Aged from its creation: no step of the upload touches the job.
-                        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
-                        { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
-                        { status: { $in: IN_FLIGHT }, updatedAt: { $lt: new Date(now.getTime() - ANALYSIS_STALE_MS) } },
-                    ],
-                },
-                { _id: 1, status: 1 },
-            )
-            .lean<Pick<StoredJob, '_id' | 'status'>[]>()
+        const stale = await this.findStaleJobs(userId, now)
         const result: ExpirySweepResult = { expired: 0, failed: 0 }
 
         for (const job of stale) {
@@ -269,27 +257,43 @@ export class JobLifecycle {
         return result
     }
 
-    private async expire(jobId: string, status: JobStatus): Promise<void> {
-        // Guarded on pending like every transition, so a job started since the sweep found it runs on.
-        if (status === JobStatus.Pending) {
-            await this.settle(
-                { _id: jobId, status: JobStatus.Pending },
-                { status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed, errorDetail: 'Never started' },
+    private findStaleJobs(userId: string | undefined, now: Date): Promise<Pick<StoredJob, '_id' | 'status'>[]> {
+        return this.model
+            .find(
+                {
+                    ...(userId ? { userId } : {}),
+                    $or: [
+                        // Aged from its creation: no step of the upload touches the job.
+                        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
+                        { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
+                        { status: { $in: IN_FLIGHT }, updatedAt: { $lt: new Date(now.getTime() - ANALYSIS_STALE_MS) } },
+                    ],
+                },
+                { _id: 1, status: 1 },
             )
+            .lean<Pick<StoredJob, '_id' | 'status'>[]>()
+    }
 
-            return
+    private async expire(jobId: string, status: JobStatus): Promise<void> {
+        switch (status) {
+            // Guarded on pending like every transition, so a job started since the sweep found it runs on.
+            case JobStatus.Pending:
+                await this.settle(
+                    { _id: jobId, status: JobStatus.Pending },
+                    { status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed, errorDetail: 'Never started' },
+                )
+
+                return
+            // The API instance died mid-start (verifying, or charging after it); the start's own charges, if it took
+            // any, are refunded with it.
+            case JobStatus.Verifying:
+                await this.failStart(jobId, JobErrorCode.VideoCheckFailed, 'The verification never finished')
+
+                return
+            default:
+                this.logger.warn(`job ${jobId} expired while ${status}`)
+                await this.fail(jobId, JobErrorCode.AnalysisTimedOut, 'No worker finished the analysis in time')
         }
-
-        // The API instance died mid-start (verifying, or charging after it); the start's own charges, if it took any,
-        // are refunded with it.
-        if (status === JobStatus.Verifying) {
-            await this.failStart(jobId, JobErrorCode.VideoCheckFailed, 'The verification never finished')
-
-            return
-        }
-
-        this.logger.warn(`job ${jobId} expired while ${status}`)
-        await this.fail(jobId, JobErrorCode.AnalysisTimedOut, 'No worker finished the analysis in time')
     }
 
     private transition(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<StoredJob | null> {

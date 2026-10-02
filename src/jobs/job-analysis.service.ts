@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
-import { type ApiError, JobErrorCode, type Job, type JobMedia, RequestErrorCode } from 'adlens-shared'
+import { type ApiError, type Job, JobErrorCode, type JobMedia, RequestErrorCode } from 'adlens-shared'
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
 import type { StoredJob } from '../database/job.doc'
@@ -56,25 +56,43 @@ export class JobAnalysisService {
             throw new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobNotPending, 'Job is not pending')
         }
 
-        const media = claimed.sampleId ? await this.checkSample(claimed) : await this.verifyUpload(claimed)
+        const media = await this.verifyVideo(claimed)
+        const queued = await this.queueRun(userId, jobId, claimed, media, ipSource)
+        const execution = await this.startWorker(jobId)
 
-        let queued: StoredJob
+        if (execution) {
+            await this.lifecycle.recordExecution(jobId, execution)
+        }
 
+        return toPublicJob(queued)
+    }
+
+    private verifyVideo(job: StoredJob): Promise<JobMedia> {
+        return job.sampleId ? this.checkSample(job) : this.verifyUpload(job)
+    }
+
+    private async queueRun(
+        userId: string,
+        jobId: string,
+        job: StoredJob,
+        media: JobMedia,
+        ipSource: IpSource,
+    ): Promise<StoredJob> {
         try {
             // Jobs created before the field existed have none: they get no pass.
-            const ipCharge = await this.admission.ipChargeFor(userId, ipSource, Boolean(claimed.hasPassedChallenge))
+            const ipCharge = await this.admission.ipChargeFor(userId, ipSource, Boolean(job.hasPassedChallenge))
 
-            queued = await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
+            return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
         } catch (err) {
             // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.
             await this.lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed, describeChargeFailure(err))
             throw err
         }
+    }
 
-        let execution: string | null
-
+    private async startWorker(jobId: string): Promise<string | null> {
         try {
-            execution = await this.dispatcher.dispatch(jobId)
+            return await this.dispatcher.dispatch(jobId)
         } catch (err) {
             this.logger.error(`dispatch failed for job ${jobId}: ${err instanceof Error ? err.message : err}`)
             await this.lifecycle.failDispatch(jobId)
@@ -84,12 +102,6 @@ export class JobAnalysisService {
                 'The analysis could not be started',
             )
         }
-
-        if (execution) {
-            await this.lifecycle.recordExecution(jobId, execution)
-        }
-
-        return toPublicJob(queued)
     }
 
     // A sample was measured when it was published, so its job skips verification; the one check is that a published
