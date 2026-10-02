@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { JobStatus } from 'adlens-shared'
 import { Model } from 'mongoose'
+import { describeError } from '../common/error-message'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { IN_PROGRESS_STATUSES, UNSTARTED_JOB_MS } from '../jobs/job-status'
 import { StorageService } from '../storage/storage.service'
@@ -37,9 +38,7 @@ export class AbandonedUploadCleanupService {
                 result.deleted++
             } catch (err) {
                 result.failed++
-                this.logger.error(
-                    `could not delete the video of job ${_id.toString()}: ${err instanceof Error ? err.message : err}`,
-                )
+                this.logger.error(`could not delete the video of job ${_id.toString()}: ${describeError(err)}`)
             }
         }
 

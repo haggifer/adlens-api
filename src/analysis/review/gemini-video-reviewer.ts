@@ -8,6 +8,7 @@ import {
 } from '@google/genai'
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { describeError } from '../../common/error-message'
 import type { Env } from '../../config/env'
 import { ModelAnswerError, ModelCallRefusedError } from '../pipeline/model-answer-error'
 import { RetryableError } from '../pipeline/retryable-error'
@@ -39,7 +40,7 @@ const toReviewError = (err: unknown): Error => {
     }
 
     // Provider overload, timeouts and network failures.
-    return new RetryableError(err instanceof Error ? err.message : String(err), { cause: refused ?? err })
+    return new RetryableError(describeError(err), { cause: refused ?? err })
 }
 
 // Gemini on Vertex AI: authenticates with ADC and reads the video straight from its gs:// URI. Temperature stays at the
@@ -119,7 +120,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
         try {
             output = parseReviewOutput(response.text)
         } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err)
+            const reason = describeError(err)
 
             throw new ModelAnswerError(`The model returned malformed output: ${reason}`, call, { cause: err })
         }

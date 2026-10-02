@@ -5,6 +5,7 @@ import type { Job } from 'adlens-shared'
 import { Model } from 'mongoose'
 import { Server, Socket } from 'socket.io'
 import { AuthService } from '../auth/auth.service'
+import { describeError } from '../common/error-message'
 import { JOB_MODEL, type JobDoc } from '../database/job.doc'
 import { IN_PROGRESS_STATUSES } from '../jobs/job-status'
 
@@ -36,7 +37,7 @@ export class JobsGateway implements OnGatewayConnection {
                 client.disconnect(true)
             }
         } catch (err) {
-            this.logger.error(`socket handshake failed: ${err instanceof Error ? err.message : String(err)}`)
+            this.logger.error(`socket handshake failed: ${describeError(err)}`)
             client.disconnect(true)
         }
     }

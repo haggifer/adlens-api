@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
 import { createLogger } from './common/cloud-logger'
+import { describeErrorWithStack } from './common/error-message'
 import type { Env } from './config/env'
 import { readLogFormat } from './config/log-format'
 import { WorkerModule } from './worker.module'
@@ -38,9 +39,7 @@ const run = async (): Promise<number> => {
     } catch (err) {
         // Anything that escapes the pipeline (it failed before claiming the job, or transiently) must be visible: locally
         // nothing retries, so without this line the job just sits queued until it expires.
-        logger.error(
-            `job ${jobId} attempt ${attempt} failed: ${err instanceof Error ? (err.stack ?? err.message) : err}`,
-        )
+        logger.error(`job ${jobId} attempt ${attempt} failed: ${describeErrorWithStack(err)}`)
         return EXIT_RETRY
     } finally {
         await app.close()
@@ -51,6 +50,6 @@ void run()
     .then((code) => process.exit(code))
     .catch((err: unknown) => {
         // Startup failed (config, database connection, module wiring) before the job could be looked at.
-        new Logger('Worker').error(`worker failed to start: ${err instanceof Error ? (err.stack ?? err.message) : err}`)
+        new Logger('Worker').error(`worker failed to start: ${describeErrorWithStack(err)}`)
         process.exit(EXIT_RETRY)
     })

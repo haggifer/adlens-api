@@ -8,6 +8,7 @@ import { anonymous } from 'better-auth/plugins/anonymous'
 import { type Db, type MongoClient, ObjectId } from 'mongodb'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { format } from 'node:util'
+import { describeError } from '../common/error-message'
 import { allowedWebOrigins } from '../config/web-origins'
 import { USER_COLLECTION } from '../database/user.doc'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
@@ -133,7 +134,7 @@ const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
     try {
         await Promise.all(messages.map((message) => mailer.send(message)))
     } catch (err) {
-        logger.error(`could not send an auth email: ${err instanceof Error ? err.message : err}`)
+        logger.error(`could not send an auth email: ${describeError(err)}`)
         throw new APIError('SERVICE_UNAVAILABLE', { code: EMAIL_NOT_SENT, message: 'The email could not be sent' })
     }
 }
@@ -165,7 +166,7 @@ export const createAuth = ({
 
             return allowed
         } catch (err) {
-            logger.error(`could not check the ${kind} email limit: ${err instanceof Error ? err.message : err}`)
+            logger.error(`could not check the ${kind} email limit: ${describeError(err)}`)
             return true
         }
     }
@@ -204,7 +205,7 @@ export const createAuth = ({
                 { $set: { lastSeenAt: new Date() } },
             )
         } catch (err) {
-            logger.error(`could not mark user ${userId} as seen: ${err instanceof Error ? err.message : err}`)
+            logger.error(`could not mark user ${userId} as seen: ${describeError(err)}`)
         }
     }
 
@@ -293,7 +294,7 @@ export const createAuth = ({
                         await onLinkAnonymous(anonymousUser.user.id, newUser.user.id)
                     } catch (err) {
                         logger.error(
-                            `could not move anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: ${err instanceof Error ? err.message : err}`,
+                            `could not move anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: ${describeError(err)}`,
                         )
                         throw new APIError('INTERNAL_SERVER_ERROR', {
                             code: ACCOUNT_LINK_FAILED,

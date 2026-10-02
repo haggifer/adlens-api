@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { type Analysis, JobErrorCode } from 'adlens-shared'
+import { describeError } from '../../common/error-message'
 import { gcsUri } from '../../common/paths'
 import type { ModelCall, StoredJob } from '../../database/job.doc'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
@@ -59,7 +60,7 @@ export class AnalysisPipeline {
 
             return isCompleted ? 'analyzed' : 'skipped'
         } catch (err) {
-            const detail = err instanceof Error ? err.message : String(err)
+            const detail = describeError(err)
 
             if (err instanceof ModelAnswerError) {
                 await this.lifecycle.addUsage(jobId, err.call)

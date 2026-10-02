@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { describeError } from '../common/error-message'
 
 // Startup-time validation of the mounted secrets bundle: fail fast, and never put a secret value in the message.
 export const readSecretsFile = (path: string | undefined): Record<string, string> => {
@@ -11,7 +12,7 @@ export const readSecretsFile = (path: string | undefined): Record<string, string
     try {
         raw = readFileSync(path, 'utf8')
     } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err)
+        const reason = describeError(err)
 
         throw new Error(`SECRETS_FILE: could not read "${path}": ${reason}`)
     }

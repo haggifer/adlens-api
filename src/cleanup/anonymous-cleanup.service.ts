@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose'
 import type { Connection, Types } from 'mongoose'
 import { AccountDataService } from '../account/account-data.service'
+import { describeError } from '../common/error-message'
 import { USER_COLLECTION, type UserExtras } from '../database/user.doc'
 import type { CleanupResult } from './types'
 
@@ -56,9 +57,7 @@ export class AnonymousCleanupService {
                 result.deleted++
             } catch (err) {
                 result.failed++
-                this.logger.error(
-                    `could not delete anonymous user ${userId}: ${err instanceof Error ? err.message : err}`,
-                )
+                this.logger.error(`could not delete anonymous user ${userId}: ${describeError(err)}`)
             }
         }
 

@@ -11,6 +11,7 @@ import { Model } from 'mongoose'
 import { randomUUID } from 'node:crypto'
 import { ChallengeVerifier } from '../challenge/challenge-verifier'
 import { ApiException } from '../common/api-exception'
+import { describeError } from '../common/error-message'
 import type { Env } from '../config/env'
 import { CONTACT_DRAFT_MODEL, type ContactDraftDoc, type ContactDraftFile } from '../database/contact-draft.doc'
 import type { IpSource } from '../ip-quota/client-ip'
@@ -105,7 +106,7 @@ export class ContactService {
         try {
             await this.mailer.send(contactEmail(to, { ...input, email }, attachments))
         } catch (err) {
-            this.logger.error(`could not send a contact message: ${err instanceof Error ? err.message : err}`)
+            this.logger.error(`could not send a contact message: ${describeError(err)}`)
             throw unavailable('The message could not be sent')
         }
     }
@@ -161,7 +162,7 @@ export class ContactService {
         try {
             objects = await Promise.all(files.map((file) => this.storage.readObject(file.path)))
         } catch (err) {
-            this.logger.error(`could not read a contact attachment: ${err instanceof Error ? err.message : err}`)
+            this.logger.error(`could not read a contact attachment: ${describeError(err)}`)
             throw unavailable('The message could not be sent')
         }
 

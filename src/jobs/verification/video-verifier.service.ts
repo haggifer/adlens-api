@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { JobErrorCode, type JobMedia, MAX_DURATION_S, MAX_UPLOAD_BYTES, videoMimeTypeSchema } from 'adlens-shared'
+import { describeError } from '../../common/error-message'
 import { StorageService } from '../../storage/storage.service'
 import { MediaProber, type ProbeResult, UndecodableMediaError } from './media-prober'
 
@@ -27,7 +28,7 @@ export class VideoVerifier {
         try {
             return await this.inspect(path)
         } catch (err) {
-            this.logger.warn(`verification of ${path} could not finish: ${err instanceof Error ? err.message : err}`)
+            this.logger.warn(`verification of ${path} could not finish: ${describeError(err)}`)
 
             return { kind: 'unavailable' }
         }

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose'
 import { Connection, mongo } from 'mongoose'
+import { describeError } from '../common/error-message'
 import type { StoredJob } from '../database/job.doc'
 import { toPublicJob } from '../jobs/job.mapper'
 import { JobsGateway } from './jobs.gateway'
@@ -61,9 +62,7 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
 
             if (job?.userId) {
                 this.gateway.publishJobUpdate(job.userId, toPublicJob(job)).catch((err: unknown) => {
-                    this.logger.error(
-                        `could not publish job ${job._id.toString()}: ${err instanceof Error ? err.message : err}`,
-                    )
+                    this.logger.error(`could not publish job ${job._id.toString()}: ${describeError(err)}`)
                 })
             }
         })

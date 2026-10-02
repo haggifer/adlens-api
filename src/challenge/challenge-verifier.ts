@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common'
+import { describeError } from '../common/error-message'
 
 // Tells people from bots. An abstract class so tests and the e2e suite replace it without reaching Cloudflare.
 export abstract class ChallengeVerifier {
@@ -59,7 +60,7 @@ export class TurnstileVerifier extends ChallengeVerifier {
 
             return result.success === true
         } catch (err) {
-            this.logger.error(`siteverify failed: ${err instanceof Error ? err.message : err}`)
+            this.logger.error(`siteverify failed: ${describeError(err)}`)
             return false
         }
     }

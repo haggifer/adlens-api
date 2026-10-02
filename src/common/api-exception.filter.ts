@@ -2,6 +2,7 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logge
 import { type ApiError, type ApiErrorCode, RequestErrorCode } from 'adlens-shared'
 import type { Response } from 'express'
 import { ApiException } from './api-exception'
+import { describeErrorWithStack } from './error-message'
 
 const CODE_BY_STATUS: Partial<Record<HttpStatus, ApiErrorCode>> = {
     [HttpStatus.BAD_REQUEST]: RequestErrorCode.ValidationFailed,
@@ -39,7 +40,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
             }
         }
 
-        this.logger.error(exception instanceof Error ? (exception.stack ?? exception.message) : String(exception))
+        this.logger.error(describeErrorWithStack(exception))
 
         return {
             statusCode: HttpStatus.INTERNAL_SERVER_ERROR,

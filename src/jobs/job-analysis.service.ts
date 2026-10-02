@@ -2,6 +2,7 @@ import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { type ApiError, type Job, JobErrorCode, type JobMedia, RequestErrorCode } from 'adlens-shared'
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
+import { describeError } from '../common/error-message'
 import type { StoredJob } from '../database/job.doc'
 import type { IpSource } from '../ip-quota/client-ip'
 import { SamplesService } from '../samples/samples.service'
@@ -94,7 +95,7 @@ export class JobAnalysisService {
         try {
             return await this.dispatcher.dispatch(jobId)
         } catch (err) {
-            this.logger.error(`dispatch failed for job ${jobId}: ${err instanceof Error ? err.message : err}`)
+            this.logger.error(`dispatch failed for job ${jobId}: ${describeError(err)}`)
             await this.lifecycle.failDispatch(jobId)
             throw new ApiException(
                 HttpStatus.SERVICE_UNAVAILABLE,

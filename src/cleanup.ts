@@ -5,6 +5,7 @@ import { AbandonedUploadCleanupService } from './cleanup/abandoned-upload-cleanu
 import { AnonymousCleanupService } from './cleanup/anonymous-cleanup.service'
 import { CleanupModule } from './cleanup/cleanup.module'
 import { createLogger } from './common/cloud-logger'
+import { describeErrorWithStack } from './common/error-message'
 import { readLogFormat } from './config/log-format'
 import { JobLifecycle } from './jobs/job-lifecycle.service'
 
@@ -40,6 +41,6 @@ const run = async (): Promise<number> => {
 void run()
     .then((code) => process.exit(code))
     .catch((err: unknown) => {
-        new Logger('Cleanup').error(`cleanup failed: ${err instanceof Error ? (err.stack ?? err.message) : err}`)
+        new Logger('Cleanup').error(`cleanup failed: ${describeErrorWithStack(err)}`)
         process.exit(EXIT_FAILED)
     })

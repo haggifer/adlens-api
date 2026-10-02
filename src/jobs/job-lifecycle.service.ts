@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import { type Analysis, JobErrorCode, type JobMedia, JobStatus, RequestErrorCode } from 'adlens-shared'
 import { type FilterQuery, Model, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
+import { describeError } from '../common/error-message'
 import { JOB_MODEL, type JobDoc, type ModelCall, type StoredJob } from '../database/job.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
@@ -28,8 +29,6 @@ const newRunId = () => new Types.ObjectId().toString()
 
 const jobChanged = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobNotPending, 'Job changed during verification')
-
-const describeError = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 // Adds a billed call to the job: to the totals across all its attempts, and to the list of calls kept for pricing.
 const recordCall = (call: ModelCall) => ({
