@@ -4,12 +4,11 @@ import { InjectConnection } from '@nestjs/mongoose'
 import { QUOTA_WINDOW_MS } from 'adlens-shared'
 import { type Connection, Types } from 'mongoose'
 import { countedRuns } from '../common/counted-runs'
+import { isDuplicateKeyError } from '../common/mongo-errors'
 import { isProvisional } from '../common/user-access'
 import type { Env } from '../config/env'
 import { IP_QUOTA_COLLECTION, type IpQuotaDoc, type IpRun } from '../database/ip-quota.doc'
 import { checkIpRules, type IpCharge, type IpLimits, type IpUsage, IpVerdict, toIpRefusal } from './ip-rules'
-
-const DUPLICATE_KEY = 11000
 
 const countedAnonymousRuns = (cutoff: Date) => ({
     $filter: { input: countedRuns(cutoff), cond: { $eq: ['$$this.anonymous', true] } },
@@ -108,7 +107,7 @@ export class IpQuotaService {
                 { upsert: true },
             )
         } catch (err) {
-            if ((err as { code?: unknown })?.code !== DUPLICATE_KEY) {
+            if (!isDuplicateKeyError(err)) {
                 throw err
             }
         }

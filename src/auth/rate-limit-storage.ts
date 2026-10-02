@@ -1,9 +1,9 @@
 import type { BetterAuthRateLimitStorage } from 'better-auth'
 import type { Db } from 'mongodb'
+import { isDuplicateKeyError } from '../common/mongo-errors'
 import { RATE_LIMIT_COLLECTION, type RateLimitDoc } from '../database/rate-limit.doc'
 import { deriveRateLimitKey, hashBucket } from '../ip-quota/ip-key'
 
-const DUPLICATE_KEY = 11000
 const EPOCH = new Date(0)
 
 type Consume = BetterAuthRateLimitStorage['consume']
@@ -47,7 +47,7 @@ export const createRateLimitStorage = (
             counter = await count(id, windowMs, at)
         } catch (err) {
             // Two first requests raced to create the counter; the loser's duplicate-key error only means it exists.
-            if ((err as { code?: unknown })?.code !== DUPLICATE_KEY) {
+            if (!isDuplicateKeyError(err)) {
                 throw err
             }
 
