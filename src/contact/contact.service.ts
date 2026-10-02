@@ -93,14 +93,14 @@ export class ContactService {
         const { ip, bucketKey } = this.network.resolve(ipSource)
         // Before the caps, so requests without a passed check can't use them up.
         const files = await this.admit(input, ip)
+        // Also before the caps: a refused upload must not cost the sender a message.
+        const attachments = await this.readAttachments(files)
         const email = input.email.toLowerCase()
         const isAllowed = await this.limits.allowMessage(bucketKey, email)
 
         if (!isAllowed) {
             throw rateLimited()
         }
-
-        const attachments = await this.readAttachments(files)
 
         try {
             await this.mailer.send(contactEmail(to, { ...input, email }, attachments))

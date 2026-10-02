@@ -816,6 +816,20 @@ describe('Jobs API (e2e)', () => {
                 expect(sendMail).not.toHaveBeenCalled()
             })
 
+            it("doesn't count a message whose images were refused", async () => {
+                for (let sent = 0; sent < 2; sent++) {
+                    await sendContact(MESSAGE).expect(204)
+                }
+
+                const draftId = await uploadDraft()
+
+                contactObjects.delete(`contact/${draftId}/0.png`)
+                await sendContact({ ...VISITOR, draftId }).expect(400)
+                await sendContact(MESSAGE).expect(204)
+
+                expect(sendMail).toHaveBeenCalledTimes(3)
+            })
+
             it('answers 503 and sends nothing when storage fails', async () => {
                 const draftId = await uploadDraft()
 

@@ -197,7 +197,8 @@ answering is a plain reply; its text isn't stored.
   one atomic pipeline upsert, so concurrent messages can't exceed a cap, under `HMAC-SHA256` of the email or the
   network key, never the address, deleted by a TTL index when its hour ends. The hour starts with a counter's first
   message. The caps are counted narrowest first and only while each passes, so a message the network or sender cap
-  refuses doesn't use up the total.
+  refuses doesn't use up the total. A message is counted only once its attachments were accepted, so a refused upload
+  doesn't cost the sender one.
 
 ## Authentication
 
