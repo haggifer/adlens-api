@@ -2,6 +2,14 @@ import type { AnalysisSettings } from 'adlens-shared'
 import { z } from 'zod'
 import type { AdvisoryProjection, ModelFinding, RuleProjection } from '../../rules'
 
+export interface ReviewOutput {
+    transcript: string
+    findings: ModelFinding[]
+    advisoryIds: string[]
+}
+
+type ParsedFinding = Omit<ModelFinding, 'time'> & { startS?: number; endS?: number }
+
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
 export const PROMPT_VERSION = '7'
 
@@ -30,34 +38,6 @@ const buildOutputSchema = (second: z.ZodInt) =>
 
 const reviewOutputSchema = buildOutputSchema(z.int().nonnegative())
 
-// Structured-output contract for the model, generated from the same Zod schema that parses the reply.
-export const buildReviewOutputJsonSchema = (durationS: number): Record<string, unknown> => {
-    const lastSecond = Math.max(1, Math.ceil(durationS))
-    const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(buildOutputSchema(z.int().min(0).max(lastSecond)))
-
-    return jsonSchema
-}
-
-export interface ReviewOutput {
-    transcript: string
-    findings: ModelFinding[]
-    advisoryIds: string[]
-}
-
-// Throws on anything that isn't valid JSON in the agreed shape; a retry of the same prompt won't fix that reliably.
-export const parseReviewOutput = (text: string | undefined): ReviewOutput => {
-    const output = reviewOutputSchema.parse(JSON.parse(text ?? ''))
-
-    return {
-        transcript: output.transcript.map((segment) => segment.text).join(' '),
-        findings: output.findings.map(({ startS, endS, ...finding }) => ({
-            ...finding,
-            time: startS === undefined ? undefined : { startS, endS },
-        })),
-        advisoryIds: output.advisories,
-    }
-}
-
 // With no platform or market chosen, every one's rules are sent (see selectRules), so the model must not read "none" as
 // "these rules don't apply here".
 const describeCampaign = (settings: AnalysisSettings): string =>
@@ -66,6 +46,30 @@ const describeCampaign = (settings: AnalysisSettings): string =>
         `Placements: ${settings.placements.join(', ') || 'not specified'}`,
         `Markets: ${settings.markets.join(', ') || 'all (none chosen)'}`,
     ].join('\n')
+
+const toModelFinding = ({ startS, endS, ...finding }: ParsedFinding): ModelFinding => ({
+    ...finding,
+    time: startS === undefined ? undefined : { startS, endS },
+})
+
+// Structured-output contract for the model, generated from the same Zod schema that parses the reply.
+export const buildReviewOutputJsonSchema = (durationS: number): Record<string, unknown> => {
+    const lastSecond = Math.max(1, Math.ceil(durationS))
+    const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(buildOutputSchema(z.int().min(0).max(lastSecond)))
+
+    return jsonSchema
+}
+
+// Throws on anything that isn't valid JSON in the agreed shape; a retry of the same prompt won't fix that reliably.
+export const parseReviewOutput = (text: string | undefined): ReviewOutput => {
+    const output = reviewOutputSchema.parse(JSON.parse(text ?? ''))
+
+    return {
+        transcript: output.transcript.map((segment) => segment.text).join(' '),
+        findings: output.findings.map(toModelFinding),
+        advisoryIds: output.advisories,
+    }
+}
 
 export const buildReviewPrompt = (
     settings: AnalysisSettings,

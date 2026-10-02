@@ -10,6 +10,7 @@ import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { describeError } from '../../common/error-message'
 import type { Env } from '../../config/env'
+import type { ModelCall } from '../../database/job.doc'
 import { ModelAnswerError, ModelCallRefusedError } from '../pipeline/model-answer-error'
 import { RetryableError } from '../pipeline/retryable-error'
 import { toModelCall } from './model-call'
@@ -43,6 +44,14 @@ const toReviewError = (err: unknown): Error => {
     return new RetryableError(describeError(err), { cause: refused ?? err })
 }
 
+const parseAnswer = (text: string | undefined, call: ModelCall): ReviewOutput => {
+    try {
+        return parseReviewOutput(text)
+    } catch (err) {
+        throw new ModelAnswerError(`The model returned malformed output: ${describeError(err)}`, call, { cause: err })
+    }
+}
+
 // Gemini on Vertex AI: authenticates with ADC and reads the video straight from its gs:// URI. Temperature stays at the
 // Gemini 3 default (1.0); Google warns that lower values can make these models loop.
 @Injectable()
@@ -63,33 +72,8 @@ export class GeminiVideoReviewer extends VideoReviewer {
         })
     }
 
-    async review({
-        videoUri,
-        mimeType,
-        durationS,
-        rules,
-        advisories,
-        settings,
-    }: VideoReviewRequest): Promise<VideoReview> {
-        let response: GenerateContentResponse
-
-        try {
-            response = await this.client.models.generateContent({
-                model: this.model,
-                contents: createUserContent([
-                    createPartFromUri(videoUri, mimeType),
-                    buildReviewPrompt(settings, rules, advisories),
-                ]),
-                config: {
-                    responseMimeType: 'application/json',
-                    responseJsonSchema: buildReviewOutputJsonSchema(durationS),
-                    maxOutputTokens: MAX_OUTPUT_TOKENS,
-                },
-            })
-        } catch (err) {
-            throw toReviewError(err)
-        }
-
+    async review(request: VideoReviewRequest): Promise<VideoReview> {
+        const response = await this.generate(request)
         const finishReason = response.candidates?.[0]?.finishReason
         const call = toModelCall(response.usageMetadata, finishReason, {
             model: this.model,
@@ -115,15 +99,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
             throw new ModelAnswerError(`The model stopped early: ${finishReason}`, call)
         }
 
-        let output: ReviewOutput
-
-        try {
-            output = parseReviewOutput(response.text)
-        } catch (err) {
-            const reason = describeError(err)
-
-            throw new ModelAnswerError(`The model returned malformed output: ${reason}`, call, { cause: err })
-        }
+        const output = parseAnswer(response.text, call)
 
         return {
             model: this.model,
@@ -132,6 +108,32 @@ export class GeminiVideoReviewer extends VideoReviewer {
             findings: output.findings,
             advisoryIds: output.advisoryIds,
             call,
+        }
+    }
+
+    private async generate({
+        videoUri,
+        mimeType,
+        durationS,
+        rules,
+        advisories,
+        settings,
+    }: VideoReviewRequest): Promise<GenerateContentResponse> {
+        try {
+            return await this.client.models.generateContent({
+                model: this.model,
+                contents: createUserContent([
+                    createPartFromUri(videoUri, mimeType),
+                    buildReviewPrompt(settings, rules, advisories),
+                ]),
+                config: {
+                    responseMimeType: 'application/json',
+                    responseJsonSchema: buildReviewOutputJsonSchema(durationS),
+                    maxOutputTokens: MAX_OUTPUT_TOKENS,
+                },
+            })
+        } catch (err) {
+            throw toReviewError(err)
         }
     }
 }

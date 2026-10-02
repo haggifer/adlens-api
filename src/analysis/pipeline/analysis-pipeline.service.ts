@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { type Analysis, JobErrorCode } from 'adlens-shared'
+import { type Analysis, JobErrorCode, type JobMedia } from 'adlens-shared'
 import { describeError } from '../../common/error-message'
 import { gcsUri } from '../../common/paths'
 import type { ModelCall, StoredJob } from '../../database/job.doc'
@@ -10,10 +10,12 @@ import {
     evaluateMetadataRules,
     projectAdvisoriesForModel,
     projectForModel,
+    type SelectedRules,
     selectRules,
 } from '../../rules'
 import { RulesetService } from '../../rules/ruleset.service'
-import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
+import type { RuleSet } from '../../rules/schema'
+import { type VideoReview, VideoReviewer, type VideoReviewRequest } from '../review/video-reviewer'
 import { isRefusedCall, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
 import { isRetryable } from './retryable-error'
 
@@ -28,6 +30,29 @@ export interface RunAttempt {
 interface CallMark {
     isKept: boolean
 }
+
+const toReviewRequest = (job: StoredJob, media: JobMedia, selected: SelectedRules): VideoReviewRequest => ({
+    videoUri: gcsUri(job.file.bucket, job.file.path),
+    mimeType: job.file.contentType,
+    durationS: media.durationS,
+    rules: projectForModel(selected.content),
+    advisories: projectAdvisoriesForModel(selected.advisory),
+    settings: job.settings,
+})
+
+const buildAnalysis = (ruleSet: RuleSet, selected: SelectedRules, review: VideoReview, media: JobMedia): Analysis => ({
+    model: review.model,
+    promptVersion: review.promptVersion,
+    rulesetVersion: ruleSet.meta.version,
+    transcript: review.transcript,
+    findings: buildFindings(ruleSet, selected.content, review.findings),
+    metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, media),
+    advisories: buildAdvisories(
+        ruleSet,
+        selected.advisory.filter((rule) => review.advisoryIds.includes(rule.id)),
+    ),
+    completedAt: new Date().toISOString(),
+})
 
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
 // attempt or the job holds the call mark (a retry could only refuse to call Gemini again); any other failure ends the
@@ -83,9 +108,9 @@ export class AnalysisPipeline {
             throw new Error('Job has no verified media')
         }
 
+        const jobId = job._id.toString()
         const ruleSet = await this.ruleset.current()
         const selected = selectRules(ruleSet, job.settings)
-        const jobId = job._id.toString()
         const isMarked = await this.lifecycle.markModelCall(jobId)
 
         mark.isKept = true
@@ -94,17 +119,14 @@ export class AnalysisPipeline {
             throw new ModelCallRepeatedError()
         }
 
-        let review: VideoReview
+        const review = await this.review(jobId, toReviewRequest(job, job.media, selected), mark)
 
+        return { analysis: buildAnalysis(ruleSet, selected, review, job.media), call: review.call }
+    }
+
+    private async review(jobId: string, request: VideoReviewRequest, mark: CallMark): Promise<VideoReview> {
         try {
-            review = await this.reviewer.review({
-                videoUri: gcsUri(job.file.bucket, job.file.path),
-                mimeType: job.file.contentType,
-                durationS: job.media.durationS,
-                rules: projectForModel(selected.content),
-                advisories: projectAdvisoriesForModel(selected.advisory),
-                settings: job.settings,
-            })
+            return await this.reviewer.review(request)
         } catch (err) {
             // Only a refusal is certainly unbilled. After a timeout or a dropped connection Vertex may still have
             // generated, and billed, an answer, so the mark stays and no attempt calls again.
@@ -114,23 +136,6 @@ export class AnalysisPipeline {
             }
 
             throw err
-        }
-
-        return {
-            analysis: {
-                model: review.model,
-                promptVersion: review.promptVersion,
-                rulesetVersion: ruleSet.meta.version,
-                transcript: review.transcript,
-                findings: buildFindings(ruleSet, selected.content, review.findings),
-                metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, job.media),
-                advisories: buildAdvisories(
-                    ruleSet,
-                    selected.advisory.filter((rule) => review.advisoryIds.includes(rule.id)),
-                ),
-                completedAt: new Date().toISOString(),
-            },
-            call: review.call,
         }
     }
 }
