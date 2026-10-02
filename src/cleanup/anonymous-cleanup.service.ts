@@ -28,13 +28,7 @@ export class AnonymousCleanupService {
         const users = this.connection.collection<UserExtras>(USER_COLLECTION)
         const sessions = this.connection.collection('session')
         const accounts = this.connection.collection('account')
-        const stale = users.find(
-            {
-                isAnonymous: true,
-                $or: [{ lastSeenAt: { $lt: cutoff } }, { lastSeenAt: { $exists: false }, createdAt: { $lt: cutoff } }],
-            },
-            { projection: { _id: 1 } },
-        )
+        const stale = this.findStaleUsers(cutoff)
         const result: CleanupResult = { deleted: 0, failed: 0 }
 
         for await (const { _id } of stale) {
@@ -64,5 +58,15 @@ export class AnonymousCleanupService {
         this.logger.log(`deleted ${result.deleted} anonymous users unused since ${cutoff.toISOString()}`)
 
         return result
+    }
+
+    private findStaleUsers(cutoff: Date) {
+        return this.connection.collection<UserExtras>(USER_COLLECTION).find(
+            {
+                isAnonymous: true,
+                $or: [{ lastSeenAt: { $lt: cutoff } }, { lastSeenAt: { $exists: false }, createdAt: { $lt: cutoff } }],
+            },
+            { projection: { _id: 1 } },
+        )
     }
 }
