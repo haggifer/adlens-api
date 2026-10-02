@@ -1,16 +1,14 @@
 import type { Types } from 'mongoose'
 
-// Better Auth owns the `user` collection. These are the fields AdLens reads or adds: `isAdmin` (set by hand),
-// `isAnonymous` (set by Better Auth's anonymous plugin), `emailVerified` (Better Auth's), `runs` (written by
-// QuotaService) and `lastSeenAt` (written by auth.instance.ts), never through Better Auth's endpoints.
-export const USER_COLLECTION = 'user'
-
 export interface QuotaRun {
     id: string
     startedAt: Date
     jobId: string
 }
 
+// Better Auth owns the `user` collection. These are the fields AdLens reads or adds: `isAdmin` (set by hand),
+// `isAnonymous` (set by Better Auth's anonymous plugin), `emailVerified` (Better Auth's), `runs` (written by
+// QuotaService) and `lastSeenAt` (written by auth.instance.ts), never through Better Auth's endpoints.
 export interface UserExtras {
     _id: Types.ObjectId
     isAdmin?: boolean
@@ -23,3 +21,5 @@ export interface UserExtras {
     lastSeenAt?: Date
     createdAt?: Date
 }
+
+export const USER_COLLECTION = 'user'
