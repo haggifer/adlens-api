@@ -4,8 +4,6 @@ import { ConfigService } from '@nestjs/config'
 import type { UploadTarget } from 'adlens-shared'
 import type { Env } from '../config/env'
 
-const SIGNED_URL_TTL_MS = 15 * 60 * 1000
-
 export interface ObjectInfo {
     sizeBytes: number
     contentType: string
@@ -20,6 +18,8 @@ export interface SignedReadUrl {
     url: string
     expiresAt: Date
 }
+
+const SIGNED_URL_TTL_MS = 15 * 60 * 1000
 
 const isNotFound = (err: unknown): boolean => (err as { code?: unknown })?.code === 404
 
@@ -48,13 +48,7 @@ export class StorageService {
             'x-goog-content-length-range': `${sizeBytes},${sizeBytes}`,
             'x-goog-if-generation-match': '0',
         }
-        const [url] = await this.object(path).getSignedUrl({
-            version: 'v4',
-            action: 'write',
-            expires: Date.now() + SIGNED_URL_TTL_MS,
-            contentType,
-            extensionHeaders,
-        })
+        const url = await this.signUploadUrl(path, contentType, extensionHeaders)
 
         return { url, headers: { 'Content-Type': contentType, ...extensionHeaders } }
     }
@@ -115,5 +109,21 @@ export class StorageService {
         await Promise.all(
             files.filter((file) => !keep.has(file.name)).map((file) => file.delete({ ignoreNotFound: true })),
         )
+    }
+
+    private async signUploadUrl(
+        path: string,
+        contentType: string,
+        extensionHeaders: Record<string, string>,
+    ): Promise<string> {
+        const [url] = await this.object(path).getSignedUrl({
+            version: 'v4',
+            action: 'write',
+            expires: Date.now() + SIGNED_URL_TTL_MS,
+            contentType,
+            extensionHeaders,
+        })
+
+        return url
     }
 }
