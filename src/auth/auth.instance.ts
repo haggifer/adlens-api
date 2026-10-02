@@ -18,31 +18,9 @@ import { isDisposableEmail } from './disposable-email'
 import { createRateLimitStorage } from './rate-limit-storage'
 import type { SocialProviderOptions } from './social-providers'
 
-export const AUTH = 'BETTER_AUTH'
-
-const RESET_TOKEN_TTL_S = 60 * 60
-
-// Bounds how many anonymous users one client can create by calling the API directly; the web only signs in
-// anonymously right before a first analysis.
-const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
-
-// Emails of one kind to one address per hour, whoever asks for them.
-const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 5 }
-
 type AuthEmailKind = 'confirmation' | 'reset'
 
-// Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
-const NO_PROVIDER_TOKENS = {
-    accessToken: null,
-    refreshToken: null,
-    idToken: null,
-    accessTokenExpiresAt: null,
-    refreshTokenExpiresAt: null,
-}
-
-// The anonymous plugin gives anonymous users `<id>@anonymous.placeholder.invalid` (createPlaceholderEmail in
-// @better-auth/core); the .invalid TLD can never receive mail.
-const ANONYMOUS_EMAIL_SUFFIX = '@anonymous.placeholder.invalid'
+type BetterAuthLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface AuthOptions {
     db: Db
@@ -57,9 +35,36 @@ export interface AuthOptions {
     onLinkAnonymous: (anonymousUserId: string, userId: string) => Promise<void>
 }
 
+export const AUTH = 'BETTER_AUTH'
+
+const RESET_TOKEN_TTL_S = 60 * 60
+
+// Bounds how many anonymous users one client can create by calling the API directly; the web only signs in
+// anonymously right before a first analysis.
+const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
+
+// Emails of one kind to one address per hour, whoever asks for them.
+const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 5 }
+
+// Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
+const NO_PROVIDER_TOKENS = {
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+}
+
+// The anonymous plugin gives anonymous users `<id>@anonymous.placeholder.invalid` (createPlaceholderEmail in
+// @better-auth/core); the .invalid TLD can never receive mail.
+const ANONYMOUS_EMAIL_SUFFIX = '@anonymous.placeholder.invalid'
+
 const logger = new Logger('Auth')
 
-type BetterAuthLogLevel = 'debug' | 'info' | 'warn' | 'error'
+// Better Auth calls its email callbacks through runInBackgroundOrAwait, which catches and only logs their errors, so a
+// failed send would still answer success. The callbacks therefore only queue the message in the request's outbox, and
+// the after hook below sends it and turns a failure into an error response.
+const outbox = new AsyncLocalStorage<MailMessage[]>()
 
 // Better Auth prints its own coloured lines by default; through Nest's logger they get a level on Cloud Logging too.
 const logBetterAuth = (level: BetterAuthLogLevel, message: string, ...args: unknown[]): void => {
@@ -79,13 +84,6 @@ const logBetterAuth = (level: BetterAuthLogLevel, message: string, ...args: unkn
             logger.log(text)
     }
 }
-
-// Better Auth calls its email callbacks through runInBackgroundOrAwait, which catches and only logs their errors, so a
-// failed send would still answer success. The callbacks therefore only queue the message in the request's outbox, and
-// the after hook below sends it and turns a failure into an error response.
-const outbox = new AsyncLocalStorage<MailMessage[]>()
-
-export const withOutbox = <T>(run: () => T): T => outbox.run([], run)
 
 // An anonymous user has no mailbox: a send would only fail the request.
 const isPlaceholderAddress = (address: string): boolean => address.endsWith(ANONYMOUS_EMAIL_SUFFIX)
@@ -138,6 +136,8 @@ const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
         throw new APIError('SERVICE_UNAVAILABLE', { code: EMAIL_NOT_SENT, message: 'The email could not be sent' })
     }
 }
+
+export const withOutbox = <T>(run: () => T): T => outbox.run([], run)
 
 // Better Auth on the app's Mongo connection. Sessions are httpOnly, SameSite=Lax cookies: in production the API
 // (api.useadlens.com) and the web app (www.useadlens.com) share the parent domain, so the cookie is first-party for both.
@@ -290,12 +290,13 @@ export const createAuth = ({
                 // Sign-up and sign-in link (they need the visitor's new password or own credentials); /verify-email
                 // never does, since it never creates a session.
                 onLinkAccount: async ({ anonymousUser, newUser }) => {
+                    const fromId = anonymousUser.user.id
+                    const toId = newUser.user.id
+
                     try {
-                        await onLinkAnonymous(anonymousUser.user.id, newUser.user.id)
+                        await onLinkAnonymous(fromId, toId)
                     } catch (err) {
-                        logger.error(
-                            `could not move anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}: ${describeError(err)}`,
-                        )
+                        logger.error(`could not move anonymous user ${fromId} to user ${toId}: ${describeError(err)}`)
                         throw new APIError('INTERNAL_SERVER_ERROR', {
                             code: ACCOUNT_LINK_FAILED,
                             message: 'The earlier analyses could not be moved',
@@ -306,59 +307,63 @@ export const createAuth = ({
         ],
         hooks: {
             before: createAuthMiddleware(async (ctx) => {
-                // That endpoint also deletes through the internal adapter, skipping the purge and orphaning the
-                // user's jobs and uploads.
-                if (ctx.path === '/delete-anonymous-user') {
-                    throw new APIError('NOT_FOUND', { message: 'Not found' })
-                }
+                switch (ctx.path) {
+                    // That endpoint also deletes through the internal adapter, skipping the purge and orphaning the
+                    // user's jobs and uploads.
+                    case '/delete-anonymous-user':
+                        throw new APIError('NOT_FOUND', { message: 'Not found' })
+                    // Otherwise an anonymous user could attach a provider and stay anonymous forever, with no email or
+                    // password of their own to ever link their history to a real account; an unconfirmed account is
+                    // limited the same way until it confirms.
+                    case '/link-social': {
+                        const session = await getSessionFromCtx(ctx)
 
-                // Otherwise an anonymous user could attach a provider and stay anonymous forever, with no email or
-                // password of their own to ever link their history to a real account; an unconfirmed account is
-                // limited the same way until it confirms.
-                if (ctx.path === '/link-social') {
-                    const session = await getSessionFromCtx(ctx)
+                        if (session && (session.user.isAnonymous || !session.user.emailVerified)) {
+                            throw new APIError('FORBIDDEN', {
+                                code: ACCOUNT_LINK_FAILED,
+                                message: 'Sign up or sign in, and confirm your email, before linking a provider',
+                            })
+                        }
 
-                    if (session && (session.user.isAnonymous || !session.user.emailVerified)) {
-                        throw new APIError('FORBIDDEN', {
-                            code: ACCOUNT_LINK_FAILED,
-                            message: 'Sign up or sign in, and confirm your email, before linking a provider',
-                        })
-                    }
-                }
-
-                // Only the account's own session may confirm its email: anyone the link reaches (a forwarded mail, a
-                // link mailed to a visitor on purpose) could otherwise confirm an address, or act in a session, that
-                // isn't theirs. With no account session the web asks the visitor to sign in and opens the link again.
-                if (ctx.path === '/verify-email') {
-                    const tokenEmail = await getTokenEmail(ctx.query?.token, ctx.context.secret)
-
-                    if (!tokenEmail) {
                         return
                     }
+                    // Only the account's own session may confirm its email: anyone the link reaches (a forwarded mail,
+                    // a link mailed to a visitor on purpose) could otherwise confirm an address, or act in a session,
+                    // that isn't theirs. With no account session the web asks the visitor to sign in and opens the
+                    // link again.
+                    case '/verify-email': {
+                        const tokenEmail = await getTokenEmail(ctx.query?.token, ctx.context.secret)
 
-                    // No refresh, so a refused request never sets a cookie.
-                    const session = await getSessionFromCtx(ctx, { disableRefresh: true })
+                        if (!tokenEmail) {
+                            return
+                        }
 
-                    if (!session || session.user.isAnonymous) {
-                        throw new APIError('UNAUTHORIZED', {
-                            code: SIGN_IN_REQUIRED,
-                            message: 'Sign in to confirm your email',
-                        })
+                        // No refresh, so a refused request never sets a cookie.
+                        const session = await getSessionFromCtx(ctx, { disableRefresh: true })
+
+                        if (!session || session.user.isAnonymous) {
+                            throw new APIError('UNAUTHORIZED', {
+                                code: SIGN_IN_REQUIRED,
+                                message: 'Sign in to confirm your email',
+                            })
+                        }
+
+                        if (normalizeEmail(session.user.email) !== tokenEmail) {
+                            throw new APIError('FORBIDDEN', {
+                                code: EMAIL_MISMATCH,
+                                message: 'This link is for a different account',
+                            })
+                        }
+
+                        return
                     }
-
-                    if (normalizeEmail(session.user.email) !== tokenEmail) {
-                        throw new APIError('FORBIDDEN', {
-                            code: EMAIL_MISMATCH,
-                            message: 'This link is for a different account',
-                        })
-                    }
-                }
-
-                if (ctx.path === '/sign-up/email' && isDisposableEmail(String(ctx.body?.email ?? ''))) {
-                    throw new APIError('BAD_REQUEST', {
-                        code: RequestErrorCode.DisposableEmail,
-                        message: 'Sign up with a permanent email address',
-                    })
+                    case '/sign-up/email':
+                        if (isDisposableEmail(String(ctx.body?.email ?? ''))) {
+                            throw new APIError('BAD_REQUEST', {
+                                code: RequestErrorCode.DisposableEmail,
+                                message: 'Sign up with a permanent email address',
+                            })
+                        }
                 }
             }),
             after: createAuthMiddleware(async () => sendQueuedMail(mailer)),

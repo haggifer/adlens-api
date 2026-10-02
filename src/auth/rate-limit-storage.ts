@@ -37,22 +37,24 @@ export const createRateLimitStorage = (
         )
     }
 
-    const consume: Consume = async (rawKey, { window, max }) => {
-        const id = hashBucket(key, rawKey)
-        const windowMs = window * 1000
-        const at = now()
-        let counter: RateLimitDoc | null
-
+    const countRetryingRace = async (id: string, windowMs: number, at: number): Promise<RateLimitDoc | null> => {
         try {
-            counter = await count(id, windowMs, at)
+            return await count(id, windowMs, at)
         } catch (err) {
             // Two first requests raced to create the counter; the loser's duplicate-key error only means it exists.
             if (!isDuplicateKeyError(err)) {
                 throw err
             }
 
-            counter = await count(id, windowMs, at)
+            return count(id, windowMs, at)
         }
+    }
+
+    const consume: Consume = async (rawKey, { window, max }) => {
+        const id = hashBucket(key, rawKey)
+        const windowMs = window * 1000
+        const at = now()
+        const counter = await countRetryingRace(id, windowMs, at)
 
         if (!counter || counter.count <= max) {
             return { allowed: true, retryAfter: null }
