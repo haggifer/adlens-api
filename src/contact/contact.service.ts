@@ -34,6 +34,14 @@ const invalidDraft = (message: string) =>
 const rateLimited = () =>
     new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.RateLimited, 'Too many messages')
 
+const toDraftFiles = (draftId: string, files: CreateContactUploadsInput['files']): ContactDraftFile[] =>
+    files.map(({ name, contentType, size }, index) => ({
+        path: contactAttachmentPath(draftId, index, contentType),
+        name,
+        contentType,
+        size,
+    }))
+
 @Injectable()
 export class ContactService {
     private readonly logger = new Logger(ContactService.name)
@@ -64,12 +72,7 @@ export class ContactService {
         }
 
         const draftId = randomUUID()
-        const files = input.files.map(({ name, contentType, size }, index) => ({
-            path: contactAttachmentPath(draftId, index, contentType),
-            name,
-            contentType,
-            size,
-        }))
+        const files = toDraftFiles(draftId, input.files)
 
         await this.drafts.create({ _id: draftId, files, expiresAt: new Date(Date.now() + DRAFT_TTL_MS), usedAt: null })
 
@@ -137,14 +140,7 @@ export class ContactService {
             return []
         }
 
-        const now = new Date()
-        const draft = await this.drafts
-            .findOneAndUpdate(
-                { _id: input.draftId, usedAt: null, expiresAt: { $gt: now } },
-                { $set: { usedAt: now } },
-                { new: true },
-            )
-            .lean()
+        const draft = await this.useDraft(input.draftId)
 
         if (!draft) {
             throw invalidDraft('Unknown, used or expired draft')
@@ -153,15 +149,20 @@ export class ContactService {
         return draft.files
     }
 
-    private async readAttachments(files: ContactDraftFile[]): Promise<MailAttachment[]> {
-        let objects: (ObjectContent | null)[]
+    private useDraft(draftId: string): Promise<ContactDraftDoc | null> {
+        const now = new Date()
 
-        try {
-            objects = await Promise.all(files.map((file) => this.storage.readObject(file.path)))
-        } catch (err) {
-            this.logger.error(`could not read a contact attachment: ${describeError(err)}`)
-            throw unavailable('The message could not be sent')
-        }
+        return this.drafts
+            .findOneAndUpdate(
+                { _id: draftId, usedAt: null, expiresAt: { $gt: now } },
+                { $set: { usedAt: now } },
+                { new: true },
+            )
+            .lean<ContactDraftDoc>()
+    }
+
+    private async readAttachments(files: ContactDraftFile[]): Promise<MailAttachment[]> {
+        const objects = await this.readObjects(files)
 
         return files.map((file, index) => {
             const object = objects[index]
@@ -172,5 +173,14 @@ export class ContactService {
 
             return { filename: attachmentFilename(file.name, file.contentType), content: object.content }
         })
+    }
+
+    private async readObjects(files: ContactDraftFile[]): Promise<(ObjectContent | null)[]> {
+        try {
+            return await Promise.all(files.map((file) => this.storage.readObject(file.path)))
+        } catch (err) {
+            this.logger.error(`could not read a contact attachment: ${describeError(err)}`)
+            throw unavailable('The message could not be sent')
+        }
     }
 }
