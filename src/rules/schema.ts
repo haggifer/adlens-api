@@ -21,13 +21,24 @@ export const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
     [Platform.Amazon]: [RulePlatform.Amazon],
 }
 
+export const toRatio = (label: string): number => {
+    const [width, height] = label.split(':').map(Number)
+
+    return width / height
+}
+
 // A ratio as the platforms write it, width:height ("9:16", "1.91:1").
-const aspectRatioSchema = z.string().regex(/^\d+(\.\d+)?:\d+(\.\d+)?$/)
+const aspectRatioSchema = z
+    .string()
+    .regex(/^\d+(\.\d+)?:\d+(\.\d+)?$/)
+    .refine((label) => label.split(':').every((part) => Number(part) > 0), { message: 'both parts must be positive' })
 
 // Platforms that accept several ratios (TikTok: 9:16, 1:1 or 16:9) or a range (Pinterest: 1:2 to 1.91:1) keep them in
 // `params`; a single required ratio stays `aspect_ratio_in` with `value`.
 export const aspectRatioListParamsSchema = z.object({ ratios: z.array(aspectRatioSchema).min(1) })
-export const aspectRatioRangeParamsSchema = z.object({ min: aspectRatioSchema, max: aspectRatioSchema })
+export const aspectRatioRangeParamsSchema = z
+    .object({ min: aspectRatioSchema, max: aspectRatioSchema })
+    .refine(({ min, max }) => toRatio(min) <= toRatio(max), { message: 'min must not be above max' })
 
 const RATIO_PARAMS_SCHEMAS: Partial<Record<string, z.ZodType>> = {
     aspect_ratio_one_of: aspectRatioListParamsSchema,

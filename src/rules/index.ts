@@ -14,6 +14,7 @@ import {
     type Rule,
     RULE_PLATFORMS,
     type RuleSet,
+    toRatio,
 } from './schema'
 
 const ASPECT_RATIO_TOLERANCE = 0.02
@@ -93,12 +94,6 @@ const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string 
     quote: rule.quote,
     ref: resolveRef(rule.ref, ruleSet.sources),
 })
-
-const toRatio = (label: string): number => {
-    const [width, height] = label.split(':').map(Number)
-
-    return width / height
-}
 
 const evaluateAspectRatio = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 'verdict' | 'detail'> => {
     if (media.width === undefined || media.height === undefined) {

@@ -326,7 +326,8 @@ selected by some settings. Selected rules are then routed by `modality`:
 
 - `metadata` → checked in code against the measured media facts (duration, dimensions as displayed after the video's
   rotation, real object size); an aspect ratio can be one required ratio (`aspect_ratio_in`), a list
-  (`aspect_ratio_one_of`, `params.ratios`) or a range (`aspect_ratio_between`, `params.min`/`max`), written as `W:H`;
+  (`aspect_ratio_one_of`, `params.ratios`) or a range (`aspect_ratio_between`, `params.min`/`max`, min not above
+  max), written as `W:H` with both parts positive;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
   source link are attached back by id, and ids the model invents are dropped;
 - `out_of_creative` → an advisory checklist, never judged: the model only names the advisories whose subject the ad
