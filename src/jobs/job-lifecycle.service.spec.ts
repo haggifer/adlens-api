@@ -20,6 +20,7 @@ import { QuotaService } from '../quota/quota.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { JobLifecycle } from './job-lifecycle.service'
+import { UNSTARTED_JOB_MS } from './job-status'
 import { buildModelCall, usageOf } from '../testing/model-call'
 
 const USER = new Types.ObjectId().toString()
@@ -110,6 +111,9 @@ describe('JobLifecycle', () => {
     }
 
     // Bypasses Mongoose's timestamps, so the job looks as if it was last touched at that moment.
+    const createdAt = (jobId: string, at: Date) =>
+        jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { createdAt: at } })
+
     const lastTouchedAt = (jobId: string, at: Date) =>
         jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { updatedAt: at } })
 
@@ -521,6 +525,47 @@ describe('JobLifecycle', () => {
             })
             expect(await usedRuns()).toBe(0)
             expect(await networkRuns()).toBe(0)
+        })
+
+        it('ends a job still pending 6 hours after its creation as UPLOAD_FAILED, however recently touched', async () => {
+            const unstarted = await createJob()
+            const young = await createJob()
+
+            expect(UNSTARTED_JOB_MS).toBe(6 * 60 * 60 * 1000)
+            await createdAt(unstarted, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            await createdAt(young, new Date(NOW.getTime() - UNSTARTED_JOB_MS))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(unstarted)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.UploadFailed,
+            })
+            expect((await findJob(young))?.status).toBe(JobStatus.Pending)
+        })
+
+        it('leaves an unstarted job alone when it was started after the sweep found it', async () => {
+            const jobId = await createJob()
+
+            await lifecycle.claimForVerification(USER, jobId)
+            jest.spyOn(jobs, 'find').mockReturnValueOnce({
+                lean: async () => [{ _id: new Types.ObjectId(jobId), status: JobStatus.Pending }],
+            } as never)
+
+            await lifecycle.expireStaleJobs(undefined, NOW)
+
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Verifying)
+        })
+
+        it("ends every user's unstarted jobs in the daily sweep, and counts them", async () => {
+            const own = await createJob()
+            const othersJob = await createJob(JobStatus.Pending, OTHER_USER)
+
+            await createdAt(own, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            await createdAt(othersJob, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+
+            expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 2, failed: 0 })
+            expect((await findJob(othersJob))?.errorCode).toBe(JobErrorCode.UploadFailed)
         })
 
         it("only expires the given user's jobs", async () => {

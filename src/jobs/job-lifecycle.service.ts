@@ -7,6 +7,7 @@ import { JOB_MODEL, type JobDoc, type ModelCall, type StoredJob } from '../datab
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
+import { UNSTARTED_JOB_MS } from './job-status'
 
 const VERIFY_STALE_MS = 10 * 60 * 1000
 // Past the worker's worst case: a 15-minute task timeout across 3 attempts, plus start-up time.
@@ -205,14 +206,17 @@ export class JobLifecycle {
     }
 
     // Closes the jobs abandoned mid-flight (a worker crashed, timed out or never started), so no job shows progress
-    // forever: this user's on every read of their jobs, everyone's in the daily cleanup, for owners who never come
-    // back. A job that can't be closed is left for the next run.
+    // forever, and the jobs never started, whose upload never came or whose run the web never asked for: this user's
+    // on every read of their jobs, everyone's in the daily cleanup, for owners who never come back. A job that can't
+    // be closed is left for the next run.
     async expireStaleJobs(userId?: string, now = new Date()): Promise<ExpirySweepResult> {
         const stale = await this.model
             .find(
                 {
                     ...(userId ? { userId } : {}),
                     $or: [
+                        // Aged from its creation: no step of the upload touches the job.
+                        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
                         { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
                         { status: { $in: IN_FLIGHT }, updatedAt: { $lt: new Date(now.getTime() - ANALYSIS_STALE_MS) } },
                     ],
@@ -266,6 +270,16 @@ export class JobLifecycle {
     }
 
     private async expire(jobId: string, status: JobStatus): Promise<void> {
+        // Guarded on pending like every transition, so a job started since the sweep found it runs on.
+        if (status === JobStatus.Pending) {
+            await this.settle(
+                { _id: jobId, status: JobStatus.Pending },
+                { status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed, errorDetail: 'Never started' },
+            )
+
+            return
+        }
+
         // The API instance died mid-start (verifying, or charging after it); the start's own charges, if it took any,
         // are refunded with it.
         if (status === JobStatus.Verifying) {

@@ -32,15 +32,16 @@ their own repos.
   it can never start another worker.
 - **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
   started by Cloud Scheduler at 03:00 UTC. It first expires every user's abandoned jobs, as a read of one's own jobs
-  does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges. Then
-  it deletes anonymous users unused for a week (see Authentication), and the video of every job that backs no results:
-  created over 6 hours ago and `pending` or `error`, so never started, failed, rejected or expired
+  does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges, and
+  ends every job still `pending` 6 hours after its creation as `UPLOAD_FAILED`. Then it deletes anonymous users unused
+  for a week (see Authentication), and the video of every job that backs no results: created over 6 hours ago and
+  `error` (failed, rejected, expired or never started) or still `pending`
   ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Jobs are aged from their
   creation, not their last update, so a job expired earlier in the same run loses its video in that run; a job still
   in progress after the expiry is running, and keeps its video. Every object's path is made from its user and job ids,
   so the jobs find them all. The job document stays, marked `videoDeletedAt` so it is handled once (with no upper age
-  bound, a missed or failed day is caught up the next), and analyzing it later answers `UPLOAD_INCOMPLETE`. An
-  analyzed job keeps its video, which its findings' timestamps replay, and a sample's shared video is never deleted.
+  bound, a missed or failed day is caught up the next). An analyzed job keeps its video, which its findings'
+  timestamps replay, and a sample's shared video is never deleted.
   Last, it retries the refunds that ended jobs still owe (see Quota), including any the expiry couldn't make. A step
   that fails for one job or user logs it and goes on; any failure makes the execution exit 1.
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
@@ -101,7 +102,9 @@ conditional update on the expected current status, so two racing callers can nev
    job at once rather than leave it to a retry that could only do the same.
 5. **Nothing stays in flight forever**: when a user reads their jobs, and for every user in the daily cleanup, anything
    stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes ends as `VIDEO_CHECK_FAILED`,
-   `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded.
+   `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded. A job still `pending` 6 hours after its
+   creation (its upload never came, or no run was started) ends as `UPLOAD_FAILED`; each of these is a conditional
+   update on the status it was found in, so a job started meanwhile runs on.
 
 **Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
 confirmed account. An anonymous user and an account that hasn't confirmed its email get one

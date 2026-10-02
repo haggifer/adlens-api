@@ -20,8 +20,9 @@ const run = async (): Promise<number> => {
 
     try {
         const lifecycle = app.get(JobLifecycle)
-        // First, so the steps below see the abandoned jobs ended and refunded: an anonymous user is purged after their
-        // jobs' charges went back, and the last sweep retries the refunds the expiry couldn't make.
+        // First, so the steps below see the abandoned and never started jobs ended and refunded: an anonymous user is
+        // purged after their jobs' charges went back, the videos of jobs it ended go in this run, and the last sweep
+        // retries the refunds the expiry couldn't make.
         const expired = await lifecycle.expireStaleJobs()
         const anonymous = await app.get(AnonymousCleanupService).run()
         const uploads = await app.get(AbandonedUploadCleanupService).run()

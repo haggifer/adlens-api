@@ -1,16 +1,16 @@
 import { Logger } from '@nestjs/common'
-import { JobStatus, VideoMimeType } from 'adlens-shared'
+import { JobErrorCode, JobStatus, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
 import { IP_QUOTA_MODEL, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import { JobLifecycle } from '../jobs/job-lifecycle.service'
-import { IN_PROGRESS_STATUSES } from '../jobs/job-status'
+import { IN_PROGRESS_STATUSES, UNSTARTED_JOB_MS } from '../jobs/job-status'
 import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
-import { AbandonedUploadCleanupService, UNUSED_VIDEO_MS } from './abandoned-upload-cleanup.service'
+import { AbandonedUploadCleanupService } from './abandoned-upload-cleanup.service'
 
 const NOW = new Date('2026-10-20T03:00:00Z')
 const HOUR_MS = 60 * 60 * 1000
@@ -65,7 +65,7 @@ describe('AbandonedUploadCleanupService', () => {
     })
 
     it('waits 6 hours after a job was created', () => {
-        expect(UNUSED_VIDEO_MS).toBe(6 * HOUR_MS)
+        expect(UNSTARTED_JOB_MS).toBe(6 * HOUR_MS)
     })
 
     it.each([JobStatus.Pending, JobStatus.Error])(
@@ -117,6 +117,19 @@ describe('AbandonedUploadCleanupService', () => {
         jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 
         expect(await lifecycle.expireStaleJobs(undefined, now)).toEqual({ expired: 1, failed: 0 })
+        expect(await cleanup.run(now)).toEqual({ deleted: 1, failed: 0 })
+        expect(storage.delete).toHaveBeenCalledWith(path)
+    })
+
+    it('deletes the video of a job the same run ended for never starting', async () => {
+        const now = new Date()
+        const quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
+        const ipQuota = new IpQuotaService(mongo.connection, configStub({}))
+        const lifecycle = new JobLifecycle(jobs, quota, ipQuota)
+        const { jobId, path } = await createJob(7, {}, now)
+
+        expect(await lifecycle.expireStaleJobs(undefined, now)).toEqual({ expired: 1, failed: 0 })
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed })
         expect(await cleanup.run(now)).toEqual({ deleted: 1, failed: 0 })
         expect(storage.delete).toHaveBeenCalledWith(path)
     })
