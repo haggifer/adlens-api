@@ -11,6 +11,8 @@ export class MeController {
 
     @Get('quota')
     async getQuota(@CurrentUser() userId: string): Promise<QuotaResponse> {
-        return { quota: await this.quota.get(userId) }
+        const quota = await this.quota.get(userId)
+
+        return { quota }
     }
 }
