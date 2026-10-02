@@ -33,7 +33,8 @@ const MAX_OUTPUT_TOKENS = 8192
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
 const toReviewError = (err: unknown): Error => {
-    // The SDK throws ApiError only for a response with an error status; a timeout or a network failure is anything else.
+    // The SDK throws ApiError only for a response with an error status; a timeout or a network failure is anything
+    // else.
     const refused = err instanceof ApiError ? new ModelCallRefusedError(err.message, err.status, { cause: err }) : null
 
     if (refused && !RETRYABLE_STATUSES.has(refused.status)) {

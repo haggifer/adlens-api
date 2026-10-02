@@ -140,7 +140,8 @@ const sendQueuedMail = async (mailer: Mailer): Promise<void> => {
 export const withOutbox = <T>(run: () => T): T => outbox.run([], run)
 
 // Better Auth on the app's Mongo connection. Sessions are httpOnly, SameSite=Lax cookies: in production the API
-// (api.useadlens.com) and the web app (www.useadlens.com) share the parent domain, so the cookie is first-party for both.
+// (api.useadlens.com) and the web app (www.useadlens.com) share the parent domain, so the cookie is first-party for
+// both.
 export const createAuth = ({
     db,
     client,

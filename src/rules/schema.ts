@@ -9,8 +9,8 @@ import {
 } from 'adlens-shared'
 import { z } from 'zod'
 
-// The rule platforms whose policies govern ads on each platform. YouTube ads are bought and reviewed through Google Ads,
-// so Google Ads policy applies to them too.
+// The rule platforms whose policies govern ads on each platform. YouTube ads are bought and reviewed through Google
+// Ads, so Google Ads policy applies to them too.
 export const RULE_PLATFORMS: Record<Platform, RulePlatform[]> = {
     [Platform.Meta]: [RulePlatform.Meta],
     [Platform.TikTok]: [RulePlatform.TikTok],
