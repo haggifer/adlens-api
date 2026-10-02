@@ -69,7 +69,7 @@ export class JobAnalysisService {
     }
 
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
-        return job.sampleId ? this.checkSample(job) : this.verifyUpload(job)
+        return job.sampleId ? this.verifySample(job) : this.verifyUpload(job)
     }
 
     private async queueRun(
@@ -107,7 +107,7 @@ export class JobAnalysisService {
 
     // A sample was measured when it was published, so its job skips verification; the one check is that a published
     // sample still points at the job's video.
-    private async checkSample(job: StoredJob): Promise<JobMedia> {
+    private async verifySample(job: StoredJob): Promise<JobMedia> {
         const isPublished = await this.samples.isPublishedPath(job.file.path)
 
         if (!isPublished || !job.media) {
