@@ -35,4 +35,14 @@ describe('ResendMailer', () => {
 
         expect(sentBody()).not.toHaveProperty('attachments')
     })
+
+    it("reports a refusal by its status alone, since Resend's body can quote the recipient", async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response('{"message":"Invalid `to` field: team@adlens.test"}', { status: 422 }),
+        )
+
+        await expect(new ResendMailer('key', 'AdLens <hello@mail.adlens.test>').send(MESSAGE)).rejects.toThrow(
+            /^Resend responded 422$/,
+        )
+    })
 })

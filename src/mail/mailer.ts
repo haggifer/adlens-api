@@ -45,8 +45,9 @@ export class ResendMailer extends Mailer {
             }),
         })
 
+        // The status only: the callers log this message, and Resend's error body can quote the recipient's address.
         if (!response.ok) {
-            throw new Error(`Resend responded ${response.status}: ${await response.text()}`)
+            throw new Error(`Resend responded ${response.status}`)
         }
     }
 }
