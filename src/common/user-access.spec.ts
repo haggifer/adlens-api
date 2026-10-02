@@ -1,6 +1,9 @@
 import { HttpStatus } from '@nestjs/common'
 import { RequestErrorCode } from 'adlens-shared'
-import { getUserAccess, isProvisional, toProvisionalRefusal, UserAccess } from './user-access'
+import { Types } from 'mongoose'
+import { USER_COLLECTION } from '../database/user.doc'
+import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
+import { getUserAccess, isProvisional, readUserAccess, toProvisionalRefusal, UserAccess } from './user-access'
 
 describe('getUserAccess', () => {
     it('reads an admin first, whatever else the document says', () => {
@@ -19,6 +22,32 @@ describe('getUserAccess', () => {
 
     it('reads a confirmed account as a member', () => {
         expect(getUserAccess({ isAnonymous: false, emailVerified: true })).toBe(UserAccess.Member)
+    })
+})
+
+describe('readUserAccess', () => {
+    let mongo: MemoryMongo
+
+    beforeAll(async () => {
+        mongo = await startMemoryMongo()
+    })
+
+    afterAll(async () => {
+        await mongo.stop()
+    })
+
+    it("reads the access from the user's document", async () => {
+        const _id = new Types.ObjectId()
+
+        await mongo.connection.collection(USER_COLLECTION).insertOne({ _id, isAnonymous: true, emailVerified: false })
+
+        await expect(readUserAccess(mongo.connection, _id.toString())).resolves.toBe(UserAccess.Anonymous)
+    })
+
+    it('reads a user without a document as unconfirmed', async () => {
+        await expect(readUserAccess(mongo.connection, new Types.ObjectId().toString())).resolves.toBe(
+            UserAccess.Unconfirmed,
+        )
     })
 })
 

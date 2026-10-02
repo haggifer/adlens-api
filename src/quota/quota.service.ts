@@ -8,6 +8,7 @@ import { countedRuns } from '../common/counted-runs'
 import {
     getUserAccess,
     isProvisional,
+    readUserAccess,
     toProvisionalRefusal,
     USER_ACCESS_PROJECTION,
     UserAccess,
@@ -73,12 +74,9 @@ export class QuotaService {
         )
 
         if (!charged) {
-            const user = await this.users.findOne(
-                { _id: new Types.ObjectId(userId) },
-                { projection: USER_ACCESS_PROJECTION },
-            )
+            const access = await readUserAccess(this.connection, userId)
 
-            throw toQuotaRefusal(getUserAccess(user))
+            throw toQuotaRefusal(access)
         }
 
         return run.id

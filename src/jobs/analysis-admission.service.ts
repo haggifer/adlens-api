@@ -1,11 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose'
 import { RequestErrorCode } from 'adlens-shared'
-import { type Connection, Types } from 'mongoose'
+import type { Connection } from 'mongoose'
 import { ChallengeVerifier } from '../challenge/challenge-verifier'
 import { ApiException } from '../common/api-exception'
-import { getUserAccess, USER_ACCESS_PROJECTION, UserAccess } from '../common/user-access'
-import { USER_COLLECTION, type UserExtras } from '../database/user.doc'
+import { readUserAccess, UserAccess } from '../common/user-access'
 import type { IpSource } from '../ip-quota/client-ip'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
@@ -34,7 +33,7 @@ export class AnalysisAdmission {
     // At job creation, read-only, so nobody uploads a video only to be refused at analyze. The Turnstile token is
     // verified only when a rule asks for it, and the job records that it passed.
     async admit(userId: string, ipSource: IpSource, challengeToken: string | undefined): Promise<Admission> {
-        const [quota, access] = await Promise.all([this.quota.get(userId), this.getAccess(userId)])
+        const [quota, access] = await Promise.all([this.quota.get(userId), readUserAccess(this.connection, userId)])
 
         if (quota.limit !== null && quota.used >= quota.limit) {
             throw toQuotaRefusal(access)
@@ -67,20 +66,12 @@ export class AnalysisAdmission {
 
     // At analyze: what to charge the network, or null for an admin.
     async ipChargeFor(userId: string, ipSource: IpSource, hasPassedChallenge: boolean): Promise<IpCharge | null> {
-        const access = await this.getAccess(userId)
+        const access = await readUserAccess(this.connection, userId)
 
         if (access === UserAccess.Admin) {
             return null
         }
 
         return { bucketKey: this.network.resolve(ipSource).bucketKey, access, hasPassedChallenge }
-    }
-
-    private async getAccess(userId: string): Promise<UserAccess> {
-        const user = await this.connection
-            .collection<UserExtras>(USER_COLLECTION)
-            .findOne({ _id: new Types.ObjectId(userId) }, { projection: USER_ACCESS_PROJECTION })
-
-        return getUserAccess(user)
     }
 }
