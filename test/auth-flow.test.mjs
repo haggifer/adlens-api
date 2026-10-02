@@ -701,6 +701,10 @@ test('a failed move leaves the anonymous user and its data in place', async () =
 
     assert.equal(signedUp.status, 500)
     assert.equal(body.code, 'ACCOUNT_LINK_FAILED')
+    assert.ok(
+        signedUp.headers.getSetCookie().some((c) => /session_token=[^;]/.test(c)),
+        'the account is signed in despite the failed move',
+    )
     assert.ok(linked, 'the account being linked to still exists')
     assert.ok(anonymousAfter, "the anonymous user wasn't deleted")
     assert.deepEqual(
@@ -708,6 +712,43 @@ test('a failed move leaves the anonymous user and its data in place', async () =
         ['anonymous-run'],
     )
     assert.equal(anonymousJobs.length, 1)
+})
+
+test('signing up from an anonymous session with the mailer down still moves its history and signs the account in', async () => {
+    const { ObjectId } = require('mongodb')
+    const email = 'linker-mail-down@example.com'
+    const anonymous = await signInAnonymously()
+    const jobPath = `users/${anonymous.user.id}/jobs/mail-down/video`
+
+    await withDb((db) => db.collection('jobs').insertOne(storedJob(anonymous.user.id, jobPath)))
+
+    isMailDown = true
+
+    let signedUp
+    try {
+        signedUp = await post(
+            '/api/auth/sign-up/email',
+            { name: 'Linker', email, password: 'first-password' },
+            anonymous.cookie,
+        )
+    } finally {
+        isMailDown = false
+    }
+    const body = await signedUp.json()
+    const [account, anonymousAfter, movedJob] = await withDb((db) =>
+        Promise.all([
+            db.collection('user').findOne({ email }),
+            db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
+            db.collection('jobs').findOne({ 'file.path': jobPath }),
+        ]),
+    )
+
+    assert.equal(signedUp.status, 503)
+    assert.equal(body.code, 'EMAIL_NOT_SENT')
+    assert.ok(signedUp.headers.getSetCookie().some((c) => /session_token=[^;]/.test(c)))
+    assert.equal((await sessionUser(cookieOf(signedUp))).email, email)
+    assert.equal(movedJob.userId, account._id.toString())
+    assert.equal(anonymousAfter, null)
 })
 
 const SAMPLE_SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
