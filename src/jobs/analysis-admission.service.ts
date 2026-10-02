@@ -1,9 +1,7 @@
-import { HttpStatus, Injectable } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose'
-import { RequestErrorCode } from 'adlens-shared'
 import type { Connection } from 'mongoose'
-import { ChallengeVerifier } from '../challenge/challenge-verifier'
-import { ApiException } from '../common/api-exception'
+import { challengeFailed, ChallengeVerifier } from '../challenge/challenge-verifier'
 import { readUserAccess, UserAccess } from '../common/user-access'
 import type { IpSource } from '../ip-quota/client-ip'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
@@ -14,9 +12,6 @@ import { QuotaService, toQuotaRefusal } from '../quota/quota.service'
 export interface Admission {
     hasPassedChallenge: boolean
 }
-
-const challengeFailed = () =>
-    new ApiException(HttpStatus.FORBIDDEN, RequestErrorCode.ChallengeFailed, 'The challenge did not pass')
 
 // Whether a user may start one more analysis from their network. Admins skip every network rule, as they skip the
 // user cap; an unconfirmed account meets the rules of an anonymous user.

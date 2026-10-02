@@ -1,19 +1,27 @@
-import { Logger } from '@nestjs/common'
+import { HttpStatus, Logger } from '@nestjs/common'
+import { RequestErrorCode } from 'adlens-shared'
+import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
-
-// Tells people from bots. An abstract class so tests and the e2e suite replace it without reaching Cloudflare.
-export abstract class ChallengeVerifier {
-    abstract verify(token: string, remoteIp: string | null): Promise<boolean>
-}
-
-const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
-const TIMEOUT_MS = 5000
 
 type Fetch = (...args: Parameters<typeof fetch>) => Promise<Response>
 
 interface SiteverifyResult {
     success?: boolean
     'error-codes'?: string[]
+}
+
+const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
+const TIMEOUT_MS = 5000
+
+const toSiteverifyBody = (secret: string, token: string, remoteIp: string | null): URLSearchParams =>
+    new URLSearchParams({ secret, response: token, ...(remoteIp ? { remoteip: remoteIp } : {}) })
+
+export const challengeFailed = () =>
+    new ApiException(HttpStatus.FORBIDDEN, RequestErrorCode.ChallengeFailed, 'The challenge did not pass')
+
+// Tells people from bots. An abstract class so tests and the e2e suite replace it without reaching Cloudflare.
+export abstract class ChallengeVerifier {
+    abstract verify(token: string, remoteIp: string | null): Promise<boolean>
 }
 
 // Fails closed: without a secret, or when Cloudflare can't be reached, a required check doesn't pass. Tokens are
@@ -34,18 +42,8 @@ export class TurnstileVerifier extends ChallengeVerifier {
             return false
         }
 
-        const body = new URLSearchParams({
-            secret: this.secret,
-            response: token,
-            ...(remoteIp ? { remoteip: remoteIp } : {}),
-        })
-
         try {
-            const response = await this.fetchFn(SITEVERIFY_URL, {
-                method: 'POST',
-                body,
-                signal: AbortSignal.timeout(TIMEOUT_MS),
-            })
+            const response = await this.postSiteverify(toSiteverifyBody(this.secret, token, remoteIp))
 
             if (!response.ok) {
                 this.logger.error(`siteverify responded ${response.status}`)
@@ -63,5 +61,9 @@ export class TurnstileVerifier extends ChallengeVerifier {
             this.logger.error(`siteverify failed: ${describeError(err)}`)
             return false
         }
+    }
+
+    private postSiteverify(body: URLSearchParams): Promise<Response> {
+        return this.fetchFn(SITEVERIFY_URL, { method: 'POST', body, signal: AbortSignal.timeout(TIMEOUT_MS) })
     }
 }

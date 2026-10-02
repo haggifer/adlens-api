@@ -9,7 +9,7 @@ import {
 } from 'adlens-shared'
 import { Model } from 'mongoose'
 import { randomUUID } from 'node:crypto'
-import { ChallengeVerifier } from '../challenge/challenge-verifier'
+import { challengeFailed, ChallengeVerifier } from '../challenge/challenge-verifier'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
 import type { Env } from '../config/env'
@@ -30,9 +30,6 @@ const unavailable = (message: string) =>
 
 const invalidDraft = (message: string) =>
     new ApiException(HttpStatus.BAD_REQUEST, RequestErrorCode.ValidationFailed, message)
-
-const challengeFailed = () =>
-    new ApiException(HttpStatus.FORBIDDEN, RequestErrorCode.ChallengeFailed, 'The challenge did not pass')
 
 const rateLimited = () =>
     new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.RateLimited, 'Too many messages')
