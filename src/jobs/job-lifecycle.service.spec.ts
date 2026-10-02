@@ -44,7 +44,7 @@ const ANALYSIS: Analysis = {
     completedAt: '2026-09-29T10:00:00.000Z',
 }
 const CALL = buildModelCall()
-const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30, IP_FAILURE_REFUND_LIMIT: 1 }
+const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
 const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', access: UserAccess.Member, hasPassedChallenge: false }
 // JobLifecycle's own thresholds: a verification or an analysis idle for longer than these was abandoned.
 const VERIFY_STALE_MS = 10 * 60 * 1000
@@ -66,8 +66,6 @@ describe('JobLifecycle', () => {
         mongo.connection.collection<IpQuotaDoc>(IP_QUOTA_COLLECTION).findOne({ _id: NETWORK_CHARGE.bucketKey })
 
     const networkRuns = async () => ((await network())?.runs ?? []).length
-
-    const refundedFailures = async () => ((await network())?.refundedFailures ?? []).length
 
     const createJob = async (status = JobStatus.Pending, userId = USER): Promise<string> => {
         const job = await jobs.create({
@@ -445,37 +443,6 @@ describe('JobLifecycle', () => {
             expect(await usedRuns()).toBe(0)
             expect(await networkRuns()).toBe(0)
         })
-
-        it('refunds a run that failed after a possibly billed call from the allowance once, even when retried', async () => {
-            const jobId = await queueJob(NETWORK_CHARGE)
-
-            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
-
-            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'malformed', { isPossiblyBilled: true })
-            expect(await usedRuns()).toBe(1)
-
-            await lifecycle.expireStale(USER, NOW)
-
-            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
-            expect(await usedRuns()).toBe(0)
-            expect(await networkRuns()).toBe(0)
-            expect(await refundedFailures()).toBe(1)
-        })
-
-        it('keeps both runs counted once the network used its refunds, and clears the job all the same', async () => {
-            const refunded = await queueJob(NETWORK_CHARGE)
-            const kept = await queueJob(NETWORK_CHARGE)
-
-            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-            await lifecycle.fail(refunded, JobErrorCode.AnalysisFailed, 'malformed', { isPossiblyBilled: true })
-            await lifecycle.fail(kept, JobErrorCode.AnalysisFailed, 'malformed', { isPossiblyBilled: true })
-            await lifecycle.expireStale(USER, NOW)
-
-            expect(await findJob(kept)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
-            expect(await usedRuns()).toBe(1)
-            expect(await networkRuns()).toBe(1)
-        })
     })
 
     describe('expiring abandoned jobs', () => {
@@ -594,6 +561,24 @@ describe('JobLifecycle', () => {
             expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
             expect(await usedRuns()).toBe(0)
             expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 0, failed: 0 })
+        })
+
+        it('refunds in full a job the removed refund cap left holding its charges', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+            jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'malformed')
+            await jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { isRefundCapped: true } })
+            await mongo.connection
+                .collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
+                .updateOne({ _id: NETWORK_CHARGE.bucketKey }, { $set: { 'runs.$[].isRefundRefused': true } })
+
+            expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 1, failed: 0 })
+            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
         })
 
         it('counts a refund that fails again, and keeps its charges for the next sweep', async () => {

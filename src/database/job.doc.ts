@@ -69,9 +69,6 @@ export const jobDocSchema = z.object({
     chargedRunId: z.string().nullable(),
     // The network's run (IpQuotaService), likewise; null when none is held (admins are never charged).
     chargedIpRunId: z.string().nullable(),
-    // The run failed after a Gemini call that may have been billed, so its refund counts against the network's
-    // allowance of them. Kept with the charges until they are refunded, so a retry decides the same way.
-    isRefundCapped: z.boolean().optional(),
     // Set at creation when a Turnstile check passed; analyze relies on it for the network rules.
     hasPassedChallenge: z.boolean().default(false),
     usage: tokenUsageSchema.optional(),

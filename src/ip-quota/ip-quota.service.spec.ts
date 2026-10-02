@@ -7,7 +7,7 @@ import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { IpQuotaService } from './ip-quota.service'
 import type { IpCharge } from './ip-rules'
 
-const LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 5, IP_HARD_LIMIT: 8, IP_FAILURE_REFUND_LIMIT: 2 }
+const LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 5, IP_HARD_LIMIT: 8 }
 const NOW = new Date('2026-09-28T10:00:00Z')
 const NETWORK = 'network-key'
 
@@ -166,62 +166,20 @@ describe('IpQuotaService', () => {
         expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([kept])
     })
 
-    it('refunds failed analyses until the network used its weekly allowance of them, then keeps the run', async () => {
-        const [first, second, third] = [
-            await ipQuota.charge(member(), 'job-1', NOW),
-            await ipQuota.charge(member(), 'job-2', NOW),
-            await ipQuota.charge(member(), 'job-3', NOW),
-        ]
+    it('refunds and charges a network that still holds what the removed refund cap stored', async () => {
+        const kept = { id: 'kept-run', startedAt: NOW, jobId: 'job-1', anonymous: false, isRefundRefused: true }
 
-        expect(await ipQuota.refundFailure(first, NOW)).toBe(true)
-        expect(await ipQuota.refundFailure(second, NOW)).toBe(true)
-        expect(await ipQuota.refundFailure(third, NOW)).toBe(false)
-        expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([third])
-    })
+        await buckets().insertOne({
+            _id: NETWORK,
+            runs: [kept],
+            refundedFailures: [NOW, NOW, NOW],
+            expiresAt: new Date(NOW.getTime() + QUOTA_WINDOW_MS),
+        } as IpQuotaDoc)
 
-    it('allows refunded failures again a window after the earlier ones', async () => {
-        const later = new Date(NOW.getTime() + QUOTA_WINDOW_MS + 1)
-        const [first, second] = [
-            await ipQuota.charge(member(), 'job-1', NOW),
-            await ipQuota.charge(member(), 'job-2', NOW),
-        ]
+        await ipQuota.refund(kept.id)
+        const charged = await ipQuota.charge(member(), 'job-2', NOW)
 
-        await ipQuota.refundFailure(first, NOW)
-        await ipQuota.refundFailure(second, NOW)
-        const third = await ipQuota.charge(member(), 'job-3', later)
-
-        expect(await ipQuota.refundFailure(third, later)).toBe(true)
-    })
-
-    it("reports a run it can't find (refunded earlier, or out of the window) as no longer counted", async () => {
-        expect(await ipQuota.refundFailure('unknown-run', NOW)).toBe(true)
-        expect(await buckets().findOne({ _id: NETWORK })).toBeNull()
-    })
-
-    it('refunds a failed run once, however often it is asked, using one refund of the allowance', async () => {
-        const runId = await ipQuota.charge(member(), 'job-1', NOW)
-
-        expect(await ipQuota.refundFailure(runId, NOW)).toBe(true)
-        expect(await ipQuota.refundFailure(runId, NOW)).toBe(true)
-        expect((await buckets().findOne({ _id: NETWORK }))?.refundedFailures).toEqual([NOW])
-    })
-
-    it('keeps a run it refused to refund counted, even once the allowance frees up', async () => {
-        const later = new Date(NOW.getTime() + QUOTA_WINDOW_MS - 1)
-        const [first, second, third] = [
-            await ipQuota.charge(member(), 'job-1', NOW),
-            await ipQuota.charge(member(), 'job-2', NOW),
-            await ipQuota.charge(member(), 'job-3', later),
-        ]
-
-        await ipQuota.refundFailure(first, NOW)
-        await ipQuota.refundFailure(second, NOW)
-        expect(await ipQuota.refundFailure(third, later)).toBe(false)
-
-        const afterAllowanceFreed = new Date(NOW.getTime() + QUOTA_WINDOW_MS + 1)
-
-        expect(await ipQuota.refundFailure(third, afterAllowanceFreed)).toBe(false)
-        expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([third])
+        expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([charged])
     })
 
     it('pushes the expiry out with every charge', async () => {

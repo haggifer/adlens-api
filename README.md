@@ -129,7 +129,6 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 | Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
 | Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
-| Refunded failures after a possibly billed Gemini call, per network | `IP_FAILURE_REFUND_LIMIT` (3) | the failed run stays counted, for the user and the network |
 
 - **The network** is the IPv4 address or the IPv6 /64 prefix (an IPv4-mapped address counts as IPv4). The address is
   the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` from the right (1 on Cloud Run: the one Google's front end appends),
@@ -144,18 +143,15 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
   (`chargedRunId`, `chargedIpRunId`) before charging and clears them once both are refunded, so each is refunded at
   most once and never lost.
-- **Failed analyses**: a failure before the Gemini call, a call Vertex refused with an HTTP error status, and a stuck
-  worker are always refunded. Once Gemini has answered, the call is billed even when the answer can't be used (cut
-  off, blocked or malformed), and a call that timed out, lost its connection or failed unknowably may have been
-  billed too. So any failure while the job keeps the call mark (`modelCallStartedAt`, cleared only after a refusal),
-  on whichever attempt, is refunded only while the network has refunds of those left
-  (`IpQuotaService.refundFailure`, one conditional update that records the refund's time in `refundedFailures`);
-  otherwise both runs stay counted, and the run is marked so a retry gives the same answer. The job keeps
-  `isRefundCapped` with its charges until they are settled, so a retried refund is capped the same way. Without the
-  cap, a video that always fails could be re-run for free until the Vertex spend cap stopped every analysis. An
-  answer that can't be used (cut off, a blocked prompt, malformed: `ModelAnswerError`) is never retried, since another
-  attempt would be billed again, and its tokens are added to the job's `usage`. A job whose earlier attempt may have
-  been billed (`modelCallStartedAt` set: the call timed out, lost its connection or got an answer) fails the same way.
+- **Failed analyses**: a run that ends without a result is never counted. Every failure refunds both runs, the
+  user's and the network's, in full: a failure before the Gemini call, a call Vertex refused with an HTTP error
+  status, a stuck worker, and a call that may have been billed alike. Once Gemini has answered, the call is billed
+  even when the answer can't be used (cut off, blocked or malformed), and a call that timed out, lost its connection
+  or failed unknowably may have been billed too, so Gemini is still called at most once per job: the job keeps the
+  call mark (`modelCallStartedAt`, cleared only after a refusal). An answer that can't be used (cut off, a blocked
+  prompt, malformed: `ModelAnswerError`) is never retried, since another attempt would be billed again, and its
+  tokens are added to the job's `usage`. A job whose earlier attempt may have been billed (`modelCallStartedAt` set:
+  the call timed out, lost its connection or got an answer) fails the same way.
 - **Turnstile** ([`ChallengeVerifier`](src/challenge/challenge-verifier.ts)): the web runs the check when an analysis
   starts, for visitors without a confirmed account, and sends its token with the job creation; members send none unless the
   API answers `CHALLENGE_REQUIRED`, after which the web runs the check and creates the job again. The API calls Cloudflare's `siteverify` only when a rule
@@ -396,7 +392,6 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window |
 | `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
-| `IP_FAILURE_REFUND_LIMIT`| `3`                     | Refunds per network of analyses that failed after a possibly billed Gemini call |
 | `TRUSTED_PROXY_HOPS`     | `1`                     | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                   |
 | `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
 | `GEMINI_MODEL`           | `gemini-3.8-flash`      | Model id                                                                    |
@@ -519,8 +514,13 @@ Why the system is built this way, and what was rejected. Decisions that span the
   failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. A retry calls Gemini again
   only if no earlier call may have been billed (none was made, or Vertex refused it): a malformed answer used to get
   one retry (generation is stochastic), but that billed the job twice, so since 2026-10-01 an unusable answer fails
-  the job at once, and so does any other possibly billed call, transient or not, refunded within the network's weekly
-  cap. `maxOutputTokens` caps what the one call can cost.
+  the job at once, and so does any other possibly billed call, transient or not. `maxOutputTokens` caps what the one
+  call can cost.
+- **A run that ends without a result is never counted.** Until 2026-10-02 a network had 3 refunds a week
+  (`IP_FAILURE_REFUND_LIMIT`) of failures after a possibly billed call, past which the failed run stayed counted for
+  the user and the network, so a video that always fails couldn't be re-run for free. It was removed so that nobody
+  is charged for a run that gave them nothing: every failure is refunded in full. Gemini is still called at most once
+  per job, and the Vertex spend cap bounds what repeated failures can cost.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and

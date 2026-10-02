@@ -25,11 +25,14 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   needs a new one). Other changes don't need this.
 - A job is created `pending`; after that, `JobLifecycle` is the only code that changes its status, and every transition
   is a conditional update on the expected current status. Don't write `status` anywhere else.
+- A run that ends without a result is never counted: every failure refunds the user's run and the network's in full,
+  even after a Gemini call that may have been billed. Gemini is still called at most once per job (the
+  `modelCallStartedAt` mark), so that refund never pays for a second call.
 - A quota charge is refunded at most once and never lost. The job records the run ids (`chargedRunId`,
   `chargedIpRunId`) before charging and keeps them until both refunds succeed; every refund is safe to repeat (`$pull`
-  by run id, `refundFailure` per run id), and ended jobs still holding ids are retried by `refundOwedCharges` (on
-  every read of the user's jobs and in the daily cleanup). Never clear those ids before the refunds succeed. Never
-  store a network key or an address on a job.
+  by run id), and ended jobs still holding ids are retried by `refundOwedCharges` (on every read of the user's jobs
+  and in the daily cleanup). Never clear those ids before the refunds succeed. Never store a network key or an address
+  on a job.
 - The client's address comes only from `ClientNetworkResolver` (`X-Forwarded-For` read `TRUSTED_PROXY_HOPS` from the
   right). Never store or log an address; networks are stored as an HMAC.
 - Better Auth resolves the address itself for its rate limits and sessions. Keep its counters in

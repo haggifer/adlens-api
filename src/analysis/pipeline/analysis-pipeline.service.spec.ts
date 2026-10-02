@@ -103,7 +103,7 @@ describe('AnalysisPipeline', () => {
             new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })),
             new IpQuotaService(
                 mongo.connection,
-                configStub({ IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30, IP_FAILURE_REFUND_LIMIT: 1 }),
+                configStub({ IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }),
             ),
         )
     })
@@ -249,7 +249,8 @@ describe('AnalysisPipeline', () => {
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).not.toHaveBeenCalled()
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
-        expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
     })
 
     it('fails a transient failure to store the answer in place, since a retry could not call Gemini again', async () => {
@@ -260,7 +261,8 @@ describe('AnalysisPipeline', () => {
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
-        expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
     })
 
     it('calls Gemini again after Vertex answered with an HTTP error status, which is never billed', async () => {
@@ -284,7 +286,8 @@ describe('AnalysisPipeline', () => {
         expect(reviewer.review).toHaveBeenCalledTimes(1)
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
         expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
-        expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
     })
 
     it('keeps the mark after an unknown failure of the call', async () => {
@@ -308,67 +311,58 @@ describe('AnalysisPipeline', () => {
         expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
     })
 
-    it('keeps a failed answer counted once the network used up its refunded failures', async () => {
+    it('refunds every possibly billed failure, for the user and the network, however many the network had', async () => {
         reviewer.next = () => Promise.reject(cutOff())
 
-        await pipeline.run(await queueJob(NETWORK), { isLast: false })
-        await pipeline.run(await queueJob(NETWORK), { isLast: false })
+        // More than the weekly allowance of refunded failures a network had until 2026-10-02 (3).
+        for (let i = 0; i < 4; i++) {
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: false })).toBe('failed')
+            expect(await used()).toBe(0)
+            expect(await usedByNetwork()).toBe(0)
+        }
 
-        expect(await used()).toBe(1)
-        expect(await usedByNetwork()).toBe(1)
+        expect(reviewer.review).toHaveBeenCalledTimes(4)
     })
 
-    it('still refunds a failure the provider caused, whatever the network used up', async () => {
-        reviewer.next = () => Promise.reject(cutOff())
-        await pipeline.run(await queueJob(NETWORK), { isLast: false })
-        reviewer.next = () => Promise.reject(overloaded())
-
-        expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
-        expect(await used()).toBe(0)
-        expect(await usedByNetwork()).toBe(0)
-    })
-
-    describe('a call that may have been billed counts against the refunded failures, however it failed', () => {
-        const refundedFailures = async () =>
-            (await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures ?? []
+    describe('refunds a run that ends without a result in full, however it failed', () => {
+        const expectRefunded = async () => {
+            expect(await used()).toBe(0)
+            expect(await usedByNetwork()).toBe(0)
+        }
 
         it('a call that timed out on the last attempt', async () => {
-            const jobId = await queueJob(NETWORK)
-
             reviewer.next = () => Promise.reject(timedOut())
 
-            expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
-            expect(await refundedFailures()).toHaveLength(1)
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+            await expectRefunded()
         })
 
         it('an unknown failure of the call', async () => {
-            const jobId = await queueJob(NETWORK)
-
             reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
 
-            expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
-            expect(await refundedFailures()).toHaveLength(1)
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: false })).toBe('failed')
+            await expectRefunded()
         })
 
         it('a failure to store the answer on the last attempt', async () => {
-            const jobId = await queueJob(NETWORK)
-
             jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(mongoBlip())
 
-            expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
-            expect(await refundedFailures()).toHaveLength(1)
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+            await expectRefunded()
         })
 
-        it('but not a call Vertex refused, nor a failure before the call', async () => {
+        it('a call Vertex refused on the last attempt', async () => {
             reviewer.next = () => Promise.reject(overloaded())
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
 
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+            await expectRefunded()
+        })
+
+        it('a failure before the call', async () => {
             jest.spyOn(lifecycle, 'markModelCall').mockRejectedValueOnce(new Error('mark failed'))
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
 
-            expect(await refundedFailures()).toHaveLength(0)
-            expect(await used()).toBe(0)
-            expect(await usedByNetwork()).toBe(0)
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+            await expectRefunded()
         })
     })
 

@@ -19,9 +19,9 @@ const OWING = [JobStatus.Pending, JobStatus.Verifying, JobStatus.Error]
 // Not `verifying`: chargeAndQueue holds the charges it is taking there until the job is queued.
 const SWEPT = [JobStatus.Pending, JobStatus.Error]
 
-type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId' | 'isRefundCapped'>
+type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
 
-const HELD_CHARGES_PROJECTION = { userId: 1, chargedRunId: 1, chargedIpRunId: 1, isRefundCapped: 1 }
+const HELD_CHARGES_PROJECTION = { userId: 1, chargedRunId: 1, chargedIpRunId: 1 }
 
 const newRunId = () => new Types.ObjectId().toString()
 
@@ -39,12 +39,6 @@ const recordCall = (call: ModelCall) => ({
     },
     $push: { 'usage.calls': call },
 })
-
-export interface FailOptions {
-    // The job kept the Gemini call mark, so a call may have been billed, whether or not it answered: the refund then
-    // counts against the network's allowance of refunded failures.
-    isPossiblyBilled?: boolean
-}
 
 export interface ExpirySweepResult {
     expired: number
@@ -184,17 +178,12 @@ export class JobLifecycle {
         await this.model.updateOne({ _id: jobId }, recordCall(call))
     }
 
-    // queued / analyzing → error, with the charges refunded.
-    async fail(
-        jobId: string,
-        errorCode: JobErrorCode,
-        detail: string,
-        { isPossiblyBilled = false }: FailOptions = {},
-    ): Promise<boolean> {
+    // queued / analyzing → error, with the charges refunded in full: a run that ends without a result is never
+    // counted, whatever its Gemini call may have cost.
+    async fail(jobId: string, errorCode: JobErrorCode, detail: string): Promise<boolean> {
         return this.settle(
             { _id: jobId, status: { $in: IN_FLIGHT } },
             { status: JobStatus.Error, errorCode, errorDetail: detail },
-            isPossiblyBilled,
         )
     }
 
@@ -283,10 +272,8 @@ export class JobLifecycle {
 
     // Applies a guarded status change, then refunds the charges the job holds. A failed refund leaves them on the job,
     // where the next sweep finds them; the status change stands either way.
-    private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>, isRefundCapped = false): Promise<boolean> {
-        const settled = await this.model
-            .findOneAndUpdate(filter, { $set: isRefundCapped ? { ...set, isRefundCapped } : set }, { new: true })
-            .lean<StoredJob>()
+    private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<boolean> {
+        const settled = await this.model.findOneAndUpdate(filter, { $set: set }, { new: true }).lean<StoredJob>()
 
         if (!settled) {
             return false
@@ -336,31 +323,17 @@ export class JobLifecycle {
             return
         }
 
-        // The network decides: past its allowance of refunded failures, both runs stay counted, which bounds what a
-        // video that always fails can cost. A job with no network run (an admin's) is refunded in full.
-        if (job.isRefundCapped && ipRunId) {
-            const isRefunded = await this.ipQuota.refundFailure(ipRunId)
+        // Both refunds run to the end even when one fails, so a failure can't skip the other.
+        const refunds = await Promise.allSettled([this.refundUser(job.userId, runId), this.refundNetwork(ipRunId)])
+        const failed = refunds.find((refund) => refund.status === 'rejected')
 
-            if (isRefunded) {
-                await this.refundUser(job.userId, runId)
-            } else {
-                this.logger.warn(
-                    `job ${job._id.toString()} failed after the network used its refunded failures; it stays counted`,
-                )
-            }
-        } else {
-            // Both refunds run to the end even when one fails, so a failure can't skip the other.
-            const refunds = await Promise.allSettled([this.refundUser(job.userId, runId), this.refundNetwork(ipRunId)])
-            const failed = refunds.find((refund) => refund.status === 'rejected')
-
-            if (failed) {
-                throw failed.reason
-            }
+        if (failed) {
+            throw failed.reason
         }
 
         await this.model.updateOne(
             { _id: job._id, status: { $in: OWING }, chargedRunId: runId, chargedIpRunId: ipRunId },
-            { $set: { chargedRunId: null, chargedIpRunId: null }, $unset: { isRefundCapped: 1 } },
+            { $set: { chargedRunId: null, chargedIpRunId: null } },
         )
     }
 
