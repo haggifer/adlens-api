@@ -26,17 +26,7 @@ export class AbandonedUploadCleanupService {
 
     async run(now = new Date()): Promise<CleanupResult> {
         const cutoff = new Date(now.getTime() - UNSTARTED_JOB_MS)
-        const unused = await this.jobs
-            .find(
-                {
-                    status: { $nin: [JobStatus.Analyzed, ...IN_PROGRESS_STATUSES] },
-                    sampleId: { $exists: false },
-                    videoDeletedAt: { $exists: false },
-                    createdAt: { $lt: cutoff },
-                },
-                { 'file.path': 1 },
-            )
-            .lean<Pick<StoredJob, '_id' | 'file'>[]>()
+        const unused = await this.findUnusedVideos(cutoff)
         const result: CleanupResult = { deleted: 0, failed: 0 }
 
         for (const { _id, file } of unused) {
@@ -58,5 +48,19 @@ export class AbandonedUploadCleanupService {
         )
 
         return result
+    }
+
+    private findUnusedVideos(cutoff: Date): Promise<Pick<StoredJob, '_id' | 'file'>[]> {
+        return this.jobs
+            .find(
+                {
+                    status: { $nin: [JobStatus.Analyzed, ...IN_PROGRESS_STATUSES] },
+                    sampleId: { $exists: false },
+                    videoDeletedAt: { $exists: false },
+                    createdAt: { $lt: cutoff },
+                },
+                { 'file.path': 1 },
+            )
+            .lean<Pick<StoredJob, '_id' | 'file'>[]>()
     }
 }
