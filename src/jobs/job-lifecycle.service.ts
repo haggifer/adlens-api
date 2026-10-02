@@ -68,14 +68,15 @@ export class JobLifecycle {
         return this.transition({ _id: jobId, userId, status: JobStatus.Pending }, { status: JobStatus.Verifying })
     }
 
-    // verifying → pending, when verification couldn't finish or the quota ran out, so the user can try again.
-    async releaseVerification(jobId: string): Promise<void> {
-        await this.transition({ _id: jobId, status: JobStatus.Verifying }, { status: JobStatus.Pending })
-    }
-
-    // verifying → error: the upload isn't an acceptable video.
-    async rejectVerification(jobId: string, errorCode: JobErrorCode): Promise<void> {
-        await this.transition({ _id: jobId, status: JobStatus.Verifying }, { status: JobStatus.Error, errorCode })
+    // verifying → error, refunding whatever the job still holds: the run couldn't start (the upload was rejected,
+    // missing or couldn't be checked, the sample is gone, or it couldn't be charged). Never back to pending: the web
+    // never starts a job twice, it creates a new one, so a job put back would stay pending for good. false when the
+    // job already left verification.
+    async failStart(jobId: string, errorCode: JobErrorCode, detail?: string): Promise<boolean> {
+        return this.settle(
+            { _id: jobId, status: JobStatus.Verifying },
+            { status: JobStatus.Error, errorCode, ...(detail ? { errorDetail: detail } : {}) },
+        )
     }
 
     // verifying → queued, after charging the network (unless the caller is an admin) and then the user. The run ids are
@@ -87,7 +88,8 @@ export class JobLifecycle {
         media: JobMedia,
         ipCharge: IpCharge | null = null,
     ): Promise<StoredJob> {
-        // An earlier run of this job may still hold charges whose refund failed; recording new ones would lose them.
+        // A job put back to pending before 2026-10-02 may still hold charges whose refund failed; recording new ones
+        // would lose them.
         await this.refundHeldCharges(jobId)
 
         const runId = newRunId()
@@ -129,9 +131,17 @@ export class JobLifecycle {
         await this.model.updateOne({ _id: jobId }, { $set: { execution } })
     }
 
-    // queued → pending with the charge refunded, when the worker couldn't be started.
-    async revertDispatch(jobId: string): Promise<void> {
-        await this.settle({ _id: jobId, status: JobStatus.Queued }, { status: JobStatus.Pending })
+    // queued → error with the charges refunded, when the worker couldn't be started. Like any failed start, never back
+    // to pending. Only from queued, so a worker that did start meanwhile keeps its analysis.
+    async failDispatch(jobId: string): Promise<void> {
+        await this.settle(
+            { _id: jobId, status: JobStatus.Queued },
+            {
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.AnalysisFailed,
+                errorDetail: 'No worker could be started',
+            },
+        )
     }
 
     // queued / analyzing → analyzing for one worker attempt. null when the job is already final or unknown.
@@ -256,8 +266,10 @@ export class JobLifecycle {
     }
 
     private async expire(jobId: string, status: JobStatus): Promise<void> {
+        // The API instance died mid-start (verifying, or charging after it); the start's own charges, if it took any,
+        // are refunded with it.
         if (status === JobStatus.Verifying) {
-            await this.releaseVerification(jobId)
+            await this.failStart(jobId, JobErrorCode.VideoCheckFailed, 'The verification never finished')
 
             return
         }

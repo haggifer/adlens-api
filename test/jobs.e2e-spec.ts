@@ -38,6 +38,8 @@ describe('Jobs API (e2e)', () => {
     // null: the upload hasn't arrived; an Error: storage can't be reached.
     let storedObject: ObjectInfo | null | Error
     let probe: ProbeResult
+    // An Error: ffprobe can't reach the video.
+    let probeFailure: Error | null
     const dispatch = jest.fn(async () => 'executions/exec-1')
     const deleteObject = jest.fn(async (_path: string) => undefined)
     // The Contact form's uploaded images, by path; an Error: storage can't be reached.
@@ -93,7 +95,15 @@ describe('Jobs API (e2e)', () => {
                 },
             })
             .overrideProvider(MediaProber)
-            .useValue({ probe: async () => probe })
+            .useValue({
+                probe: async () => {
+                    if (probeFailure) {
+                        throw probeFailure
+                    }
+
+                    return probe
+                },
+            })
             .overrideProvider(AnalysisDispatcher)
             .useValue({ dispatch })
             .overrideProvider(Mailer)
@@ -126,6 +136,7 @@ describe('Jobs API (e2e)', () => {
     beforeEach(() => {
         storedObject = { sizeBytes: FILE.size, contentType: FILE.contentType }
         probe = { durationS: 20, width: 1080, height: 1920, hasAudio: true }
+        probeFailure = null
         dispatch.mockClear()
         deleteObject.mockClear()
         sendMail.mockClear()
@@ -206,7 +217,8 @@ describe('Jobs API (e2e)', () => {
         expect(quota.body.quota.used).toBe(1)
     })
 
-    it('keeps the job pending when the upload has not arrived', async () => {
+    // The web never starts the same job twice: a failed start creates a new job, so this one ends.
+    it('answers UPLOAD_INCOMPLETE and ends the job as UPLOAD_FAILED when the upload is missing', async () => {
         const jobId = await createJob()
 
         storedObject = null
@@ -214,8 +226,13 @@ describe('Jobs API (e2e)', () => {
         const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(409)
         const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER)).expect(200)
 
-        expect(res.body.errorCode).toBe(RequestErrorCode.UploadIncomplete)
-        expect(job.body.job.status).toBe(JobStatus.Pending)
+        expect(res.body).toMatchObject({
+            errorCode: RequestErrorCode.UploadIncomplete,
+            message: 'The upload has not finished',
+        })
+        expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed })
+        expect(deleteObject).not.toHaveBeenCalled()
+        expect(dispatch).not.toHaveBeenCalled()
     })
 
     it("doesn't let another user start the job", async () => {
@@ -245,20 +262,33 @@ describe('Jobs API (e2e)', () => {
         expect(dispatch).not.toHaveBeenCalled()
     })
 
-    it('keeps the job pending and the upload in place when storage cannot be reached', async () => {
-        const jobId = await createJob()
+    it.each([
+        ['storage', () => (storedObject = new Error('GCS 503'))],
+        ['the prober', () => (probeFailure = new Error('Connection reset by peer'))],
+    ])(
+        'ends the job as VIDEO_CHECK_FAILED and keeps the upload in place when %s cannot be reached',
+        async (_failing, fail) => {
+            const jobId = await createJob()
+            const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
 
-        storedObject = new Error('GCS 503')
+            fail()
 
-        const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
-        const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER))
+            const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
+            const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
+            const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER))
 
-        expect(res.body.errorCode).toBe(RequestErrorCode.Unavailable)
-        expect(job.body.job.status).toBe(JobStatus.Pending)
-        expect(deleteObject).not.toHaveBeenCalled()
-    })
+            expect(res.body).toMatchObject({
+                errorCode: RequestErrorCode.Unavailable,
+                message: 'The upload could not be checked',
+            })
+            expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoCheckFailed })
+            expect(after.body.quota.used).toBe(before.body.quota.used)
+            expect(deleteObject).not.toHaveBeenCalled()
+            expect(dispatch).not.toHaveBeenCalled()
+        },
+    )
 
-    it('refunds and reopens the job when the worker cannot be started', async () => {
+    it('ends the job as ANALYSIS_FAILED, refunded, when the worker cannot be started', async () => {
         const jobId = await createJob()
         const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
 
@@ -270,7 +300,7 @@ describe('Jobs API (e2e)', () => {
 
         expect(res.body.errorCode).toBe(RequestErrorCode.Unavailable)
         expect(after.body.quota.used).toBe(before.body.quota.used)
-        expect(job.body.job.status).toBe(JobStatus.Pending)
+        expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
     })
 
     it("pages the user's own job list newest first", async () => {
@@ -413,7 +443,7 @@ describe('Jobs API (e2e)', () => {
             expect(quota.body.quota.used).toBe(1)
         })
 
-        it('keeps a sample job pending when its sample has been removed', async () => {
+        it('ends a sample job as VIDEO_CHECK_FAILED when its sample has been removed', async () => {
             const created = await request(app.getHttpServer())
                 .post('/v1/jobs/from-sample')
                 .set(as(SAMPLER))
@@ -431,7 +461,7 @@ describe('Jobs API (e2e)', () => {
             await samples.updateOne({ _id: sampleId }, { $set: { 'file.path': 'samples/running-shoes.mp4' } })
 
             expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
-            expect(job.body.job.status).toBe(JobStatus.Pending)
+            expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoCheckFailed })
             expect(dispatch).not.toHaveBeenCalled()
         })
 
@@ -1046,6 +1076,32 @@ describe('Jobs API (e2e)', () => {
             const res = await createFrom(LIMITED, '203.0.113.6').expect(429)
 
             expect(res.body.errorCode).toBe(RequestErrorCode.QuotaExceeded)
+        })
+
+        it('ends a job refused at charging as ANALYSIS_FAILED, with nothing charged', async () => {
+            const user = await addUser({ emailVerified: true })
+            const created = await createFrom(user, '203.0.113.16').expect(201)
+
+            // Spent between creating the job, which the admission check allowed, and starting it.
+            await app
+                .get<Connection>(getConnectionToken())
+                .collection(USER_COLLECTION)
+                .updateOne(
+                    { _id: new Types.ObjectId(user) },
+                    {
+                        $set: {
+                            runs: [0, 1, 2].map((i) => ({ id: `run-${i}`, startedAt: new Date(), jobId: `job-${i}` })),
+                        },
+                    },
+                )
+
+            const res = await analyzeFrom(user, '203.0.113.16', created.body.job.id).expect(429)
+            const job = await request(app.getHttpServer()).get(`/v1/jobs/${created.body.job.id}`).set(as(user))
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.QuotaExceeded)
+            expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+            expect(await usage('203.0.113.16')).toEqual({ total: 0, anonymous: 0 })
+            expect(dispatch).not.toHaveBeenCalled()
         })
 
         it('gives the network run back when the worker cannot be started', async () => {

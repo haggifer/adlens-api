@@ -25,6 +25,9 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   needs a new one). Other changes don't need this.
 - A job is created `pending`; after that, `JobLifecycle` is the only code that changes its status, and every transition
   is a conditional update on the expected current status. Don't write `status` anywhere else.
+- A job never goes back to `pending`: the web never starts a job twice (it creates a new one), so a start that fails
+  ends the job in `error` with a `JobErrorCode` saying why, any charge refunded, while the HTTP answer keeps its own
+  code.
 - A run that ends without a result is never counted: every failure refunds the user's run and the network's in full,
   even after a Gemini call that may have been billed. Gemini is still called at most once per job (the
   `modelCallStartedAt` mark), so that refund never pays for a second call.

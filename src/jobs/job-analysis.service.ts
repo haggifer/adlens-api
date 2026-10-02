@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
-import { JobErrorCode, type Job, type JobMedia, RequestErrorCode } from 'adlens-shared'
+import { type ApiError, JobErrorCode, type Job, type JobMedia, RequestErrorCode } from 'adlens-shared'
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
 import type { StoredJob } from '../database/job.doc'
@@ -19,11 +19,21 @@ const REJECTION_MESSAGES: Record<JobErrorCode, string> = {
     [JobErrorCode.UnsupportedFormat]: 'The video format is not supported',
     [JobErrorCode.AnalysisFailed]: 'The analysis failed',
     [JobErrorCode.AnalysisTimedOut]: 'The analysis timed out',
+    [JobErrorCode.VideoCheckFailed]: 'The upload could not be checked',
+    [JobErrorCode.UploadFailed]: 'The upload has not finished',
 }
 
-// POST /v1/jobs/:id/analyze. Claims the pending job, verifies the upload, charges
-// the network and the user, and starts the worker. Each step that can't complete puts the job back where the user
-// can retry it, with any charge refunded.
+// The refusal's own code (e.g. QUOTA_EXCEEDED), never another error's message: a MongoDB error quotes the key it hit,
+// and a job must never hold a network key.
+const describeChargeFailure = (err: unknown) => {
+    const response = err instanceof ApiException ? (err.getResponse() as ApiError) : null
+
+    return `The run could not be charged: ${response?.errorCode ?? 'unexpected error'}`
+}
+
+// POST /v1/jobs/:id/analyze. Claims the pending job, verifies the upload, charges the network and the user, and starts
+// the worker. A step that can't complete ends the job in error with any charge refunded: the web never starts a job
+// twice (it creates a new one), so the job never goes back to pending.
 @Injectable()
 export class JobAnalysisService {
     private readonly logger = new Logger(JobAnalysisService.name)
@@ -56,7 +66,8 @@ export class JobAnalysisService {
 
             queued = await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
         } catch (err) {
-            await this.lifecycle.releaseVerification(jobId)
+            // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.
+            await this.lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed, describeChargeFailure(err))
             throw err
         }
 
@@ -66,7 +77,7 @@ export class JobAnalysisService {
             execution = await this.dispatcher.dispatch(jobId)
         } catch (err) {
             this.logger.error(`dispatch failed for job ${jobId}: ${err instanceof Error ? err.message : err}`)
-            await this.lifecycle.revertDispatch(jobId)
+            await this.lifecycle.failDispatch(jobId)
             throw new ApiException(
                 HttpStatus.SERVICE_UNAVAILABLE,
                 RequestErrorCode.Unavailable,
@@ -87,7 +98,11 @@ export class JobAnalysisService {
         const isPublished = await this.samples.isPublishedPath(job.file.path)
 
         if (!isPublished || !job.media) {
-            await this.lifecycle.releaseVerification(job._id.toString())
+            await this.lifecycle.failStart(
+                job._id.toString(),
+                JobErrorCode.VideoCheckFailed,
+                'The sample is no longer published',
+            )
             throw new ApiException(HttpStatus.NOT_FOUND, RequestErrorCode.NotFound, 'Sample not found')
         }
 
@@ -101,22 +116,27 @@ export class JobAnalysisService {
         switch (outcome.kind) {
             case 'verified':
                 return outcome.media
+            // Neither deletes the user's file: the daily cleanup deletes the video of an error job.
             case 'upload-incomplete':
-                await this.lifecycle.releaseVerification(jobId)
+                await this.lifecycle.failStart(jobId, JobErrorCode.UploadFailed, 'No upload when the run started')
                 throw new ApiException(
                     HttpStatus.CONFLICT,
                     RequestErrorCode.UploadIncomplete,
                     'The upload has not finished',
                 )
             case 'unavailable':
-                await this.lifecycle.releaseVerification(jobId)
+                await this.lifecycle.failStart(
+                    jobId,
+                    JobErrorCode.VideoCheckFailed,
+                    'Storage or the prober failed during verification',
+                )
                 throw new ApiException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     RequestErrorCode.Unavailable,
                     'The upload could not be checked',
                 )
             case 'rejected':
-                await this.lifecycle.rejectVerification(jobId, outcome.errorCode)
+                await this.lifecycle.failStart(jobId, outcome.errorCode)
                 await this.storage.delete(job.file.path)
                 throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,

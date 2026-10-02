@@ -68,20 +68,25 @@ conditional update on the expected current status, so two racing callers can nev
    size** (`x-goog-content-length-range`), so the stored object must match the declaration, and only creates the object
    (`x-goog-if-generation-match: 0`), so a verified video can't be replaced by a second PUT. The
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
-2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)):
+2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
+   fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
+   job twice, it creates a new one. The HTTP answer still says what went wrong.
    - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
    - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
      metadata plus ffprobe over a signed read URL (range reads, no download; the image runs Debian's ffprobe, because
      `ffprobe-static`'s Linux build segfaults on any hostname lookup, see the Dockerfile). A bad file (unreadable, too long, too
      large, unsupported type) is rejected with 422 and deleted; a file ffprobe can't decode is probed a second time
-     first, since a range read cut off by the network looks the same. A missing upload (409 `UPLOAD_INCOMPLETE`) or a storage
-     or network problem (503) puts the job back to `pending` and never deletes the user's file. A job on a
-     [sample ad](#sample-ads) skips this step: its video was measured when the sample was published;
+     first, since a range read cut off by the network looks the same. A missing upload (409 `UPLOAD_INCOMPLETE`)
+     ends the job as `UPLOAD_FAILED`, and a storage or network problem (503 `UNAVAILABLE`) as `VIDEO_CHECK_FAILED`;
+     neither deletes the user's file, which the daily cleanup deletes with every error job's video. A job on a
+     [sample ad](#sample-ads) skips this step: its video was measured when the sample was published, and a sample no
+     longer published answers 404 and ends the job as `VIDEO_CHECK_FAILED`;
    - **charge** one run on the user's network, then one on the user, and move to `queued` (429 `QUOTA_EXCEEDED` when
      the user's window is spent, `SIGN_UP_REQUIRED` or `EMAIL_CONFIRMATION_REQUIRED` for an anonymous user or an
      unconfirmed account; the [network rules](#abuse-limits) answer with their own codes). If the user charge
-     fails, the network run is given back;
-   - **dispatch** the worker. If that fails, the job goes back to `pending` and the charge is refunded (503).
+     fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
+     code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
+   - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`.
@@ -95,7 +100,7 @@ conditional update on the expected current status, so two racing callers can nev
    other failure Vertex may still have generated, and billed, an answer, so the mark stays, and the attempt fails the
    job at once rather than leave it to a retry that could only do the same.
 5. **Nothing stays in flight forever**: when a user reads their jobs, and for every user in the daily cleanup, anything
-   stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes goes back to `pending`,
+   stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes ends as `VIDEO_CHECK_FAILED`,
    `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded.
 
 **Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
@@ -109,8 +114,9 @@ the new run, so concurrent requests can't overdraw and the list stays a few entr
 config on every charge. The job records its run (`chargedRunId`) before the charge and keeps it until the refund
 succeeds, so no charge exists that no job holds. A refund is `$pull` of that run, safe to repeat, so it happens at most
 once however often it is tried; ending a run refunds right away, and a refund that fails or is cut short stays on the
-ended job (`pending` or `error` still holding a run id) until `JobLifecycle.refundOwedCharges` retries it, on every read
-of the user's jobs and in the daily cleanup. Deleting a job keeps its run counted.
+ended job (`error`, or `pending` from before 2026-10-02, still holding a run id) until
+`JobLifecycle.refundOwedCharges` retries it, on every read of the user's jobs and in the daily cleanup. Deleting a job
+keeps its run counted.
 
 **Admins have no limit**: set `isAdmin: true` on the user's document in Better Auth's `user` collection. Their runs
 are still counted but never capped, and `GET /v1/me/quota` reports `limit: null`. The field is declared to Better Auth
@@ -526,7 +532,11 @@ Why the system is built this way, and what was rejected. Decisions that span the
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
   the signed upload URL binds the exact declared size and can only create the object, never overwrite it. Only a definite problem with the file deletes it; storage or
-  network trouble leaves the job pending.
+  network trouble ends the job as `VIDEO_CHECK_FAILED` and leaves the file to the daily cleanup.
+- **A failed start ends the job; it never goes back to `pending`.** Until 2026-10-02 a missing upload, a storage or
+  prober failure, a sample gone, a refused charge or a worker that couldn't be started put the job back to `pending` so
+  the same job could be started again. The web never does that (it creates a new job for every run), so those jobs
+  stayed `pending` for good. Each now ends in `error` with a code saying why, while the HTTP answer stays the same.
 - **Lazy expiry, backed by the daily cleanup.** Abandoned jobs are expired when their owner next reads their jobs, so
   what they see is never stale, and the daily cleanup expires everyone's, so a job whose owner never comes back
   doesn't keep its charges for the whole 7-day window. Both run the same `JobLifecycle` transitions.

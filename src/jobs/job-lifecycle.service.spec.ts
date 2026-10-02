@@ -161,30 +161,23 @@ describe('JobLifecycle', () => {
             expect((await findJob(jobId))?.status).toBe(JobStatus.Pending)
         })
 
-        it('puts a job under verification back to pending, and leaves a job that moved on alone', async () => {
-            const verifying = await claimJob()
-            const queued = await queueJob()
+        it.each([JobErrorCode.VideoTooLong, JobErrorCode.UploadFailed, JobErrorCode.VideoCheckFailed])(
+            'ends a start that failed with %s in error, never back to pending, and leaves a job that moved on alone',
+            async (errorCode) => {
+                const verifying = await claimJob()
+                const queued = await queueJob()
 
-            await lifecycle.releaseVerification(verifying)
-            await lifecycle.releaseVerification(queued)
+                expect(await lifecycle.failStart(verifying, errorCode, 'why')).toBe(true)
+                expect(await lifecycle.failStart(queued, errorCode)).toBe(false)
 
-            expect((await findJob(verifying))?.status).toBe(JobStatus.Pending)
-            expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
-        })
-
-        it('ends a rejected upload in error with its reason, and leaves a job that moved on alone', async () => {
-            const verifying = await claimJob()
-            const queued = await queueJob()
-
-            await lifecycle.rejectVerification(verifying, JobErrorCode.VideoTooLong)
-            await lifecycle.rejectVerification(queued, JobErrorCode.VideoTooLong)
-
-            expect(await findJob(verifying)).toMatchObject({
-                status: JobStatus.Error,
-                errorCode: JobErrorCode.VideoTooLong,
-            })
-            expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
-        })
+                expect(await findJob(verifying)).toMatchObject({
+                    status: JobStatus.Error,
+                    errorCode,
+                    errorDetail: 'why',
+                })
+                expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
+            },
+        )
     })
 
     describe('charging and queueing', () => {
@@ -266,11 +259,14 @@ describe('JobLifecycle', () => {
             expect((await findJob(jobId))?.chargedRunId).toEqual(expect.any(String))
             expect(await usedRuns()).toBe(1)
 
-            // What the caller does next: the job goes back to pending, where the next sweep finds the charge.
-            await lifecycle.releaseVerification(jobId)
-            await lifecycle.expireStale(USER, NOW)
+            // What the caller does next: ending the start refunds what the job still holds.
+            await lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed)
 
-            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Error,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
             expect(await usedRuns()).toBe(0)
             expect(await networkRuns()).toBe(0)
         })
@@ -278,11 +274,8 @@ describe('JobLifecycle', () => {
         it('refunds what an earlier run of the job still holds before charging it again', async () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 
-            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-            jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
-            await lifecycle.revertDispatch(jobId)
-            expect(await networkRuns()).toBe(1)
-
+            // Until 2026-10-02 a failed dispatch put the job back to pending, holding charges whose refund failed.
+            await jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { status: JobStatus.Pending } })
             await lifecycle.claimForVerification(USER, jobId)
             const queued = await lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)
 
@@ -296,13 +289,13 @@ describe('JobLifecycle', () => {
             const jobId = await claimJob()
 
             // What expireStale does to a verification it takes for abandoned, racing the charge.
-            await lifecycle.releaseVerification(jobId)
+            await lifecycle.failStart(jobId, JobErrorCode.VideoCheckFailed)
 
             await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toMatchObject({
                 response: { errorCode: RequestErrorCode.JobNotPending },
             })
             expect(await findJob(jobId)).toMatchObject({
-                status: JobStatus.Pending,
+                status: JobStatus.Error,
                 chargedRunId: null,
                 chargedIpRunId: null,
             })
@@ -312,13 +305,14 @@ describe('JobLifecycle', () => {
     })
 
     describe('ending a run', () => {
-        it('puts a job back to pending with both charges refunded when dispatch fails', async () => {
+        it('ends a job whose worker could not be started in error, with both charges refunded', async () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 
-            await lifecycle.revertDispatch(jobId)
+            await lifecycle.failDispatch(jobId)
 
             expect(await findJob(jobId)).toMatchObject({
-                status: JobStatus.Pending,
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.AnalysisFailed,
                 chargedRunId: null,
                 chargedIpRunId: null,
             })
@@ -423,16 +417,16 @@ describe('JobLifecycle', () => {
             expect(await networkRuns()).toBe(0)
         })
 
-        it('keeps the charges of a job put back to pending until their refund succeeds', async () => {
+        it('keeps the charges of a job whose worker could not be started until their refund succeeds', async () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 
             jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
             jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
 
-            await lifecycle.revertDispatch(jobId)
+            await lifecycle.failDispatch(jobId)
 
             expect(await findJob(jobId)).toMatchObject({
-                status: JobStatus.Pending,
+                status: JobStatus.Error,
                 chargedIpRunId: expect.any(String),
             })
             expect(await networkRuns()).toBe(1)
@@ -446,7 +440,7 @@ describe('JobLifecycle', () => {
     })
 
     describe('expiring abandoned jobs', () => {
-        it('releases a verification and fails an analysis, refunded, once each is idle past its limit', async () => {
+        it('fails a verification and an analysis, refunded, once each is idle past its limit', async () => {
             const verifying = await claimJob()
             const analyzing = await queueJob(NETWORK_CHARGE)
 
@@ -456,7 +450,11 @@ describe('JobLifecycle', () => {
 
             await lifecycle.expireStale(USER, NOW)
 
-            expect((await findJob(verifying))?.status).toBe(JobStatus.Pending)
+            // The web never starts a job twice, so a verification that never finished ends the run.
+            expect(await findJob(verifying)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.VideoCheckFailed,
+            })
             expect(await findJob(analyzing)).toMatchObject({
                 status: JobStatus.Error,
                 errorCode: JobErrorCode.AnalysisTimedOut,
@@ -499,6 +497,30 @@ describe('JobLifecycle', () => {
             expect((await findJob(analyzed))?.chargedRunId).toEqual(expect.any(String))
             expect(await usedRuns()).toBe(2)
             expect(await networkRuns()).toBe(2)
+        })
+
+        it('refunds what a verification that never finished still holds', async () => {
+            const jobId = await claimJob()
+
+            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+            jest.spyOn(jobs, 'findOneAndUpdate').mockImplementationOnce(() => {
+                throw new Error('write failed')
+            })
+            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
+            await expect(lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)).rejects.toThrow('write failed')
+            // The API instance died before it could end the start.
+            await lastTouchedAt(jobId, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.VideoCheckFailed,
+                chargedRunId: null,
+                chargedIpRunId: null,
+            })
+            expect(await usedRuns()).toBe(0)
+            expect(await networkRuns()).toBe(0)
         })
 
         it("only expires the given user's jobs", async () => {
@@ -544,7 +566,7 @@ describe('JobLifecycle', () => {
 
             expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 1, failed: 1 })
             expect([(await findJob(first))?.status, (await findJob(second))?.status]).toEqual(
-                expect.arrayContaining([JobStatus.Verifying, JobStatus.Pending]),
+                expect.arrayContaining([JobStatus.Verifying, JobStatus.Error]),
             )
         })
     })
