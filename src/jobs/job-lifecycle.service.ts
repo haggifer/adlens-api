@@ -10,6 +10,18 @@ import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
 import { UNSTARTED_JOB_MS } from './job-status'
 
+type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
+
+export interface ExpirySweepResult {
+    expired: number
+    failed: number
+}
+
+export interface RefundSweepResult {
+    refunded: number
+    failed: number
+}
+
 const VERIFY_STALE_MS = 10 * 60 * 1000
 // Past the worker's worst case: a 15-minute task timeout across 3 attempts, plus start-up time.
 const ANALYSIS_STALE_MS = 60 * 60 * 1000
@@ -20,8 +32,6 @@ const IN_FLIGHT = [JobStatus.Queued, JobStatus.Analyzing]
 const OWING = [JobStatus.Pending, JobStatus.Verifying, JobStatus.Error]
 // Not `verifying`: chargeAndQueue holds the charges it is taking there until the job is queued.
 const SWEPT = [JobStatus.Pending, JobStatus.Error]
-
-type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
 
 const HELD_CHARGES_PROJECTION = { userId: 1, chargedRunId: 1, chargedIpRunId: 1 }
 
@@ -39,16 +49,6 @@ const recordCall = (call: ModelCall) => ({
     },
     $push: { 'usage.calls': call },
 })
-
-export interface ExpirySweepResult {
-    expired: number
-    failed: number
-}
-
-export interface RefundSweepResult {
-    refunded: number
-    failed: number
-}
 
 // The single owner of a job's status. Every transition is one conditional update on the expected current status, so
 // racing callers can't both win. A job holds the ids of its charges until they are refunded: every refund is safe to
@@ -231,16 +231,7 @@ export class JobLifecycle {
     // Retries the refunds that ended jobs still owe: this user's on every read of their jobs, everyone's in the daily
     // cleanup, for networks whose users never come back.
     async refundOwedCharges(userId?: string): Promise<RefundSweepResult> {
-        const owing = await this.model
-            .find(
-                {
-                    ...(userId ? { userId } : {}),
-                    status: { $in: SWEPT },
-                    $or: [{ chargedRunId: { $ne: null } }, { chargedIpRunId: { $ne: null } }],
-                },
-                HELD_CHARGES_PROJECTION,
-            )
-            .lean<HeldCharges[]>()
+        const owing = await this.findOwingJobs(userId)
         const result: RefundSweepResult = { refunded: 0, failed: 0 }
 
         for (const job of owing) {
@@ -254,6 +245,19 @@ export class JobLifecycle {
         }
 
         return result
+    }
+
+    private findOwingJobs(userId: string | undefined): Promise<HeldCharges[]> {
+        return this.model
+            .find(
+                {
+                    ...(userId ? { userId } : {}),
+                    status: { $in: SWEPT },
+                    $or: [{ chargedRunId: { $ne: null } }, { chargedIpRunId: { $ne: null } }],
+                },
+                HELD_CHARGES_PROJECTION,
+            )
+            .lean<HeldCharges[]>()
     }
 
     private findStaleJobs(userId: string | undefined, now: Date): Promise<Pick<StoredJob, '_id' | 'status'>[]> {

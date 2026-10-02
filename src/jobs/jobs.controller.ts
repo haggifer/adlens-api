@@ -46,7 +46,9 @@ export class JobsController {
     ): Promise<JobResponse> {
         const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken)
 
-        return { job: await this.jobs.createFromSample(userId, input, hasPassedChallenge) }
+        const job = await this.jobs.createFromSample(userId, input, hasPassedChallenge)
+
+        return { job }
     }
 
     @Post(':id/analyze')
@@ -56,7 +58,9 @@ export class JobsController {
         @Param('id') id: string,
         @RequestIpSource() ipSource: IpSource,
     ): Promise<JobResponse> {
-        return { job: await this.analysis.start(userId, id, ipSource) }
+        const job = await this.analysis.start(userId, id, ipSource)
+
+        return { job }
     }
 
     @Get()
@@ -69,7 +73,9 @@ export class JobsController {
 
     @Get(':id')
     async getOne(@CurrentUser() userId: string, @Param('id') id: string): Promise<JobResponse> {
-        return { job: await this.jobs.get(userId, id) }
+        const job = await this.jobs.get(userId, id)
+
+        return { job }
     }
 
     @Delete(':id')

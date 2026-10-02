@@ -2,20 +2,12 @@ import { Injectable } from '@nestjs/common'
 import ffprobeStatic from 'ffprobe-static'
 import { spawn } from 'node:child_process'
 
-const PROBE_TIMEOUT_MS = 30 * 1000
-
-// ffprobe's wording when it reached the input but couldn't read it as media.
-const UNDECODABLE_PATTERN = /invalid data found|moov atom not found|could not find codec|end of file/i
-
 export interface ProbeResult {
     durationS: number
     width?: number
     height?: number
     hasAudio: boolean
 }
-
-// The input was reachable but isn't a readable video. Anything else ffprobe throws is treated as transient.
-export class UndecodableMediaError extends Error {}
 
 interface ProbeStream {
     codec_type?: string
@@ -25,6 +17,11 @@ interface ProbeStream {
     tags?: { rotate?: unknown }
     side_data_list?: { side_data_type?: unknown; rotation?: unknown }[]
 }
+
+const PROBE_TIMEOUT_MS = 30 * 1000
+
+// ffprobe's wording when it reached the input but couldn't read it as media.
+const UNDECODABLE_PATTERN = /invalid data found|moov atom not found|could not find codec|end of file/i
 
 // Phones store a portrait video as landscape frames plus a rotation to apply on playback. Newer ffprobe reports it as
 // the display matrix's rotation; older files and builds as the legacy `rotate` tag.
@@ -36,6 +33,9 @@ const getRotation = (stream: ProbeStream): number => {
 }
 
 const isQuarterTurn = (rotation: number) => Math.abs(Math.round(rotation / 90)) % 2 === 1
+
+// The input was reachable but isn't a readable video. Anything else ffprobe throws is treated as transient.
+export class UndecodableMediaError extends Error {}
 
 export const parseProbeOutput = (stdout: string): ProbeResult => {
     const parsed = JSON.parse(stdout) as { streams?: ProbeStream[]; format?: { duration?: unknown } }

@@ -100,11 +100,7 @@ export class JobsService {
     async list(userId: string, { cursor, limit }: ListJobsQuery): Promise<JobListResponse> {
         await this.lifecycle.expireStale(userId)
 
-        const jobs = await this.model
-            .find({ userId, ...(cursor ? { _id: { $lt: cursor } } : {}) })
-            .sort({ _id: -1 })
-            .limit(limit + 1)
-            .lean<StoredJob[]>()
+        const jobs = await this.findPage(userId, cursor, limit + 1)
         const page = jobs.slice(0, limit)
 
         return {
@@ -166,5 +162,13 @@ export class JobsService {
         }
 
         return job
+    }
+
+    private findPage(userId: string, cursor: string | undefined, limit: number): Promise<StoredJob[]> {
+        return this.model
+            .find({ userId, ...(cursor ? { _id: { $lt: cursor } } : {}) })
+            .sort({ _id: -1 })
+            .limit(limit)
+            .lean<StoredJob[]>()
     }
 }
