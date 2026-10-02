@@ -26,7 +26,7 @@ const RESET_TOKEN_TTL_S = 60 * 60
 const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
 
 // Emails of one kind to one address per hour, whoever asks for them.
-const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 3 }
+const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 5 }
 
 type AuthEmailKind = 'confirmation' | 'reset'
 

@@ -261,7 +261,7 @@ answering is a plain reply; its text isn't stored.
   for an unknown address. The endpoint's work stands: a sign-up whose confirmation email failed has still created the
   account, and its 503 still sets the session cookie, since Better Auth merges the endpoint's response headers into an
   after hook's error. The user is signed in, unconfirmed, and can resend the email (`/send-verification-email`).
-- **At most 3 confirmation and 3 reset emails per address per hour**, whoever asks. Anyone can ask for an unconfirmed
+- **At most 5 confirmation and 5 reset emails per address per hour**, whoever asks. Anyone can ask for an unconfirmed
   account's link again (`/send-verification-email`), so without a cap anyone could flood an inbox and use up the day's
   Resend quota. The count
   lives in `rate_limits` under a keyed hash of `email|<kind>|<address>`, never the address. Past the cap nothing is

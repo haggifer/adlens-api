@@ -215,19 +215,19 @@ test('a duplicate sign-up answers that the address is in use', async () => {
     assert.ok(!cookieOf(res).includes('session_token'))
 })
 
-test('confirmation emails to one address stop at 3 an hour, however often they are resent', async () => {
+test('confirmation emails to one address stop at 5 an hour, however often they are resent', async () => {
     const email = 'flooded@example.com'
     const signedUp = await signUp(email, 'flood-password')
 
     assert.equal(signedUp.status, 200)
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
         const resent = await post('/api/auth/send-verification-email', { email }, signedUp.cookie)
 
         assert.equal(resent.status, 200)
     }
 
-    assert.equal(outbox.filter((message) => message.to === email).length, 3)
+    assert.equal(outbox.filter((message) => message.to === email).length, 5)
 })
 
 test('a confirmation link opened without a session asks to sign in, and sets no cookie', async () => {
