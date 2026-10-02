@@ -4,6 +4,7 @@ import {
     type Finding,
     type JobMedia,
     type MetadataCheck,
+    type Placement,
     RulePlatform,
     type TimeRange,
 } from 'adlens-shared'
@@ -16,8 +17,6 @@ import {
     type RuleSet,
     toRatio,
 } from './schema'
-
-const ASPECT_RATIO_TOLERANCE = 0.02
 
 export interface SelectedRules {
     content: Rule[]
@@ -45,62 +44,50 @@ export interface ModelFinding {
     time?: TimeRange
 }
 
-const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
-    new Set([RulePlatform.All, ...settings.platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
-
-// The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives, to the
-// selected markets (global rules always apply) and, for placement-specific rules, to the selected placements. Then
-// split by how each one is checked. No platform (or market) chosen means none is ruled out, so the ad is checked
-// against all of them; placements stay opt-in, since a placement's specs (a bumper's 6 seconds) only bind that format.
-export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): SelectedRules => {
-    const platforms = settings.platforms.length ? rulePlatformsFor(settings) : null
-    const markets = settings.markets.length ? new Set<string>(settings.markets) : null
-    const placements = new Set(settings.placements)
-    const relevant = ruleSet.rules.filter(
-        (rule) =>
-            rule.appliesTo !== 'image' &&
-            (!platforms || rule.platform.some((platform) => platforms.has(platform))) &&
-            (rule.region === 'global' || !markets || markets.has(rule.region)) &&
-            (!rule.placements || rule.placements.some((placement) => placements.has(placement))),
-    )
-
-    return {
-        content: relevant.filter(
-            (r) => r.modality === 'text' || r.modality === 'visual' || r.modality === 'audiovisual',
-        ),
-        metadata: relevant.filter((r) => r.modality === 'metadata'),
-        advisory: relevant.filter((r) => r.modality === 'out_of_creative'),
-    }
+interface RuleFilter {
+    platforms: Set<RulePlatform> | null
+    markets: Set<string> | null
+    placements: Set<Placement>
 }
+
+type MetadataVerdict = Pick<MetadataCheck, 'verdict' | 'detail'>
+
+const ASPECT_RATIO_TOLERANCE = 0.02
 
 const SCOPE_RANK: Record<Rule['scope'], number> = { compliance: 0, best_practice: 1 }
 const SEVERITY_RANK: Record<Rule['severity'], number> = { blocker: 0, warning: 1, info: 2 }
 
-// The lean projection sent to the model; quote and ref are attached back by id afterwards. With a long list the model
-// works through it in order, so policies that block an ad come first and best-practice advice last; rules of equal
-// rank keep their ruleset order.
-export const projectForModel = (rules: Rule[]): RuleProjection[] =>
-    [...rules]
-        .sort(
-            (a, b) =>
-                SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
-        )
-        .map(({ id, check, severity, modality }) => ({ id, check, severity, modality }))
+const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
+    new Set([RulePlatform.All, ...settings.platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
 
-export const projectAdvisoriesForModel = (rules: Rule[]): AdvisoryProjection[] =>
-    rules.map(({ id, check }) => ({ id, check }))
+const toRuleFilter = (settings: AnalysisSettings): RuleFilter => ({
+    platforms: settings.platforms.length ? rulePlatformsFor(settings) : null,
+    markets: settings.markets.length ? new Set<string>(settings.markets) : null,
+    placements: new Set(settings.placements),
+})
+
+const isRelevant = (rule: Rule, { platforms, markets, placements }: RuleFilter): boolean =>
+    rule.appliesTo !== 'image' &&
+    (!platforms || rule.platform.some((platform) => platforms.has(platform))) &&
+    (rule.region === 'global' || !markets || markets.has(rule.region)) &&
+    (!rule.placements || rule.placements.some((placement) => placements.has(placement)))
 
 const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string } => ({
     quote: rule.quote,
     ref: resolveRef(rule.ref, ruleSet.sources),
 })
 
-const evaluateAspectRatio = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 'verdict' | 'detail'> => {
-    if (media.width === undefined || media.height === undefined) {
+// null when the prober couldn't read the video's dimensions.
+const getAspectRatio = (media: JobMedia): number | null =>
+    media.width === undefined || media.height === undefined ? null : media.width / media.height
+
+const evaluateAspectRatio = (rule: Rule, media: JobMedia): MetadataVerdict => {
+    const ratio = getAspectRatio(media)
+
+    if (ratio === null) {
         return { verdict: 'unknown', detail: 'Video dimensions unavailable' }
     }
 
-    const ratio = media.width / media.height
     const aspect = `Aspect ${ratio.toFixed(3)}`
 
     if (rule.checkType === 'aspect_ratio_one_of') {
@@ -116,7 +103,7 @@ const evaluateAspectRatio = (rule: Rule, media: JobMedia): Pick<MetadataCheck, '
     return { verdict: isInRange ? 'pass' : 'fail', detail: `${aspect} vs allowed ${min} to ${max}` }
 }
 
-const evaluateMetadataRule = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 'verdict' | 'detail'> => {
+const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
     const { value, unit } = rule
 
     if (rule.checkType === 'aspect_ratio_one_of' || rule.checkType === 'aspect_ratio_between') {
@@ -162,11 +149,12 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 
             }
         }
         case 'aspect_ratio_in': {
-            if (media.width === undefined || media.height === undefined) {
+            const ratio = getAspectRatio(media)
+
+            if (ratio === null) {
                 return { verdict: 'unknown', detail: 'Video dimensions unavailable' }
             }
 
-            const ratio = media.width / media.height
             const required = typeof rule.params?.ratio === 'string' ? rule.params.ratio : `${value}`
             const isOff = Math.abs(ratio - value) > ASPECT_RATIO_TOLERANCE
 
@@ -176,6 +164,37 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): Pick<MetadataCheck, 
             return { verdict: 'unknown', detail: 'Unsupported metadata check' }
     }
 }
+
+// The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives, to the
+// selected markets (global rules always apply) and, for placement-specific rules, to the selected placements. Then
+// split by how each one is checked. No platform (or market) chosen means none is ruled out, so the ad is checked
+// against all of them; placements stay opt-in, since a placement's specs (a bumper's 6 seconds) only bind that format.
+export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): SelectedRules => {
+    const filter = toRuleFilter(settings)
+    const relevant = ruleSet.rules.filter((rule) => isRelevant(rule, filter))
+
+    return {
+        content: relevant.filter(
+            (r) => r.modality === 'text' || r.modality === 'visual' || r.modality === 'audiovisual',
+        ),
+        metadata: relevant.filter((r) => r.modality === 'metadata'),
+        advisory: relevant.filter((r) => r.modality === 'out_of_creative'),
+    }
+}
+
+// The lean projection sent to the model; quote and ref are attached back by id afterwards. With a long list the model
+// works through it in order, so policies that block an ad come first and best-practice advice last; rules of equal
+// rank keep their ruleset order.
+export const projectForModel = (rules: Rule[]): RuleProjection[] =>
+    [...rules]
+        .sort(
+            (a, b) =>
+                SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
+        )
+        .map(({ id, check, severity, modality }) => ({ id, check, severity, modality }))
+
+export const projectAdvisoriesForModel = (rules: Rule[]): AdvisoryProjection[] =>
+    rules.map(({ id, check }) => ({ id, check }))
 
 export const evaluateMetadataRules = (ruleSet: RuleSet, rules: Rule[], media: JobMedia): MetadataCheck[] =>
     rules.map((rule) => ({
