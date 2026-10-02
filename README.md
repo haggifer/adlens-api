@@ -71,7 +71,8 @@ conditional update on the expected current status, so two racing callers can nev
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)):
    - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
    - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
-     metadata plus ffprobe over a signed read URL (range reads, no download). A bad file (unreadable, too long, too
+     metadata plus ffprobe over a signed read URL (range reads, no download; the image runs Debian's ffprobe, because
+     `ffprobe-static`'s Linux build segfaults on any hostname lookup, see the Dockerfile). A bad file (unreadable, too long, too
      large, unsupported type) is rejected with 422 and deleted; a file ffprobe can't decode is probed a second time
      first, since a range read cut off by the network looks the same. A missing upload (409 `UPLOAD_INCOMPLETE`) or a storage
      or network problem (503) puts the job back to `pending` and never deletes the user's file. A job on a
