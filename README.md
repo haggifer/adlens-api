@@ -85,13 +85,14 @@ conditional update on the expected current status, so two racing callers can nev
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`.
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
-   network, timeout) exits 1 so Cloud Run retries it; a permanent failure, or any failure on the last attempt, ends
-   the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute timeout, well inside the 15-minute task
-   timeout. A job is never billed twice: the worker marks the job (`modelCallStartedAt`, a conditional write) before
-   calling Gemini, and an attempt that finds the mark set doesn't call again but fails the job as if Gemini had
-   answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which
+   network) exits 1 so Cloud Run retries it, unless the call may have been billed (below); a permanent failure, or any
+   failure on the last attempt, ends the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute
+   timeout, well inside the 15-minute task timeout. A job is never billed twice: the worker marks the job
+   (`modelCallStartedAt`, a conditional write) before calling Gemini, and an attempt that finds the mark set doesn't
+   call again but fails the job as if Gemini had answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which
    Gemini doesn't bill) clears the mark, so those stay retryable. After our own timeout, a dropped connection or any
-   other failure Vertex may still have generated, and billed, an answer, so the mark stays.
+   other failure Vertex may still have generated, and billed, an answer, so the mark stays, and the attempt fails the
+   job at once rather than leave it to a retry that could only do the same.
 5. **Nothing stays in flight forever**: when a user reads their jobs, and for every user in the daily cleanup, anything
    stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes goes back to `pending`,
    `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded.
@@ -517,7 +518,7 @@ Why the system is built this way, and what was rejected. Decisions that span the
   failures exit 1 while attempts remain; permanent ones, or the last attempt, end the job. A retry calls Gemini again
   only if no earlier call may have been billed (none was made, or Vertex refused it): a malformed answer used to get
   one retry (generation is stochastic), but that billed the job twice, so since 2026-10-01 an unusable answer fails
-  the job at once, and a retry after any other possibly billed call fails it too, refunded within the network's weekly
+  the job at once, and so does any other possibly billed call, transient or not, refunded within the network's weekly
   cap. `maxOutputTokens` caps what the one call can cost.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.

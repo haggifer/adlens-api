@@ -29,7 +29,7 @@ interface CallMark {
 }
 
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
-// attempt; any other failure ends the job in `error` with its charge refunded (after a call that may have been
+// attempt or the job holds the call mark (a retry could only refuse to call Gemini again); any other failure ends the job in `error` with its charge refunded (after a call that may have been
 // billed, only while the network has refunds of those left), and the process exits cleanly. A job is never billed
 // twice: Gemini is called at most once per job, unless Vertex refused the call with an HTTP error status.
 @Injectable()
@@ -64,7 +64,7 @@ export class AnalysisPipeline {
                 await this.lifecycle.addUsage(jobId, err.call)
             }
 
-            if (isRetryable(err) && !attempt.isLast) {
+            if (isRetryable(err) && !attempt.isLast && !mark.isKept) {
                 this.logger.warn(`job ${jobId} failed transiently, leaving it for a retry: ${detail}`)
                 throw err
             }

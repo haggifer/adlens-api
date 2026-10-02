@@ -189,7 +189,7 @@ describe('AnalysisPipeline', () => {
     it('leaves a transient failure for Cloud Run to retry while attempts remain', async () => {
         const jobId = await queueJob()
 
-        reviewer.next = () => Promise.reject(new RetryableError('provider overloaded'))
+        reviewer.next = () => Promise.reject(overloaded())
 
         await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
         expect((await findJob(jobId))?.status).toBe(JobStatus.Analyzing)
@@ -242,9 +242,21 @@ describe('AnalysisPipeline', () => {
     it('never calls Gemini again once an attempt may have been billed, and fails the job as answered', async () => {
         const jobId = await queueJob(NETWORK)
 
+        // An earlier attempt that marked the job and then crashed.
+        await lifecycle.startAttempt(jobId)
+        await lifecycle.markModelCall(jobId)
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect(reviewer.review).not.toHaveBeenCalled()
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+        expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
+    })
+
+    it('fails a transient failure to store the answer in place, since a retry could not call Gemini again', async () => {
+        const jobId = await queueJob(NETWORK)
+
         jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(mongoBlip())
 
-        await expect(pipeline.run(jobId, { isLast: false })).rejects.toThrow('connection reset')
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
@@ -263,15 +275,15 @@ describe('AnalysisPipeline', () => {
         expect(reviewer.review).toHaveBeenCalledTimes(2)
     })
 
-    it('never calls Gemini again after a call that timed out, which may have been billed, and fails it as answered', async () => {
+    it('fails a call that timed out, which may have been billed, in place and as answered, instead of retrying', async () => {
         const jobId = await queueJob(NETWORK)
 
         reviewer.next = () => Promise.reject(timedOut())
-        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
-        expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+        expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
         expect((await networks().findOne({ _id: NETWORK.bucketKey }))?.refundedFailures).toHaveLength(1)
     })
 
