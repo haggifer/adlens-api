@@ -50,32 +50,39 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
             return
         }
 
-        this.stream = db.collection('jobs').watch([{ $match: { operationType: { $in: ['update', 'replace'] } } }], {
+        this.stream = this.openStream(db)
+        this.stream.on('change', (change) => this.handleChange(change))
+        this.stream.on('error', (err: Error) => this.handleError(err))
+    }
+
+    private openStream(db: mongo.Db): mongo.ChangeStream {
+        return db.collection('jobs').watch([{ $match: { operationType: { $in: ['update', 'replace'] } } }], {
             fullDocument: 'updateLookup',
             ...(this.resumeToken ? { resumeAfter: this.resumeToken } : {}),
         })
+    }
 
-        this.stream.on('change', (change) => {
-            this.resumeToken = change._id
+    private handleChange(change: mongo.ChangeStreamDocument): void {
+        this.resumeToken = change._id
 
-            const job = (change as { fullDocument?: StoredJob }).fullDocument
+        const job = (change as { fullDocument?: StoredJob }).fullDocument
 
-            if (job?.userId) {
-                this.gateway.publishJobUpdate(job.userId, toPublicJob(job)).catch((err: unknown) => {
-                    this.logger.error(`could not publish job ${job._id.toString()}: ${describeError(err)}`)
-                })
-            }
-        })
-        this.stream.on('error', (err: Error) => {
-            if (isUnresumable(err)) {
-                this.resumeToken = undefined
-                this.logger.error(`change stream can't resume, reopening from now: ${err.message}`)
-            } else {
-                this.logger.error(`change stream error, reopening: ${err.message}`)
-            }
+        if (job?.userId) {
+            this.gateway.publishJobUpdate(job.userId, toPublicJob(job)).catch((err: unknown) => {
+                this.logger.error(`could not publish job ${job._id.toString()}: ${describeError(err)}`)
+            })
+        }
+    }
 
-            void this.restart()
-        })
+    private handleError(err: Error): void {
+        if (isUnresumable(err)) {
+            this.resumeToken = undefined
+            this.logger.error(`change stream can't resume, reopening from now: ${err.message}`)
+        } else {
+            this.logger.error(`change stream error, reopening: ${err.message}`)
+        }
+
+        void this.restart()
     }
 
     private async restart(): Promise<void> {
