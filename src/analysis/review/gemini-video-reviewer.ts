@@ -4,8 +4,10 @@ import {
     createPartFromUri,
     createUserContent,
     FinishReason,
+    type GenerateContentConfig,
     type GenerateContentResponse,
     GoogleGenAI,
+    type ThinkingLevel,
 } from '@google/genai'
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -22,6 +24,7 @@ import {
     PROMPT_VERSION,
     type ReviewOutput,
 } from './review-prompt'
+import { FLEX_REQUEST_HEADERS, type TrafficLane } from './traffic-lane'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from './video-reviewer'
 
 interface TimedResponse {
@@ -40,9 +43,10 @@ const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
 const getElapsedMs = (startedAt: number) => Math.round(performance.now() - startedAt)
 
-// The elapsed time goes into the message, which the pipeline logs, to tell a timeout from a fast failure.
-const toReviewError = (err: unknown, elapsedMs: number): Error => {
-    const detail = `${describeError(err)} (after ${elapsedMs} ms)`
+// The lane and elapsed time go into the message, which the pipeline logs, to tell a timeout from a fast failure and a
+// throttled Flex call from a Standard one.
+const toReviewError = (err: unknown, lane: TrafficLane, elapsedMs: number): Error => {
+    const detail = `${describeError(err)} (${lane} lane, after ${elapsedMs} ms)`
     // The SDK throws ApiError only for a response with an error status; a timeout or a network failure is anything
     // else.
     const refused = err instanceof ApiError ? new ModelCallRefusedError(detail, err.status, { cause: err }) : null
@@ -59,6 +63,14 @@ const toReviewError = (err: unknown, elapsedMs: number): Error => {
 export const buildReviewContents = (prompt: string, videoUri: string, mimeType: string): Content =>
     createUserContent([prompt, createPartFromUri(videoUri, mimeType)])
 
+const buildConfig = (lane: TrafficLane, thinkingLevel: ThinkingLevel | undefined): GenerateContentConfig => ({
+    responseMimeType: 'application/json',
+    responseJsonSchema: buildReviewOutputJsonSchema(),
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    ...(thinkingLevel && { thinkingConfig: { thinkingLevel } }),
+    ...(lane === 'flex' && { httpOptions: { headers: FLEX_REQUEST_HEADERS } }),
+})
+
 const parseAnswer = (text: string | undefined, call: ModelCall): ReviewOutput => {
     try {
         return parseReviewOutput(text)
@@ -74,11 +86,13 @@ export class GeminiVideoReviewer extends VideoReviewer {
     private readonly client: GoogleGenAI
     private readonly model: string
     private readonly location: string
+    private readonly thinkingLevel: ThinkingLevel | undefined
 
     constructor(config: ConfigService<Env, true>) {
         super()
         this.model = config.get('GEMINI_MODEL', { infer: true })
         this.location = config.get('GEMINI_LOCATION', { infer: true })
+        this.thinkingLevel = config.get('GEMINI_THINKING_LEVEL', { infer: true })
         this.client = new GoogleGenAI({
             vertexai: true,
             project: config.get('GOOGLE_CLOUD_PROJECT', { infer: true }),
@@ -133,14 +147,11 @@ export class GeminiVideoReviewer extends VideoReviewer {
         rules,
         advisories,
         settings,
+        lane,
     }: VideoReviewRequest): Promise<TimedResponse> {
         // Built before the clock starts, so the duration is the model request alone.
         const contents = buildReviewContents(buildReviewPrompt(settings, rules, advisories), videoUri, mimeType)
-        const config = {
-            responseMimeType: 'application/json',
-            responseJsonSchema: buildReviewOutputJsonSchema(),
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-        }
+        const config = buildConfig(lane, this.thinkingLevel)
 
         const startedAt = performance.now()
 
@@ -149,7 +160,7 @@ export class GeminiVideoReviewer extends VideoReviewer {
 
             return { response, durationMs: getElapsedMs(startedAt) }
         } catch (err) {
-            throw toReviewError(err, getElapsedMs(startedAt))
+            throw toReviewError(err, lane, getElapsedMs(startedAt))
         }
     }
 }

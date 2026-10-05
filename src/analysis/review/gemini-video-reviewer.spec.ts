@@ -1,4 +1,10 @@
-import { ApiError, BlockedReason, FinishReason, type GenerateContentResponse } from '@google/genai'
+import {
+    ApiError,
+    BlockedReason,
+    FinishReason,
+    type GenerateContentConfig,
+    type GenerateContentResponse,
+} from '@google/genai'
 import { Market } from 'adlens-shared'
 import { configStub } from '../../testing/config-stub'
 import { isRefusedCall, ModelAnswerError } from '../pipeline/model-answer-error'
@@ -12,6 +18,7 @@ const REQUEST: VideoReviewRequest = {
     rules: [],
     advisories: [],
     settings: { platforms: [], placements: [], markets: [] },
+    lane: 'standard',
 }
 
 const USAGE = { promptTokenCount: 20000, candidatesTokenCount: 10, totalTokenCount: 20010 }
@@ -25,7 +32,7 @@ const answer = (text: string, finishReason = FinishReason.STOP) =>
 
 interface SentRequest {
     contents: { parts: { text?: string; fileData?: { fileUri: string } }[] }
-    config: unknown
+    config: GenerateContentConfig
 }
 
 describe('buildReviewContents', () => {
@@ -40,9 +47,9 @@ describe('buildReviewContents', () => {
 describe('GeminiVideoReviewer', () => {
     const generateContent = jest.fn<Promise<GenerateContentResponse>, unknown[]>()
 
-    const build = () => {
+    const build = (env: Record<string, unknown> = {}) => {
         const reviewer = new GeminiVideoReviewer(
-            configStub({ GEMINI_MODEL: 'fake-model', GEMINI_LOCATION: 'global', GOOGLE_CLOUD_PROJECT: 'p' }),
+            configStub({ GEMINI_MODEL: 'fake-model', GEMINI_LOCATION: 'global', GOOGLE_CLOUD_PROJECT: 'p', ...env }),
         )
 
         // Never the real client: tests make no model calls.
@@ -79,6 +86,42 @@ describe('GeminiVideoReviewer', () => {
         expect(promptStart(second)).toBe(promptStart(first))
         expect(second.config).toEqual(first.config)
         expect(second.contents.parts[1].fileData?.fileUri).toBe('gs://bucket/users/u2/jobs/j2/video')
+    })
+
+    it('sends a Standard request with the model default thinking level when nothing is set', async () => {
+        generateContent.mockResolvedValue(answer('{"transcript": [], "findings": [], "advisories": []}'))
+
+        await build().review(REQUEST)
+
+        const [[request]] = generateContent.mock.calls as [[SentRequest]]
+
+        expect(request.config.httpOptions).toBeUndefined()
+        expect(request.config.thinkingConfig).toBeUndefined()
+    })
+
+    it('asks Vertex for Flex PayGo only, with both headers, on the Flex lane', async () => {
+        generateContent.mockResolvedValue(answer('{"transcript": [], "findings": [], "advisories": []}'))
+
+        await build().review({ ...REQUEST, lane: 'flex' })
+
+        const [[request]] = generateContent.mock.calls as [[SentRequest]]
+
+        expect(request.config.httpOptions).toEqual({
+            headers: {
+                'X-Vertex-AI-LLM-Request-Type': 'shared',
+                'X-Vertex-AI-LLM-Shared-Request-Type': 'flex',
+            },
+        })
+    })
+
+    it('sends the configured thinking level and never a thinking budget with it', async () => {
+        generateContent.mockResolvedValue(answer('{"transcript": [], "findings": [], "advisories": []}'))
+
+        await build({ GEMINI_THINKING_LEVEL: 'LOW' }).review(REQUEST)
+
+        const [[request]] = generateContent.mock.calls as [[SentRequest]]
+
+        expect(request.config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' })
     })
 
     it('fails a blocked prompt without a retry, keeping the call it was billed for', async () => {
@@ -200,6 +243,18 @@ describe('GeminiVideoReviewer', () => {
 
             expect((timedOut as Error).message).toContain('after 600000 ms')
             expect((refused as Error).message).toContain('after 1500 ms')
+        })
+
+        it('names the lane of a call that got no answer', async () => {
+            settleAfter(2000, () => {
+                throw new ApiError({ message: 'resource exhausted', status: 429 })
+            })
+
+            const flex = await build()
+                .review({ ...REQUEST, lane: 'flex' })
+                .catch((err: unknown) => err)
+
+            expect((flex as Error).message).toContain('(flex lane, after 2000 ms)')
         })
     })
 })

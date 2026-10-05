@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
+import { chooseTrafficLane } from './analysis/review/traffic-lane'
 import { createLogger } from './common/cloud-logger'
 import { describeErrorWithStack } from './common/error-message'
 import type { Env } from './config/env'
@@ -24,6 +25,8 @@ const run = async (): Promise<number> => {
     const jobId = config.get('WORKER_JOB_ID', { infer: true })
     const attempt = config.get('CLOUD_RUN_TASK_ATTEMPT', { infer: true })
     const maxRetries = config.get('ANALYZE_MAX_RETRIES', { infer: true })
+    const isLast = attempt >= maxRetries
+    const lane = chooseTrafficLane(config.get('GEMINI_TRAFFIC', { infer: true }), attempt, isLast)
 
     try {
         if (!jobId) {
@@ -31,9 +34,9 @@ const run = async (): Promise<number> => {
             return EXIT_DONE
         }
 
-        const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast: attempt >= maxRetries })
+        const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast, lane })
 
-        logger.log(`job ${jobId}: ${outcome} (attempt ${attempt})`)
+        logger.log(`job ${jobId}: ${outcome} (attempt ${attempt}, ${lane} lane)`)
 
         return EXIT_DONE
     } catch (err) {

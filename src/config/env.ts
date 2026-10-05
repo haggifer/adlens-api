@@ -1,3 +1,4 @@
+import { ThinkingLevel } from '@google/genai'
 import { ConfigModule } from '@nestjs/config'
 import { z } from 'zod'
 import { logFormatSchema } from './log-format'
@@ -47,6 +48,10 @@ const envSchema = z.object({
     TRUSTED_PROXY_HOPS: z.coerce.number().int().positive().default(1),
     GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
     GEMINI_LOCATION: z.string().default('global'),
+    // `flex`: Vertex Flex PayGo (half price, slower, throttled first) for a job's first attempt when a retry follows.
+    GEMINI_TRAFFIC: z.enum(['standard', 'flex']).default('standard'),
+    // Unset, the model's default (MEDIUM). Gemini 3.8 Flash rejects MINIMAL.
+    GEMINI_THINKING_LEVEL: z.enum([ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH]).optional(),
     ANALYZE_LOCAL: flagSchema,
     ANALYZE_JOB_NAME: z.string().default('adlens-analyze'),
     // Must equal the Cloud Run Job's --max-retries, so the worker knows which attempt is its last.

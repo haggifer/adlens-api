@@ -31,6 +31,9 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - A run that ends without a result is never counted: every failure refunds the user's run and the network's in full,
   even after a Gemini call that may have been billed. Gemini is still called at most once per job (the
   `modelCallStartedAt` mark), so that refund never pays for a second call.
+- Every job keeps a Standard Gemini attempt: Flex PayGo is used only on a first attempt that has another after it
+  (`chooseTrafficLane`), and a Flex 429 or 503 goes through the normal refused-call retry, never a retry inside the
+  reviewer.
 - Keep everything before the campaign block in the Gemini request (instructions, rules, advisories, and the output
   schema) identical for identical rule selections; anything per request (settings, the video, its duration, dates,
   ids) goes after it, so Vertex's implicit cache can match the prefix.

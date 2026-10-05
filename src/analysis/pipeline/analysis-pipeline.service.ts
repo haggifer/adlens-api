@@ -15,6 +15,7 @@ import {
 } from '../../rules'
 import { RulesetService } from '../../rules/ruleset.service'
 import type { RuleSet } from '../../rules/schema'
+import type { TrafficLane } from '../review/traffic-lane'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from '../review/video-reviewer'
 import { isRefusedCall, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
 import { isRetryable } from './retryable-error'
@@ -23,6 +24,7 @@ type RunOutcome = 'analyzed' | 'failed' | 'skipped'
 
 interface RunAttempt {
     isLast: boolean
+    lane: TrafficLane
 }
 
 // Whether the job holds the Gemini call mark: from the moment an attempt sets it (or finds it set by an earlier one)
@@ -31,12 +33,13 @@ interface CallMark {
     isKept: boolean
 }
 
-const toReviewRequest = (job: StoredJob, selected: SelectedRules): VideoReviewRequest => ({
+const toReviewRequest = (job: StoredJob, selected: SelectedRules, lane: TrafficLane): VideoReviewRequest => ({
     videoUri: gcsUri(job.file.bucket, job.file.path),
     mimeType: job.file.contentType,
     rules: projectForModel(selected.content),
     advisories: projectAdvisoriesForModel(selected.advisory),
     settings: job.settings,
+    lane,
 })
 
 const buildAnalysis = (ruleSet: RuleSet, selected: SelectedRules, review: VideoReview, media: JobMedia): Analysis => ({
@@ -79,7 +82,7 @@ export class AnalysisPipeline {
         const mark: CallMark = { isKept: false }
 
         try {
-            const { analysis, call } = await this.analyze(job, mark)
+            const { analysis, call } = await this.analyze(job, attempt.lane, mark)
             const isCompleted = await this.lifecycle.complete(jobId, analysis, call)
 
             return isCompleted ? 'analyzed' : 'skipped'
@@ -102,7 +105,11 @@ export class AnalysisPipeline {
         }
     }
 
-    private async analyze(job: StoredJob, mark: CallMark): Promise<{ analysis: Analysis; call: ModelCall }> {
+    private async analyze(
+        job: StoredJob,
+        lane: TrafficLane,
+        mark: CallMark,
+    ): Promise<{ analysis: Analysis; call: ModelCall }> {
         if (!job.media) {
             throw new Error('Job has no verified media')
         }
@@ -118,7 +125,7 @@ export class AnalysisPipeline {
             throw new ModelCallRepeatedError()
         }
 
-        const review = await this.review(jobId, toReviewRequest(job, selected), mark)
+        const review = await this.review(jobId, toReviewRequest(job, selected, lane), mark)
 
         return { analysis: buildAnalysis(ruleSet, selected, review, job.media), call: review.call }
     }

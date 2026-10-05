@@ -55,4 +55,20 @@ describe('validateEnvWithSecretsFile', () => {
 
         expect(() => validateEnvWithSecretsFile({ ...baseEnv, SECRETS_FILE: path })).toThrow('MONGODB_URI')
     })
+
+    it('keeps Gemini on Standard traffic and the model default thinking level unless set', () => {
+        const env = validateEnvWithSecretsFile({ ...baseEnv, MONGODB_URI: 'mongodb://local' })
+
+        expect(env.GEMINI_TRAFFIC).toBe('standard')
+        expect(env.GEMINI_THINKING_LEVEL).toBeUndefined()
+    })
+
+    it('rejects a thinking level Gemini 3.8 Flash refuses', () => {
+        const env = { ...baseEnv, MONGODB_URI: 'mongodb://local' }
+
+        expect(validateEnvWithSecretsFile({ ...env, GEMINI_THINKING_LEVEL: 'LOW' }).GEMINI_THINKING_LEVEL).toBe('LOW')
+        expect(() => validateEnvWithSecretsFile({ ...env, GEMINI_THINKING_LEVEL: 'MINIMAL' })).toThrow(
+            'GEMINI_THINKING_LEVEL',
+        )
+    })
 })

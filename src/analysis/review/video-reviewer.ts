@@ -1,6 +1,7 @@
 import type { AnalysisSettings } from 'adlens-shared'
 import type { ModelCall } from '../../database/job.doc'
 import type { AdvisoryProjection, ModelFinding, RuleProjection } from '../../rules'
+import type { TrafficLane } from './traffic-lane'
 
 export interface VideoReviewRequest {
     videoUri: string
@@ -8,6 +9,7 @@ export interface VideoReviewRequest {
     rules: RuleProjection[]
     advisories: AdvisoryProjection[]
     settings: AnalysisSettings
+    lane: TrafficLane
 }
 
 export interface VideoReview {

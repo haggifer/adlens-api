@@ -99,7 +99,9 @@ conditional update on the expected current status, so two racing callers can nev
    call again but fails the job as if Gemini had answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which
    Gemini doesn't bill) clears the mark, so those stay retryable. After our own timeout, a dropped connection or any
    other failure Vertex may still have generated, and billed, an answer, so the mark stays, and the attempt fails the
-   job at once rather than leave it to a retry that could only do the same.
+   job at once rather than leave it to a retry that could only do the same. With `GEMINI_TRAFFIC=flex` the first
+   attempt asks Vertex for Flex PayGo when another attempt follows it, and every later attempt uses Standard, so a
+   refused Flex call is retried on Standard.
 5. **Nothing stays in flight forever**: when a user reads their jobs, and for every user in the daily cleanup, anything
    stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes ends as `VIDEO_CHECK_FAILED`,
    `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded. A job still `pending` 6 hours after its
@@ -416,6 +418,8 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
 | `GEMINI_MODEL`           | `gemini-3.8-flash`      | Model id                                                                    |
 | `GEMINI_LOCATION`        | `global`                | Vertex serving location                                                     |
+| `GEMINI_TRAFFIC`         | `standard`              | `flex`: Vertex Flex PayGo for a job's first attempt when a retry follows (global only) |
+| `GEMINI_THINKING_LEVEL`  | — (model default)       | `LOW`, `MEDIUM` or `HIGH`; Gemini 3.8 Flash rejects `MINIMAL`               |
 | `WORKER_JOB_ID`          | —                       | Worker only: set per execution by the dispatcher                            |
 | `CLOUD_RUN_TASK_ATTEMPT` | `0`                     | Worker only: set by Cloud Run on each attempt                               |
 
@@ -543,9 +547,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
   per job, and the Vertex spend cap bounds what repeated failures can cost.
 - **The request starts with what repeats, so Vertex can cache it.** The text of a request (an all-platforms run sends
   321 rules and 27 advisories) was about 55% of an analysis's cost and the same for the same settings, yet nothing was
-  cached: the video came first, so every request differed from its first part. Vertex caches Gemini 3 Flash requests
-  implicitly, matching a prefix of at least 2,048 tokens and billing the cached tokens at 10% of the input price, so
+  cached: the video came first, so every request differed from its first part. Vertex caches Gemini 3.8 Flash requests
+  implicitly, matching a prefix of at least 6,144 tokens and billing the cached tokens at 10% of the input price, so
   since prompt version 8 the instructions, rules and advisories come first, then the campaign block, then the video.
+  On the `global` endpoint the first runs still reported no cached tokens; caching is best-effort and the multi-region
+  endpoints cost 10% more and exclude Flex, so the layout stays for the chance of a hit and nothing else depends on
+  it.
   The output schema used to cap timestamps at the video's own last second; it isn't known whether Vertex counts the
   schema into the prefix, so the cap is now the constant `MAX_DURATION_S`. Whole seconds stay: they are what stopped
   the runaway decimals, and the parser still accepts a second past the end.
@@ -554,6 +561,16 @@ Why the system is built this way, and what was rejected. Decisions that span the
   `<id>: <check>` sends the same content in about a fifth fewer tokens (all platforms: about 19.2k text tokens instead
   of 23.8k). Groups follow the importance order, so a header can repeat when best-practice advice of the same severity
   comes after the policy rules.
+- **Flex PayGo per attempt, not a fallback inside the call.** Vertex's Flex lane bills every token at half the
+  Standard price for the same synchronous request, in exchange for longer latency and earlier throttling. A refused
+  call (429, 503) already clears the call mark and leaves the task to Cloud Run's retry, so the lane is a function of
+  the attempt: Flex on the first attempt when another follows, Standard after that. No second error path and no retry
+  inside the reviewer, and the billed-call guard is untouched. A job without retries, such as a local run, never uses
+  Flex. A Flex call that times out may have been billed, so like any timeout it fails the job; Flex is only switched
+  on once lab runs show its latency well inside the 10-minute request timeout.
+- **Thinking level from config.** Thinking tokens bill as output and were the second-largest cost of a run, varying
+  2.3× between runs of the same video. `GEMINI_THINKING_LEVEL` sets `thinkingConfig.thinkingLevel` and never a
+  thinking budget, which Gemini 3 doesn't combine with a level; unset, the model's default applies.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
