@@ -56,6 +56,13 @@ const ASPECT_RATIO_TOLERANCE = 0.02
 
 const SCOPE_RANK: Record<Rule['scope'], number> = { compliance: 0, best_practice: 1 }
 const SEVERITY_RANK: Record<Rule['severity'], number> = { blocker: 0, warning: 1, info: 2 }
+const MODALITY_RANK: Record<Rule['modality'], number> = {
+    text: 0,
+    visual: 1,
+    audiovisual: 2,
+    metadata: 3,
+    out_of_creative: 4,
+}
 
 const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
     new Set([RulePlatform.All, ...settings.platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
@@ -184,12 +191,15 @@ export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): Selec
 
 // The lean projection sent to the model; quote and ref are attached back by id afterwards. With a long list the model
 // works through it in order, so policies that block an ad come first and best-practice advice last; rules of equal
-// rank keep their ruleset order.
+// rank are grouped by modality, since the prompt lists them under one header per severity and modality, and otherwise
+// keep their ruleset order.
 export const projectForModel = (rules: Rule[]): RuleProjection[] =>
     [...rules]
         .sort(
             (a, b) =>
-                SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
+                SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] ||
+                SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
+                MODALITY_RANK[a.modality] - MODALITY_RANK[b.modality],
         )
         .map(({ id, check, severity, modality }) => ({ id, check, severity, modality }))
 

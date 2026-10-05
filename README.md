@@ -334,11 +334,12 @@ selected by some settings. Selected rules are then routed by `modality`:
   rotation, real object size); an aspect ratio can be one required ratio (`aspect_ratio_in`), a list
   (`aspect_ratio_one_of`, `params.ratios`) or a range (`aspect_ratio_between`, `params.min`/`max`, min not above
   max), written as `W:H` with both parts positive;
-- `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
-  source link are attached back by id, and ids the model invents are dropped;
+- `text` / `visual` / `audiovisual` → sent to the model as `<id>: <check>` lines under `## <severity> · <modality>`
+  headers; quote and resolved source link are attached back by id, and ids the model invents are dropped;
 - `out_of_creative` → an advisory checklist, never judged: the model only names the advisories whose subject the ad
   falls under (`advisories` in its output), and only those are stored. Content rules reach the model ordered by
-  importance (blocker policies first, best-practice advice last).
+  importance (blocker policies first, best-practice advice last), rules of equal importance grouped by modality;
+  advisories are `<id>: <check>` lines too.
 
 The Gemini request ([`review-prompt.ts`](src/analysis/review/review-prompt.ts),
 [`gemini-video-reviewer.ts`](src/analysis/review/gemini-video-reviewer.ts)) is laid out for Vertex's implicit
@@ -545,6 +546,11 @@ Why the system is built this way, and what was rejected. Decisions that span the
   The output schema used to cap timestamps at the video's own last second; it isn't known whether Vertex counts the
   schema into the prefix, so the cap is now the constant `MAX_DURATION_S`. Whole seconds stay: they are what stopped
   the runaway decimals, and the parser still accepts a second past the end.
+- **Rules as plain lines, not JSON.** Until prompt version 8 the rules and advisories went out as JSON arrays, repeating
+  the keys and quotes on every rule. Grouping the rules under one `severity · modality` header and writing each as
+  `<id>: <check>` sends the same content in about a fifth fewer tokens (all platforms: about 19.2k text tokens instead
+  of 23.8k). Groups follow the importance order, so a header can repeat when best-practice advice of the same severity
+  comes after the policy rules.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and

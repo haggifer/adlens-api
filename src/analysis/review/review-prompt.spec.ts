@@ -1,4 +1,5 @@
 import { Market, MAX_DURATION_S, Platform } from 'adlens-shared'
+import type { RuleProjection } from '../../rules'
 import { buildReviewOutputJsonSchema, buildReviewPrompt, parseReviewOutput } from './review-prompt'
 
 const SETTINGS = { platforms: [], placements: [], markets: [] }
@@ -8,6 +9,13 @@ const RULES = [
 ]
 
 const ADVISORIES = [{ id: 'meta.restricted.crypto', check: 'Crypto needs permission.' }]
+
+const ruleOf = (id: string, severity: RuleProjection['severity'], modality: RuleProjection['modality']) => ({
+    id,
+    check: `Check ${id}.`,
+    severity,
+    modality,
+})
 
 // Vertex's implicit cache matches a request's prefix, so this part must not vary with the campaign.
 const beforeCampaign = (prompt: string) => prompt.slice(0, prompt.indexOf('Campaign context'))
@@ -55,15 +63,71 @@ describe('buildReviewPrompt', () => {
         expect(prompt).toContain('use "warning", even for a rule whose severity is blocker')
     })
 
-    it('lists the advisory rules and asks which of them this ad falls under', () => {
+    it('lists the advisory rules one per line and asks which of them this ad falls under', () => {
+        const prompt = buildReviewPrompt(SETTINGS, [], ADVISORIES)
+
+        expect(prompt).toContain('Advisory rules, one per line as "<id>: <check>".')
+        expect(prompt).toContain('\nmeta.restricted.crypto: Crypto needs permission.\n')
+        expect(prompt).toContain('Return in "advisories" the ids of those whose subject this ad actually falls under')
+    })
+
+    it('says when there are no advisory rules', () => {
+        expect(buildReviewPrompt(SETTINGS, RULES, [])).toContain('or [] when none do.\n(none)\n')
+    })
+
+    it('lists the rules under a header per severity and modality, one "<id>: <check>" line each', () => {
         const prompt = buildReviewPrompt(
             SETTINGS,
+            [
+                ruleOf('a', 'blocker', 'visual'),
+                ruleOf('b', 'blocker', 'visual'),
+                ruleOf('c', 'blocker', 'text'),
+                ruleOf('d', 'warning', 'audiovisual'),
+            ],
             [],
-            [{ id: 'meta.restricted.crypto', check: 'Crypto needs permission.' }],
         )
 
-        expect(prompt).toContain('[{"id":"meta.restricted.crypto","check":"Crypto needs permission."}]')
-        expect(prompt).toContain('Return in "advisories" the ids of those whose subject this ad actually falls under')
+        expect(prompt).toContain(
+            'Rules, grouped under "## <severity> · <modality>" headers, one per line as "<id>: <check>":',
+        )
+        expect(prompt).toContain(
+            [
+                '## blocker · visual',
+                'a: Check a.',
+                'b: Check b.',
+                '',
+                '## blocker · text',
+                'c: Check c.',
+                '',
+                '## warning · audiovisual',
+                'd: Check d.',
+                '',
+            ].join('\n'),
+        )
+        expect(prompt).not.toContain('"severity"')
+    })
+
+    // projectForModel orders them by importance; a header never pulls a rule ahead of a more important one.
+    it('keeps the rules in the given order, starting a new group whenever severity or modality changes', () => {
+        const prompt = buildReviewPrompt(
+            SETTINGS,
+            [ruleOf('a', 'blocker', 'visual'), ruleOf('b', 'blocker', 'text'), ruleOf('c', 'blocker', 'visual')],
+            [],
+        )
+
+        expect(prompt).toContain(
+            [
+                '## blocker · visual',
+                'a: Check a.',
+                '',
+                '## blocker · text',
+                'b: Check b.',
+                '',
+                '## blocker · visual',
+                'c: Check c.',
+                '',
+            ].join('\n'),
+        )
     })
 
     it('asks for whole seconds, and startS 0 for an issue that concerns the whole video', () => {

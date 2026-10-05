@@ -12,7 +12,8 @@ type ParsedFinding = Omit<ModelFinding, 'time'> & { startS?: number; endS?: numb
 
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
 // 8: the instructions, rules and advisories come first and the campaign and the video last, and the output schema no
-// longer depends on the video, so Vertex can cache the start of the request.
+// longer depends on the video, so Vertex can cache the start of the request; rules and advisories are plain
+// "<id>: <check>" lines (rules under severity and modality headers) instead of JSON.
 export const PROMPT_VERSION = '8'
 
 // Times are whole seconds: free decimals ran away (`0.000…` or `3.0134…1234567890…`, thousands of digits) until the
@@ -50,6 +51,34 @@ const describeCampaign = (settings: AnalysisSettings): string =>
         `Markets: ${settings.markets.join(', ') || 'all (none chosen)'}`,
     ].join('\n')
 
+const isSameGroup = (a: RuleProjection, b: RuleProjection) => a.severity === b.severity && a.modality === b.modality
+
+// Consecutive rules only, so a header never moves a rule ahead of a more important one (projectForModel's order).
+const groupRules = (rules: RuleProjection[]): RuleProjection[][] =>
+    rules.reduce<RuleProjection[][]>((groups, rule) => {
+        const last = groups[groups.length - 1]
+
+        if (last && isSameGroup(last[0], rule)) {
+            last.push(rule)
+        } else {
+            groups.push([rule])
+        }
+
+        return groups
+    }, [])
+
+const toLine = ({ id, check }: AdvisoryProjection) => `${id}: ${check}`
+
+const formatAdvisories = (advisories: AdvisoryProjection[]) =>
+    advisories.length ? advisories.map(toLine).join('\n') : '(none)'
+
+const formatGroup = (group: RuleProjection[]) =>
+    [`## ${group[0].severity} · ${group[0].modality}`, ...group.map(toLine)].join('\n')
+
+// Plain lines rather than JSON: the same content in about a fifth fewer prompt tokens.
+const formatRules = (rules: RuleProjection[]) =>
+    rules.length ? groupRules(rules).map(formatGroup).join('\n\n') : '(none)'
+
 const toModelFinding = ({ startS, endS, ...finding }: ParsedFinding): ModelFinding => ({
     ...finding,
     time: startS === undefined ? undefined : { startS, endS },
@@ -83,11 +112,11 @@ export const buildReviewPrompt = (
     [
         'You are an ad-policy compliance reviewer. Watch and listen to the attached video advertisement and evaluate it against the policy rules below.',
         '',
-        'Rules (JSON array; each has id, check, severity, modality):',
-        JSON.stringify(rules),
+        'Rules, grouped under "## <severity> · <modality>" headers, one per line as "<id>: <check>":',
+        formatRules(rules),
         '',
-        'Advisory rules (JSON array; each has id and check). They concern targeting, licences or permissions, so they are not judged from the video. Return in "advisories" the ids of those whose subject this ad actually falls under (for example an alcohol-targeting rule only for an ad that promotes alcohol), or [] when none do.',
-        JSON.stringify(advisories),
+        'Advisory rules, one per line as "<id>: <check>". They concern targeting, licences or permissions, so they are not judged from the video. Return in "advisories" the ids of those whose subject this ad actually falls under (for example an alcohol-targeting rule only for an ad that promotes alcohol), or [] when none do.',
+        formatAdvisories(advisories),
         '',
         'Instructions:',
         '- Return the spoken audio in "transcript" as a list of segments, one per sentence, each with the second it starts at (an empty list if there is no speech).',

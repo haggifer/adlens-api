@@ -99,6 +99,19 @@ describe('projectForModel', () => {
 
         expect(projectForModel(rules).map((rule) => rule.id)).toEqual(['b', 'a'])
     })
+
+    // The prompt lists the rules under one header per severity and modality.
+    it('groups rules of equal importance by modality, keeping their order within each modality', () => {
+        const rules = [
+            { ...ruleOf('a', 'compliance', 'blocker'), modality: 'audiovisual' as const },
+            { ...ruleOf('b', 'compliance', 'blocker'), modality: 'visual' as const },
+            { ...ruleOf('c', 'compliance', 'blocker'), modality: 'audiovisual' as const },
+            { ...ruleOf('d', 'compliance', 'blocker'), modality: 'text' as const },
+            { ...ruleOf('e', 'compliance', 'warning'), modality: 'text' as const },
+        ]
+
+        expect(projectForModel(rules).map((rule) => rule.id)).toEqual(['d', 'b', 'a', 'c', 'e'])
+    })
 })
 
 describe('evaluateMetadataRules', () => {
