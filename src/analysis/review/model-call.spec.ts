@@ -2,10 +2,10 @@ import { FinishReason, MediaModality, TrafficType } from '@google/genai'
 import { toModelCall } from './model-call'
 
 const AT = new Date('2026-09-30T12:00:00.000Z')
-const WHERE = { model: 'gemini-3.8-flash', location: 'global', at: AT }
+const WHERE = { model: 'gemini-3.8-flash', location: 'global', at: AT, durationMs: 41250 }
 
 describe('toModelCall', () => {
-    it('keeps everything a price depends on: model, endpoint, time, traffic type and every token count', () => {
+    it('keeps everything a price depends on (model, endpoint, time, traffic type, every token count) and the duration', () => {
         const call = toModelCall(
             {
                 promptTokenCount: 12000,
@@ -29,6 +29,7 @@ describe('toModelCall', () => {
 
         expect(call).toEqual({
             at: AT,
+            durationMs: 41250,
             model: 'gemini-3.8-flash',
             location: 'global',
             trafficType: 'ON_DEMAND',

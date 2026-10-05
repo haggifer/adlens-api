@@ -122,4 +122,52 @@ describe('GeminiVideoReviewer', () => {
         expect(isRefusedCall(dropped)).toBe(false)
         expect(isRetryable(dropped)).toBe(true)
     })
+
+    describe('call duration', () => {
+        // The fake clock moves only while the model request is pending, so parsing the answer adds nothing.
+        const settleAfter = (ms: number, settle: () => GenerateContentResponse) =>
+            generateContent.mockImplementation(async () => {
+                jest.advanceTimersByTime(ms)
+
+                return settle()
+            })
+
+        beforeEach(() => jest.useFakeTimers())
+
+        afterEach(() => jest.useRealTimers())
+
+        it('records how long the model request took, in whole milliseconds', async () => {
+            settleAfter(41250.6, () => answer('{"transcript": [], "findings": [], "advisories": []}'))
+
+            const review = await build().review(REQUEST)
+
+            expect(review.call.durationMs).toBe(41251)
+        })
+
+        it('records it on a billed answer that cannot be used', async () => {
+            settleAfter(95000, () => answer('{"transcript": ', FinishReason.MAX_TOKENS))
+
+            const err = await reviewError()
+
+            expect(err).toBeInstanceOf(ModelAnswerError)
+            expect((err as ModelAnswerError).call.durationMs).toBe(95000)
+        })
+
+        it('reports how long a call that got no answer ran', async () => {
+            settleAfter(600000, () => {
+                throw new DOMException('This operation was aborted', 'AbortError')
+            })
+
+            const timedOut = await reviewError()
+
+            settleAfter(1500, () => {
+                throw new ApiError({ message: 'bad request', status: 400 })
+            })
+
+            const refused = await reviewError()
+
+            expect((timedOut as Error).message).toContain('after 600000 ms')
+            expect((refused as Error).message).toContain('after 1500 ms')
+        })
+    })
 })

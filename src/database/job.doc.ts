@@ -23,6 +23,9 @@ const tokensByModalitySchema = z.record(z.string(), tokenCountSchema)
 // and the tokens by kind and modality; a request's own size decides long-context tiers.
 const modelCallSchema = z.object({
     at: z.date(),
+    // Milliseconds the model request took, our parsing excluded; `at` is when the answer arrived. Calls recorded
+    // before it was measured have none.
+    durationMs: z.number().int().nonnegative().optional(),
     model: z.string(),
     location: z.string(),
     trafficType: z.string().optional(),
