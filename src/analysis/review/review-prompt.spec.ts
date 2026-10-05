@@ -1,9 +1,38 @@
-import { Market, Platform } from 'adlens-shared'
+import { Market, MAX_DURATION_S, Platform } from 'adlens-shared'
 import { buildReviewOutputJsonSchema, buildReviewPrompt, parseReviewOutput } from './review-prompt'
 
 const SETTINGS = { platforms: [], placements: [], markets: [] }
 
+const RULES = [
+    { id: 'meta.prohibited.weapons', check: 'No weapons.', severity: 'blocker' as const, modality: 'visual' as const },
+]
+
+const ADVISORIES = [{ id: 'meta.restricted.crypto', check: 'Crypto needs permission.' }]
+
+// Vertex's implicit cache matches a request's prefix, so this part must not vary with the campaign.
+const beforeCampaign = (prompt: string) => prompt.slice(0, prompt.indexOf('Campaign context'))
+
 describe('buildReviewPrompt', () => {
+    it('keeps the text before the campaign block identical for campaigns that select the same rules', () => {
+        const youtube = buildReviewPrompt(
+            { platforms: [Platform.YouTube], placements: [], markets: [Market.UK] },
+            RULES,
+            ADVISORIES,
+        )
+        const meta = buildReviewPrompt({ platforms: [Platform.Meta], placements: [], markets: [] }, RULES, ADVISORIES)
+
+        expect(beforeCampaign(youtube)).toBe(beforeCampaign(meta))
+    })
+
+    it('puts the campaign block after the instructions, rules and advisories', () => {
+        const prompt = buildReviewPrompt(SETTINGS, RULES, ADVISORIES)
+
+        expect(beforeCampaign(prompt)).toContain('Instructions:')
+        expect(beforeCampaign(prompt)).toContain('meta.prohibited.weapons')
+        expect(beforeCampaign(prompt)).toContain('meta.restricted.crypto')
+        expect(prompt.trimEnd().endsWith('</campaign>')).toBe(true)
+    })
+
     it('asks for the transcript as sentence segments, never verbatim in one piece', () => {
         const prompt = buildReviewPrompt(SETTINGS, [], [])
 
@@ -65,30 +94,26 @@ interface JsonSchema {
 }
 
 describe('buildReviewOutputJsonSchema', () => {
-    const SECOND_OF_A_29_4_S_VIDEO = { type: 'integer', minimum: 0, maximum: 30 }
-    const { properties } = buildReviewOutputJsonSchema(29.4) as unknown as JsonSchema
+    const WHOLE_SECOND = { type: 'integer', minimum: 0, maximum: MAX_DURATION_S }
+    const { properties } = buildReviewOutputJsonSchema() as unknown as JsonSchema
 
     it('asks for the transcript as segments with a whole-second start', () => {
         expect(properties.transcript).toMatchObject({
             type: 'array',
-            items: { properties: { startS: SECOND_OF_A_29_4_S_VIDEO, text: { type: 'string' } } },
+            items: { properties: { startS: WHOLE_SECOND, text: { type: 'string' } } },
         })
+    })
+
+    it('asks for the ids of the advisories the ad falls under', () => {
+        expect(properties.advisories).toEqual({ type: 'array', items: { type: 'string' } })
+        expect((buildReviewOutputJsonSchema() as unknown as { required: string[] }).required).toContain('advisories')
     })
 
     // Free decimals ran away (`0.000…`, thousands of digits) until the reply hit the token limit: 5 of 6 runs of
-    // gemini-3.8-flash on 2026-09-29.
-    it('asks for the ids of the advisories the ad falls under', () => {
-        expect(properties.advisories).toEqual({ type: 'array', items: { type: 'string' } })
-        expect((buildReviewOutputJsonSchema(29.4) as unknown as { required: string[] }).required).toContain(
-            'advisories',
-        )
-    })
-
-    it("asks for finding times in whole seconds, capped at the video's length", () => {
-        expect(properties.findings.items.properties).toMatchObject({
-            startS: SECOND_OF_A_29_4_S_VIDEO,
-            endS: SECOND_OF_A_29_4_S_VIDEO,
-        })
+    // gemini-3.8-flash on 2026-09-29. The cap is the longest video accepted, not this video's length, so the schema is
+    // the same in every request.
+    it('asks for finding times in whole seconds, capped at the longest video accepted', () => {
+        expect(properties.findings.items.properties).toMatchObject({ startS: WHOLE_SECOND, endS: WHOLE_SECOND })
     })
 })
 

@@ -31,10 +31,9 @@ interface CallMark {
     isKept: boolean
 }
 
-const toReviewRequest = (job: StoredJob, media: JobMedia, selected: SelectedRules): VideoReviewRequest => ({
+const toReviewRequest = (job: StoredJob, selected: SelectedRules): VideoReviewRequest => ({
     videoUri: gcsUri(job.file.bucket, job.file.path),
     mimeType: job.file.contentType,
-    durationS: media.durationS,
     rules: projectForModel(selected.content),
     advisories: projectAdvisoriesForModel(selected.advisory),
     settings: job.settings,
@@ -119,7 +118,7 @@ export class AnalysisPipeline {
             throw new ModelCallRepeatedError()
         }
 
-        const review = await this.review(jobId, toReviewRequest(job, job.media, selected), mark)
+        const review = await this.review(jobId, toReviewRequest(job, selected), mark)
 
         return { analysis: buildAnalysis(ruleSet, selected, review, job.media), call: review.call }
     }

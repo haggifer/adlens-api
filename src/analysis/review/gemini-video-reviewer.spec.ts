@@ -1,14 +1,14 @@
 import { ApiError, BlockedReason, FinishReason, type GenerateContentResponse } from '@google/genai'
+import { Market } from 'adlens-shared'
 import { configStub } from '../../testing/config-stub'
 import { isRefusedCall, ModelAnswerError } from '../pipeline/model-answer-error'
 import { isRetryable } from '../pipeline/retryable-error'
-import { GeminiVideoReviewer } from './gemini-video-reviewer'
+import { buildReviewContents, GeminiVideoReviewer } from './gemini-video-reviewer'
 import type { VideoReviewRequest } from './video-reviewer'
 
 const REQUEST: VideoReviewRequest = {
     videoUri: 'gs://bucket/users/u1/jobs/j1/video',
     mimeType: 'video/mp4',
-    durationS: 15,
     rules: [],
     advisories: [],
     settings: { platforms: [], placements: [], markets: [] },
@@ -22,6 +22,21 @@ const answer = (text: string, finishReason = FinishReason.STOP) =>
         text,
         usageMetadata: USAGE,
     }) as unknown as GenerateContentResponse
+
+interface SentRequest {
+    contents: { parts: { text?: string; fileData?: { fileUri: string } }[] }
+    config: unknown
+}
+
+describe('buildReviewContents', () => {
+    // Vertex's implicit cache matches a request's prefix: a video first made every request differ from its first part.
+    it('puts the prompt before the video', () => {
+        expect(buildReviewContents('Review this ad.', 'gs://bucket/video', 'video/mp4')).toEqual({
+            role: 'user',
+            parts: [{ text: 'Review this ad.' }, { fileData: { fileUri: 'gs://bucket/video', mimeType: 'video/mp4' } }],
+        })
+    })
+})
 
 describe('GeminiVideoReviewer', () => {
     const generateContent = jest.fn<Promise<GenerateContentResponse>, unknown[]>()
@@ -48,6 +63,24 @@ describe('GeminiVideoReviewer', () => {
     }
 
     beforeEach(() => generateContent.mockReset())
+
+    it('sends the same prompt start and config for another video and campaign, with the video last', async () => {
+        generateContent.mockResolvedValue(answer('{"transcript": [], "findings": [], "advisories": []}'))
+
+        await build().review(REQUEST)
+        await build().review({
+            ...REQUEST,
+            videoUri: 'gs://bucket/users/u2/jobs/j2/video',
+            settings: { platforms: [], placements: [], markets: [Market.UK] },
+        })
+
+        const [first, second] = generateContent.mock.calls.map(([request]) => request as SentRequest)
+        const promptStart = ({ contents }: SentRequest) => contents.parts[0].text?.split('Campaign context')[0]
+
+        expect(promptStart(second)).toBe(promptStart(first))
+        expect(second.config).toEqual(first.config)
+        expect(second.contents.parts[1].fileData?.fileUri).toBe('gs://bucket/users/u2/jobs/j2/video')
+    })
 
     it('fails a blocked prompt without a retry, keeping the call it was billed for', async () => {
         generateContent.mockResolvedValue({

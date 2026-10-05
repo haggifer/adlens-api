@@ -1,5 +1,6 @@
 import {
     ApiError,
+    type Content,
     createPartFromUri,
     createUserContent,
     FinishReason,
@@ -44,6 +45,11 @@ const toReviewError = (err: unknown): Error => {
     // Provider overload, timeouts and network failures.
     return new RetryableError(describeError(err), { cause: refused ?? err })
 }
+
+// The prompt goes first: Vertex's implicit cache matches a request's prefix, and a video first made every request
+// differ from its first part.
+export const buildReviewContents = (prompt: string, videoUri: string, mimeType: string): Content =>
+    createUserContent([prompt, createPartFromUri(videoUri, mimeType)])
 
 const parseAnswer = (text: string | undefined, call: ModelCall): ReviewOutput => {
     try {
@@ -115,7 +121,6 @@ export class GeminiVideoReviewer extends VideoReviewer {
     private async generate({
         videoUri,
         mimeType,
-        durationS,
         rules,
         advisories,
         settings,
@@ -123,13 +128,10 @@ export class GeminiVideoReviewer extends VideoReviewer {
         try {
             return await this.client.models.generateContent({
                 model: this.model,
-                contents: createUserContent([
-                    createPartFromUri(videoUri, mimeType),
-                    buildReviewPrompt(settings, rules, advisories),
-                ]),
+                contents: buildReviewContents(buildReviewPrompt(settings, rules, advisories), videoUri, mimeType),
                 config: {
                     responseMimeType: 'application/json',
-                    responseJsonSchema: buildReviewOutputJsonSchema(durationS),
+                    responseJsonSchema: buildReviewOutputJsonSchema(),
                     maxOutputTokens: MAX_OUTPUT_TOKENS,
                 },
             })

@@ -340,6 +340,12 @@ selected by some settings. Selected rules are then routed by `modality`:
   falls under (`advisories` in its output), and only those are stored. Content rules reach the model ordered by
   importance (blocker policies first, best-practice advice last).
 
+The Gemini request ([`review-prompt.ts`](src/analysis/review/review-prompt.ts),
+[`gemini-video-reviewer.ts`](src/analysis/review/gemini-video-reviewer.ts)) is laid out for Vertex's implicit
+caching: the instructions, rules and advisories come first and depend only on the rules selected, then the campaign
+block (the job's settings), then the video. The output schema caps timestamps at `MAX_DURATION_S` rather than the
+video's length, so it is the same in every request too. This layout is prompt version 8.
+
 Every analysis records `model`, `promptVersion` and `rulesetVersion`. For pricing, the job keeps every billed Gemini
 call in `usage.calls` (time, model, location, traffic type, finish reason, and prompt, cached, tool-use, answer and
 thinking tokens with their split by modality), failed attempts included, plus totals across them.
@@ -531,6 +537,14 @@ Why the system is built this way, and what was rejected. Decisions that span the
   the user and the network, so a video that always fails couldn't be re-run for free. It was removed so that nobody
   is charged for a run that gave them nothing: every failure is refunded in full. Gemini is still called at most once
   per job, and the Vertex spend cap bounds what repeated failures can cost.
+- **The request starts with what repeats, so Vertex can cache it.** The text of a request (an all-platforms run sends
+  321 rules and 27 advisories) was about 55% of an analysis's cost and the same for the same settings, yet nothing was
+  cached: the video came first, so every request differed from its first part. Vertex caches Gemini 3 Flash requests
+  implicitly, matching a prefix of at least 2,048 tokens and billing the cached tokens at 10% of the input price, so
+  since prompt version 8 the instructions, rules and advisories come first, then the campaign block, then the video.
+  The output schema used to cap timestamps at the video's own last second; it isn't known whether Vertex counts the
+  schema into the prefix, so the cap is now the constant `MAX_DURATION_S`. Whole seconds stay: they are what stopped
+  the runaway decimals, and the parser still accepts a second past the end.
 - **Gemini 3 runs at its default temperature.** Google advises keeping Gemini 3 at 1.0; a temperature of 0.2 made it
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
