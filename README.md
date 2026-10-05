@@ -349,7 +349,10 @@ video's length, so it is the same in every request too. This layout is prompt ve
 
 Every analysis records `model`, `promptVersion` and `rulesetVersion`. For pricing, the job keeps every billed Gemini
 call in `usage.calls` (time, model, location, traffic type, finish reason, and prompt, cached, tool-use, answer and
-thinking tokens with their split by modality), failed attempts included, plus totals across them.
+thinking tokens with their split by modality), failed attempts included, plus totals across them. Each call also
+records `durationMs`, how long the model request took (a monotonic clock, our parsing excluded; `at` is when the answer
+arrived), so cost changes can be checked against processing time; calls recorded before it was measured lack it. A call
+that got no answer (an error status, a timeout) isn't recorded, but its logged failure says how long it ran.
 
 ## Sample ads
 

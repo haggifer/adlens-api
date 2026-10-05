@@ -5,6 +5,7 @@ interface CallContext {
     model: string
     location: string
     at: Date
+    durationMs: number
 }
 
 const byModality = (details: ModalityTokenCount[] | undefined): Record<string, number> =>
@@ -16,9 +17,10 @@ const byModality = (details: ModalityTokenCount[] | undefined): Record<string, n
 export const toModelCall = (
     usage: GenerateContentResponseUsageMetadata | undefined,
     finishReason: FinishReason | undefined,
-    { model, location, at }: CallContext,
+    { model, location, at, durationMs }: CallContext,
 ): ModelCall => ({
     at,
+    durationMs,
     model,
     location,
     // Left out rather than undefined, which the database would store as null.

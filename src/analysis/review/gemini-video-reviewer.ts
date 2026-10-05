@@ -24,6 +24,11 @@ import {
 } from './review-prompt'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from './video-reviewer'
 
+interface TimedResponse {
+    response: GenerateContentResponse
+    durationMs: number
+}
+
 // Well under the Cloud Run task timeout (15 min), so a hung call ends in a handled failure, not a killed task.
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -33,17 +38,22 @@ const MAX_OUTPUT_TOKENS = 8192
 
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
-const toReviewError = (err: unknown): Error => {
+// A monotonic clock, so a wall-clock adjustment during a call can't skew its duration.
+const getElapsedMs = (startedAt: number) => Math.round(performance.now() - startedAt)
+
+// The elapsed time goes into the message, which the pipeline logs, to tell a timeout from a fast failure.
+const toReviewError = (err: unknown, elapsedMs: number): Error => {
+    const detail = `${describeError(err)} (after ${elapsedMs} ms)`
     // The SDK throws ApiError only for a response with an error status; a timeout or a network failure is anything
     // else.
-    const refused = err instanceof ApiError ? new ModelCallRefusedError(err.message, err.status, { cause: err }) : null
+    const refused = err instanceof ApiError ? new ModelCallRefusedError(detail, err.status, { cause: err }) : null
 
     if (refused && !RETRYABLE_STATUSES.has(refused.status)) {
         return refused
     }
 
     // Provider overload, timeouts and network failures.
-    return new RetryableError(describeError(err), { cause: refused ?? err })
+    return new RetryableError(detail, { cause: refused ?? err })
 }
 
 // The prompt goes first: Vertex's implicit cache matches a request's prefix, and a video first made every request
@@ -80,12 +90,14 @@ export class GeminiVideoReviewer extends VideoReviewer {
     }
 
     async review(request: VideoReviewRequest): Promise<VideoReview> {
-        const response = await this.generate(request)
+        const { response, durationMs } = await this.generate(request)
         const finishReason = response.candidates?.[0]?.finishReason
+        // Taken as the answer arrives, before it is parsed, so `at - durationMs` is when the request started.
         const call = toModelCall(response.usageMetadata, finishReason, {
             model: this.model,
             location: this.location,
             at: new Date(),
+            durationMs,
         })
 
         // A blocked prompt gets no candidates. Blocked content won't change on a retry.
@@ -124,19 +136,23 @@ export class GeminiVideoReviewer extends VideoReviewer {
         rules,
         advisories,
         settings,
-    }: VideoReviewRequest): Promise<GenerateContentResponse> {
+    }: VideoReviewRequest): Promise<TimedResponse> {
+        // Built before the clock starts, so the duration is the model request alone.
+        const contents = buildReviewContents(buildReviewPrompt(settings, rules, advisories), videoUri, mimeType)
+        const config = {
+            responseMimeType: 'application/json',
+            responseJsonSchema: buildReviewOutputJsonSchema(),
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
+        }
+
+        const startedAt = performance.now()
+
         try {
-            return await this.client.models.generateContent({
-                model: this.model,
-                contents: buildReviewContents(buildReviewPrompt(settings, rules, advisories), videoUri, mimeType),
-                config: {
-                    responseMimeType: 'application/json',
-                    responseJsonSchema: buildReviewOutputJsonSchema(),
-                    maxOutputTokens: MAX_OUTPUT_TOKENS,
-                },
-            })
+            const response = await this.client.models.generateContent({ model: this.model, contents, config })
+
+            return { response, durationMs: getElapsedMs(startedAt) }
         } catch (err) {
-            throw toReviewError(err)
+            throw toReviewError(err, getElapsedMs(startedAt))
         }
     }
 }
