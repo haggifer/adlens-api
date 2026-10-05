@@ -100,7 +100,6 @@ describe('projectForModel', () => {
         expect(projectForModel(rules).map((rule) => rule.id)).toEqual(['b', 'a'])
     })
 
-    // The prompt lists the rules under one header per severity and modality.
     it('groups rules of equal importance by modality, keeping their order within each modality', () => {
         const rules = [
             { ...ruleOf('a', 'compliance', 'blocker'), modality: 'audiovisual' as const },

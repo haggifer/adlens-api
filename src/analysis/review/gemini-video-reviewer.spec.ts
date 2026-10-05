@@ -29,7 +29,6 @@ interface SentRequest {
 }
 
 describe('buildReviewContents', () => {
-    // Vertex's implicit cache matches a request's prefix: a video first made every request differ from its first part.
     it('puts the prompt before the video', () => {
         expect(buildReviewContents('Review this ad.', 'gs://bucket/video', 'video/mp4')).toEqual({
             role: 'user',

@@ -11,9 +11,6 @@ export interface ReviewOutput {
 type ParsedFinding = Omit<ModelFinding, 'time'> & { startS?: number; endS?: number }
 
 // Bump whenever the prompt or the output contract changes; it is stored with every analysis.
-// 8: the instructions, rules and advisories come first and the campaign and the video last, and the output schema no
-// longer depends on the video, so Vertex can cache the start of the request; rules and advisories are plain
-// "<id>: <check>" lines (rules under severity and modality headers) instead of JSON.
 export const PROMPT_VERSION = '8'
 
 // Times are whole seconds: free decimals ran away (`0.000…` or `3.0134…1234567890…`, thousands of digits) until the

@@ -17,7 +17,6 @@ const ruleOf = (id: string, severity: RuleProjection['severity'], modality: Rule
     modality,
 })
 
-// Vertex's implicit cache matches a request's prefix, so this part must not vary with the campaign.
 const beforeCampaign = (prompt: string) => prompt.slice(0, prompt.indexOf('Campaign context'))
 
 describe('buildReviewPrompt', () => {
@@ -107,7 +106,6 @@ describe('buildReviewPrompt', () => {
         expect(prompt).not.toContain('"severity"')
     })
 
-    // projectForModel orders them by importance; a header never pulls a rule ahead of a more important one.
     it('keeps the rules in the given order, starting a new group whenever severity or modality changes', () => {
         const prompt = buildReviewPrompt(
             SETTINGS,
@@ -173,9 +171,6 @@ describe('buildReviewOutputJsonSchema', () => {
         expect((buildReviewOutputJsonSchema() as unknown as { required: string[] }).required).toContain('advisories')
     })
 
-    // Free decimals ran away (`0.000…`, thousands of digits) until the reply hit the token limit: 5 of 6 runs of
-    // gemini-3.8-flash on 2026-09-29. The cap is the longest video accepted, not this video's length, so the schema is
-    // the same in every request.
     it('asks for finding times in whole seconds, capped at the longest video accepted', () => {
         expect(properties.findings.items.properties).toMatchObject({ startS: WHOLE_SECOND, endS: WHOLE_SECOND })
     })
