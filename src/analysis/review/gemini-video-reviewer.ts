@@ -37,7 +37,6 @@ const MAX_OUTPUT_TOKENS = 8192
 
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
-// A monotonic clock, so a wall-clock adjustment during a call can't skew its duration.
 const getElapsedMs = (startedAt: number) => Math.round(performance.now() - startedAt)
 
 // The elapsed time goes into the message, which the pipeline logs, to tell a timeout from a fast failure.
@@ -86,7 +85,6 @@ export class GeminiVideoReviewer extends VideoReviewer {
     async review(request: VideoReviewRequest): Promise<VideoReview> {
         const { response, durationMs } = await this.generate(request)
         const finishReason = response.candidates?.[0]?.finishReason
-        // Taken as the answer arrives, before it is parsed, so `at - durationMs` is when the request started.
         const call = toModelCall(response.usageMetadata, finishReason, {
             model: this.model,
             location: this.location,
