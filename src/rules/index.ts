@@ -53,6 +53,8 @@ interface RuleFilter {
 type MetadataVerdict = Pick<MetadataCheck, 'verdict' | 'detail'>
 
 const ASPECT_RATIO_TOLERANCE = 0.02
+// Decimal megabytes, as the platforms state their file-size limits.
+const BYTES_PER_MB = 1000 * 1000
 
 const SCOPE_RANK: Record<Rule['scope'], number> = { compliance: 0, best_practice: 1 }
 const SEVERITY_RANK: Record<Rule['severity'], number> = { blocker: 0, warning: 1, info: 2 }
@@ -81,87 +83,99 @@ const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string 
 const getAspectRatio = (media: JobMedia): number | null =>
     media.width === undefined || media.height === undefined ? null : media.width / media.height
 
+// "30.4 seconds": one decimal at most, none for whole seconds.
+const formatSeconds = (seconds: number) => `${Number(seconds.toFixed(1))} seconds`
+
+const formatSize = (media: JobMedia) => `${media.width}×${media.height}`
+
 const evaluateAspectRatio = (rule: Rule, media: JobMedia): MetadataVerdict => {
     const ratio = getAspectRatio(media)
 
     if (ratio === null) {
-        return { verdict: 'unknown', detail: 'Video dimensions unavailable' }
+        return { verdict: 'unknown', detail: 'Its dimensions couldn’t be read.' }
     }
 
-    const aspect = `Aspect ${ratio.toFixed(3)}`
+    const size = formatSize(media)
 
     if (rule.checkType === 'aspect_ratio_one_of') {
         const { ratios } = aspectRatioListParamsSchema.parse(rule.params)
         const isListed = ratios.some((label) => Math.abs(ratio - toRatio(label)) <= ASPECT_RATIO_TOLERANCE)
+        const allowed = ratios.join(', ')
 
-        return { verdict: isListed ? 'pass' : 'fail', detail: `${aspect} vs allowed ${ratios.join(', ')}` }
+        return isListed
+            ? { verdict: 'pass', detail: `It’s ${size}, one of the shapes allowed: ${allowed}.` }
+            : { verdict: 'fail', detail: `It’s ${size}, none of the shapes allowed: ${allowed}.` }
     }
 
     const { min, max } = aspectRatioRangeParamsSchema.parse(rule.params)
     const isInRange = ratio >= toRatio(min) - ASPECT_RATIO_TOLERANCE && ratio <= toRatio(max) + ASPECT_RATIO_TOLERANCE
 
-    return { verdict: isInRange ? 'pass' : 'fail', detail: `${aspect} vs allowed ${min} to ${max}` }
+    return isInRange
+        ? { verdict: 'pass', detail: `It’s ${size}, within the shapes allowed: ${min} to ${max}.` }
+        : { verdict: 'fail', detail: `It’s ${size}, outside the shapes allowed: ${min} to ${max}.` }
 }
 
+// The details are sentences the report shows as they are, about the video ("It’s 30.4 seconds long, …").
 const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
-    const { value, unit } = rule
+    const { value } = rule
 
     if (rule.checkType === 'aspect_ratio_one_of' || rule.checkType === 'aspect_ratio_between') {
         return evaluateAspectRatio(rule, media)
     }
 
     if (value === undefined) {
-        return { verdict: 'unknown', detail: 'Rule has no threshold to check against' }
+        return { verdict: 'unknown', detail: 'The rule has no limit to check against.' }
     }
 
     switch (rule.checkType) {
         case 'duration_max': {
-            const isOver = media.durationS > value
+            const length = `It’s ${formatSeconds(media.durationS)} long`
 
-            return {
-                verdict: isOver ? 'fail' : 'pass',
-                detail: `Duration ${media.durationS.toFixed(1)}s vs max ${value}${unit}`,
-            }
+            return media.durationS > value
+                ? { verdict: 'fail', detail: `${length}, longer than the ${formatSeconds(value)} allowed.` }
+                : { verdict: 'pass', detail: `${length}, within the ${formatSeconds(value)} allowed.` }
         }
         case 'duration_min': {
-            const isUnder = media.durationS < value
+            const length = `It’s ${formatSeconds(media.durationS)} long`
 
-            return {
-                verdict: isUnder ? 'fail' : 'pass',
-                detail: `Duration ${media.durationS.toFixed(1)}s vs min ${value}${unit}`,
-            }
+            return media.durationS < value
+                ? { verdict: 'fail', detail: `${length}, shorter than the ${formatSeconds(value)} required.` }
+                : { verdict: 'pass', detail: `${length}, at least the ${formatSeconds(value)} required.` }
         }
         case 'resolution_min': {
             if (media.height === undefined) {
-                return { verdict: 'unknown', detail: 'Video height unavailable' }
+                return { verdict: 'unknown', detail: 'Its height couldn’t be read.' }
             }
 
-            const isUnder = media.height < value
+            const height = `It’s ${media.height} px tall`
 
-            return { verdict: isUnder ? 'fail' : 'pass', detail: `Height ${media.height}px vs min ${value}${unit}` }
+            return media.height < value
+                ? { verdict: 'fail', detail: `${height}, less than the ${value} px required.` }
+                : { verdict: 'pass', detail: `${height}, at least the ${value} px required.` }
         }
         case 'filesize_max': {
-            const isOver = media.sizeBytes > value * 1000 * 1000
+            const size = `It’s ${Number((media.sizeBytes / BYTES_PER_MB).toFixed(1))} MB`
 
-            return {
-                verdict: isOver ? 'fail' : 'pass',
-                detail: `Size ${(media.sizeBytes / (1000 * 1000)).toFixed(1)}MB vs max ${value}${unit}`,
-            }
+            return media.sizeBytes > value * BYTES_PER_MB
+                ? { verdict: 'fail', detail: `${size}, more than the ${value} MB allowed.` }
+                : { verdict: 'pass', detail: `${size}, within the ${value} MB allowed.` }
         }
         case 'aspect_ratio_in': {
             const ratio = getAspectRatio(media)
 
             if (ratio === null) {
-                return { verdict: 'unknown', detail: 'Video dimensions unavailable' }
+                return { verdict: 'unknown', detail: 'Its dimensions couldn’t be read.' }
             }
 
             const required = typeof rule.params?.ratio === 'string' ? rule.params.ratio : `${value}`
-            const isOff = Math.abs(ratio - value) > ASPECT_RATIO_TOLERANCE
+            const size = formatSize(media)
 
-            return { verdict: isOff ? 'fail' : 'pass', detail: `Aspect ${ratio.toFixed(3)} vs required ${required}` }
+            return Math.abs(ratio - value) > ASPECT_RATIO_TOLERANCE
+                ? { verdict: 'fail', detail: `It’s ${size}, not the ${required} shape required.` }
+                : { verdict: 'pass', detail: `It’s ${size}, the ${required} shape required.` }
         }
         default:
-            return { verdict: 'unknown', detail: 'Unsupported metadata check' }
+            return { verdict: 'unknown', detail: 'This spec can’t be checked automatically.' }
     }
 }
 
@@ -196,10 +210,22 @@ export const projectForModel = (rules: Rule[]): RuleProjection[] =>
 export const projectAdvisoriesForModel = (rules: Rule[]): AdvisoryProjection[] =>
     rules.map(({ id, check }) => ({ id, check }))
 
-export const evaluateMetadataRules = (ruleSet: RuleSet, rules: Rule[], media: JobMedia): MetadataCheck[] =>
+// A placement-specific rule binds the selected placements among its own; a rule without placements binds its
+// platforms' every placement and names none.
+export const evaluateMetadataRules = (
+    ruleSet: RuleSet,
+    rules: Rule[],
+    media: JobMedia,
+    selectedPlacements: Placement[],
+): MetadataCheck[] =>
     rules.map((rule) => ({
         id: rule.id,
+        platform: rule.platform,
+        ...(rule.placements && {
+            placements: rule.placements.filter((placement) => selectedPlacements.includes(placement)),
+        }),
         topic: rule.topic,
+        check: rule.check,
         severity: rule.severity,
         ...evaluateMetadataRule(rule, media),
         ...citationOf(ruleSet, rule),

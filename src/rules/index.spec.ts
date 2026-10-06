@@ -112,10 +112,11 @@ describe('evaluateMetadataRules', () => {
         contentType: 'video/mp4',
     }
     const BYTES_PER_MB = 1000 * 1000
+    const SELECTED = [Placement.AmazonSponsoredBrandsVideo]
 
     const checkOf = (ruleId: string, media: Partial<JobMedia>) => {
         const rule = ruleSet.rules.find((candidate) => candidate.id === ruleId)!
-        const [check] = evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media })
+        const [check] = evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media }, SELECTED)
 
         return check
     }
@@ -159,7 +160,7 @@ describe('evaluateMetadataRules', () => {
             params: { ratios: ['9:16', '1:1', '16:9'] },
         }
         const checkWith = (media: Partial<JobMedia>) =>
-            evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media })[0]
+            evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media }, SELECTED)[0]
 
         it('passes any listed ratio within the tolerance', () => {
             expect(checkWith({ width: 1080, height: 1920 }).verdict).toBe('pass')
@@ -170,7 +171,7 @@ describe('evaluateMetadataRules', () => {
         it('fails a ratio that is not listed, naming the allowed ones', () => {
             expect(checkWith({ width: 1080, height: 1350 })).toMatchObject({
                 verdict: 'fail',
-                detail: 'Aspect 0.800 vs allowed 9:16, 1:1, 16:9',
+                detail: 'It’s 1080×1350, none of the shapes allowed: 9:16, 1:1, 16:9.',
             })
         })
 
@@ -188,7 +189,7 @@ describe('evaluateMetadataRules', () => {
             params: { min: '1:2', max: '1.91:1' },
         }
         const checkWith = (media: Partial<JobMedia>) =>
-            evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media })[0]
+            evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, ...media }, SELECTED)[0]
 
         it('passes the bounds and anything between them', () => {
             expect(checkWith({ width: 1000, height: 2000 }).verdict).toBe('pass')
@@ -200,13 +201,49 @@ describe('evaluateMetadataRules', () => {
             expect(checkWith({ width: 900, height: 2000 }).verdict).toBe('fail')
             expect(checkWith({ width: 2000, height: 1000 })).toMatchObject({
                 verdict: 'fail',
-                detail: 'Aspect 2.000 vs allowed 1:2 to 1.91:1',
+                detail: 'It’s 2000×1000, outside the shapes allowed: 1:2 to 1.91:1.',
             })
         })
 
         it('says so when the dimensions are unknown', () => {
             expect(checkWith({ height: undefined }).verdict).toBe('unknown')
         })
+    })
+
+    it('says what was measured against the limit, as a sentence', () => {
+        expect(checkOf('amazon.creative_spec.video_max_length', { durationS: 50.04 }).detail).toBe(
+            'It’s 50 seconds long, longer than the 45 seconds allowed.',
+        )
+        expect(checkOf('amazon.creative_spec.video_resolution_min', { height: 1080 }).detail).toBe(
+            'It’s 1080 px tall, at least the 720 px required.',
+        )
+        expect(checkOf('amazon.creative_spec.video_filesize_max', { sizeBytes: 512_340_000 }).detail).toBe(
+            'It’s 512.3 MB, more than the 500 MB allowed.',
+        )
+    })
+
+    it('names the selected placements a placement spec binds, its platforms and its rule', () => {
+        const bumper = ruleSet.rules.find((candidate) => candidate.id === 'youtube.creative_spec.bumper_duration')!
+        const [check] = evaluateMetadataRules(ruleSet, [bumper], { ...MEDIA, durationS: 30.39 }, [
+            Placement.YouTubeBumper,
+            Placement.YouTubeShorts,
+        ])
+
+        expect(check).toMatchObject({
+            verdict: 'fail',
+            platform: [RulePlatform.YouTube, RulePlatform.Google],
+            placements: [Placement.YouTubeBumper],
+            check: 'Bumper ads must be at most 6 seconds long.',
+            detail: 'It’s 30.4 seconds long, longer than the 6 seconds allowed.',
+        })
+    })
+
+    it('names no placement for a spec that binds every placement of its platforms', () => {
+        const rule = { ...ruleSet.rules.find((candidate) => candidate.id === 'amazon.creative_spec.video_max_length')! }
+
+        delete rule.placements
+
+        expect(evaluateMetadataRules(ruleSet, [rule], MEDIA, SELECTED)[0]).not.toHaveProperty('placements')
     })
 
     it('cites the rule, with its source resolved to a link', () => {

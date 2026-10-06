@@ -1,4 +1,4 @@
-import { JobErrorCode, JobStatus, Market, Platform, RulePlatform, VideoMimeType } from 'adlens-shared'
+import { JobErrorCode, JobStatus, Market, Placement, Platform, RulePlatform, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
 import { UserAccess } from '../../common/user-access'
 import { IP_QUOTA_COLLECTION, type IpQuotaDoc } from '../../database/ip-quota.doc'
@@ -149,6 +149,29 @@ describe('AnalysisPipeline', () => {
             expect.objectContaining({ id: contentRule.id, time: { startS: 1, endS: 3 }, quote: contentRule.quote }),
         ])
         expect(await used()).toBe(1)
+    })
+
+    it('stores which selected placement a spec binds, with its rule, so the report can name it', async () => {
+        const jobId = await queueJob()
+
+        await jobs.updateOne(
+            { _id: jobId },
+            {
+                $set: {
+                    settings: { platforms: [Platform.YouTube], placements: [Placement.YouTubeBumper], markets: [] },
+                },
+            },
+        )
+        await pipeline.run(jobId, { isLast: false })
+
+        const checks = (await findJob(jobId))?.analysis?.metadataChecks ?? []
+
+        expect(checks.find((check) => check.id === 'youtube.creative_spec.bumper_duration')).toMatchObject({
+            verdict: 'fail',
+            placements: [Placement.YouTubeBumper],
+            platform: [RulePlatform.YouTube, RulePlatform.Google],
+            check: 'Bumper ads must be at most 6 seconds long.',
+        })
     })
 
     it('offers the reviewer the selected advisories to choose from', async () => {
