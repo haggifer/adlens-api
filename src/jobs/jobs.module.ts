@@ -7,6 +7,7 @@ import { IpQuotaModule } from '../ip-quota/ip-quota.module'
 import { QuotaModule } from '../quota/quota.module'
 import { SamplesModule } from '../samples/samples.module'
 import { StorageModule } from '../storage/storage.module'
+import { AdmissionController } from './admission.controller'
 import { AnalysisAdmission } from './analysis-admission.service'
 import { JobAnalysisService } from './job-analysis.service'
 import { JobStoreModule } from './job-store.module'
@@ -27,7 +28,7 @@ import { VideoVerifier } from './verification/video-verifier.service'
         IpQuotaModule,
         ChallengeModule,
     ],
-    controllers: [JobsController],
+    controllers: [JobsController, AdmissionController],
     providers: [JobsService, JobAnalysisService, VideoVerifier, MediaProber, AnalysisAdmission, ClientNetworkResolver],
 })
 export class JobsModule {}

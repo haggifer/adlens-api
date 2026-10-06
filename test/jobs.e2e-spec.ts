@@ -994,6 +994,50 @@ describe('Jobs API (e2e)', () => {
             expect(anonymous.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
         })
 
+        describe('the admission check', () => {
+            const admissionFrom = (network: string, userId?: string) =>
+                request(app.getHttpServer())
+                    .get('/v1/admission')
+                    .set({ ...(userId ? as(userId) : {}), ...from(network) })
+
+            it('admits a visitor without a session, whose first analysis only needs the challenge', async () => {
+                await admissionFrom('203.0.113.20').expect(204)
+            })
+
+            it('refuses a visitor once the network used its anonymous analyses, as creating the job would', async () => {
+                await seedNetwork('203.0.113.21', 3, UserAccess.Anonymous)
+
+                const visitor = await admissionFrom('203.0.113.21').expect(429)
+                const anonymous = await admissionFrom('203.0.113.21', await addAnonymous()).expect(429)
+
+                await admissionFrom('203.0.113.21', MEMBER).expect(204)
+                expect(visitor.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+                expect(anonymous.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+            })
+
+            it('refuses a member whose own quota is spent', async () => {
+                const res = await admissionFrom('203.0.113.22', LIMITED).expect(429)
+
+                expect(res.body.errorCode).toBe(RequestErrorCode.QuotaExceeded)
+            })
+
+            it('refuses everyone but an admin on a network at its hard limit', async () => {
+                await seedNetwork('203.0.113.23', 30)
+
+                const member = await admissionFrom('203.0.113.23', MEMBER).expect(429)
+
+                await admissionFrom('203.0.113.23', ADMIN).expect(204)
+                expect(member.body.errorCode).toBe(RequestErrorCode.NetworkQuotaExceeded)
+            })
+
+            it('charges and verifies nothing', async () => {
+                await admissionFrom('203.0.113.24', await addAnonymous()).expect(204)
+
+                expect(await usage('203.0.113.24')).toEqual({ total: 0, anonymous: 0 })
+                expect(verifyChallenge).not.toHaveBeenCalledWith(expect.anything(), '203.0.113.24')
+            })
+        })
+
         it('always asks an unconfirmed account for the challenge, and counts its analysis as anonymous', async () => {
             const unconfirmed = await addUnconfirmed()
             const missing = await createFrom(unconfirmed, '203.0.113.10').expect(403)

@@ -31,6 +31,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - A run that ends without a result is never counted: every failure refunds the user's run and the network's in full,
   even after a Gemini call that may have been billed. Gemini is still called at most once per job (the
   `modelCallStartedAt` mark), so that refund never pays for a second call.
+- `GET /v1/admission` and job creation share `AnalysisAdmission`'s rule checks (`preview` and `admit`): a new refusal
+  goes into those checks, never into one path only, so the web's advance check matches what creating a job answers.
 - A quota charge is refunded at most once and never lost. The job records the run ids (`chargedRunId`,
   `chargedIpRunId`) before charging and keeps them until both refunds succeed; every refund is safe to repeat (`$pull`
   by run id), and ended jobs still holding ids are retried by `refundOwedCharges` (on every read of the user's jobs

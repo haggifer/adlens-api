@@ -28,19 +28,13 @@ export class AnalysisAdmission {
     // At job creation, read-only, so nobody uploads a video only to be refused at analyze. The Turnstile token is
     // verified only when a rule asks for it, and the job records that it passed.
     async admit(userId: string, ipSource: IpSource, challengeToken: string | undefined): Promise<Admission> {
-        const [quota, access] = await Promise.all([this.quota.get(userId), readUserAccess(this.connection, userId)])
-
-        if (quota.limit !== null && quota.used >= quota.limit) {
-            throw toQuotaRefusal(access)
-        }
+        const access = await this.checkQuota(userId)
 
         if (access === UserAccess.Admin) {
             return { hasPassedChallenge: false }
         }
 
-        const { ip, bucketKey } = this.network.resolve(ipSource)
-        const usage = await this.ipQuota.usage(bucketKey)
-        const verdict = checkIpRules(usage, access, this.ipQuota.limits)
+        const { ip, verdict } = await this.checkNetwork(access, ipSource)
 
         if (verdict === IpVerdict.Allowed) {
             return { hasPassedChallenge: false }
@@ -59,6 +53,22 @@ export class AnalysisAdmission {
         return { hasPassedChallenge: true }
     }
 
+    // Throws the refusal admit would throw before any Turnstile check, so the web can disable Run in advance. A visitor
+    // without a session is judged as the anonymous user their first analysis starts, whose own quota is still unused.
+    async preview(userId: string | null, ipSource: IpSource): Promise<void> {
+        const access = userId ? await this.checkQuota(userId) : UserAccess.Anonymous
+
+        if (access === UserAccess.Admin) {
+            return
+        }
+
+        const { verdict } = await this.checkNetwork(access, ipSource)
+
+        if (verdict === IpVerdict.AnonymousLimit || verdict === IpVerdict.NetworkLimit) {
+            throw toIpRefusal(verdict, access)
+        }
+    }
+
     // At analyze: what to charge the network, or null for an admin.
     async ipChargeFor(userId: string, ipSource: IpSource, hasPassedChallenge: boolean): Promise<IpCharge | null> {
         const access = await readUserAccess(this.connection, userId)
@@ -68,5 +78,26 @@ export class AnalysisAdmission {
         }
 
         return { bucketKey: this.network.resolve(ipSource).bucketKey, access, hasPassedChallenge }
+    }
+
+    // Throws when the user's own quota is spent; otherwise returns their access.
+    private async checkQuota(userId: string): Promise<UserAccess> {
+        const [quota, access] = await Promise.all([this.quota.get(userId), readUserAccess(this.connection, userId)])
+
+        if (quota.limit !== null && quota.used >= quota.limit) {
+            throw toQuotaRefusal(access)
+        }
+
+        return access
+    }
+
+    private async checkNetwork(
+        access: UserAccess,
+        ipSource: IpSource,
+    ): Promise<{ ip: string | null; verdict: IpVerdict }> {
+        const { ip, bucketKey } = this.network.resolve(ipSource)
+        const usage = await this.ipQuota.usage(bucketKey)
+
+        return { ip, verdict: checkIpRules(usage, access, this.ipQuota.limits) }
     }
 }
