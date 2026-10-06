@@ -994,6 +994,56 @@ describe('Jobs API (e2e)', () => {
             expect(anonymous.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
         })
 
+        describe('one free analysis per browser', () => {
+            const usedBy = (userId: string) => ({ Cookie: `adlens_free_run=${userId}` })
+
+            const createWithCookie = (userId: string, network: string, freeRunUserId: string) =>
+                request(app.getHttpServer())
+                    .post('/v1/jobs')
+                    .set({ ...as(userId), ...from(network), ...usedBy(freeRunUserId) })
+                    .send({ settings: SETTINGS, file: FILE, challengeToken: 'pass' })
+
+            const freeRunCookieOf = (res: { headers: Record<string, unknown> }) =>
+                ([res.headers['set-cookie']].flat().filter(Boolean) as string[]).find((cookie) =>
+                    cookie.startsWith('adlens_free_run='),
+                )
+
+            it('remembers which anonymous user used it, in a cookie scripts can’t read', async () => {
+                const anonymous = await addAnonymous()
+                const created = await createFrom(anonymous, '203.0.113.30', { challengeToken: 'pass' }).expect(201)
+                const started = await analyzeFrom(anonymous, '203.0.113.30', created.body.job.id).expect(202)
+
+                expect(freeRunCookieOf(started)).toMatch(new RegExp(`^adlens_free_run=${anonymous};.*HttpOnly`))
+            })
+
+            it('sets no such cookie for an account’s analysis', async () => {
+                const member = await addUser({ isAnonymous: false, emailVerified: true })
+                const created = await createFrom(member, '203.0.113.31').expect(201)
+                const started = await analyzeFrom(member, '203.0.113.31', created.body.job.id).expect(202)
+
+                expect(freeRunCookieOf(started)).toBeUndefined()
+            })
+
+            it('asks a visitor or a new anonymous session in that browser to sign in, in advance and at creation', async () => {
+                const used = new Types.ObjectId().toString()
+                const visitor = await request(app.getHttpServer())
+                    .get('/v1/admission')
+                    .set({ ...from('203.0.113.32'), ...usedBy(used) })
+                    .expect(429)
+                const another = await createWithCookie(await addAnonymous(), '203.0.113.32', used).expect(429)
+
+                expect(visitor.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+                expect(another.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+            })
+
+            it('lets the anonymous user that used it retry a refunded run, and never limits an account', async () => {
+                const anonymous = await addAnonymous()
+
+                await createWithCookie(anonymous, '203.0.113.33', anonymous).expect(201)
+                await createWithCookie(MEMBER, '203.0.113.33', anonymous).expect(201)
+            })
+        })
+
         describe('the admission check', () => {
             const admissionFrom = (network: string, userId?: string) =>
                 request(app.getHttpServer())

@@ -110,6 +110,11 @@ conditional update on the expected current status, so two racing callers can nev
 confirmed account. An anonymous user and an account that hasn't confirmed its email get one
 (`PROVISIONAL_QUOTA_LIMIT`), and `GET /v1/me/quota` reports `limit: 1` for them; the runs an anonymous user brings to
 an account at sign-up or sign-in keep counting, so confirming lifts the limit to `QUOTA_LIMIT` without resetting it.
+The free analysis is one per browser, not per anonymous user: signing in deletes the anonymous user, so after signing
+out a new one would get another. Starting an anonymous user's analysis sets the API's own `adlens_free_run` cookie
+(httpOnly, host-only, 7 days) to that user's id, and admission (`GET /v1/admission` and job creation) then asks a
+visitor or any other anonymous user in that browser to sign in (`SIGN_UP_REQUIRED`); the one named may still retry a
+refunded run. Clearing cookies gets around it, which the network's anonymous allowance (`IP_ANON_LIMIT`) still bounds.
 Each charged run is stored on the user's Better Auth document (`runs: { id, startedAt, jobId }[]`) and stops counting 7
 days after it started; `GET /v1/me/quota` reports `nextFreeAt`, when the oldest counted run does. A charge is one
 conditional pipeline update on that document: it counts the runs still in the window, drops older ones and appends

@@ -4,6 +4,7 @@ import { AuthService } from '../auth/auth.service'
 import { RequestIpSource } from '../common/ip-source.decorator'
 import type { IpSource } from '../ip-quota/client-ip'
 import { AnalysisAdmission } from './analysis-admission.service'
+import { readFreeRunUserId } from './free-run-cookie'
 
 // Public, so the web can disable Run before a visitor without a session even has one: 204 when a new analysis would
 // be admitted, otherwise the same refusal creating the job would answer.
@@ -19,6 +20,6 @@ export class AdmissionController {
     async check(@Req() req: Request, @RequestIpSource() ipSource: IpSource): Promise<void> {
         const userId = await this.auth.getUserId(req.headers)
 
-        await this.admission.preview(userId, ipSource)
+        await this.admission.preview(userId, ipSource, readFreeRunUserId(req))
     }
 }

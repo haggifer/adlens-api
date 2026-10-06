@@ -1,4 +1,18 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common'
+import {
+    Body,
+    Controller,
+    Delete,
+    Get,
+    HttpCode,
+    HttpStatus,
+    Param,
+    Post,
+    Query,
+    Req,
+    Res,
+    UseGuards,
+} from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import {
     createJobInputSchema,
     type CreateJobPayload,
@@ -9,31 +23,42 @@ import {
     type JobResponse,
     type JobVideoResponse,
 } from 'adlens-shared'
+import type { Request, Response } from 'express'
 import { SessionGuard } from '../auth/session.guard'
 import { CurrentUser } from '../common/current-user.decorator'
 import { RequestIpSource } from '../common/ip-source.decorator'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
+import type { Env } from '../config/env'
 import type { IpSource } from '../ip-quota/client-ip'
 import { AnalysisAdmission } from './analysis-admission.service'
+import { readFreeRunUserId, writeFreeRunCookie } from './free-run-cookie'
 import { JobAnalysisService } from './job-analysis.service'
 import { JobsService, type ListJobsQuery, listJobsQuerySchema } from './jobs.service'
 
 @UseGuards(SessionGuard)
 @Controller('v1/jobs')
 export class JobsController {
+    // Secure only over HTTPS: locally the API runs on plain http://localhost.
+    private readonly isSecureCookie: boolean
+
     constructor(
         private readonly jobs: JobsService,
         private readonly analysis: JobAnalysisService,
         private readonly admission: AnalysisAdmission,
-    ) {}
+        config: ConfigService<Env, true>,
+    ) {
+        this.isSecureCookie = new URL(config.get('BETTER_AUTH_URL', { infer: true })).protocol === 'https:'
+    }
 
     @Post()
     async create(
         @CurrentUser() userId: string,
         @RequestIpSource() ipSource: IpSource,
+        @Req() req: Request,
         @Body(new ZodValidationPipe(createJobInputSchema)) input: CreateJobPayload,
     ): Promise<CreateJobResponse> {
-        const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken)
+        const freeRunUserId = readFreeRunUserId(req)
+        const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken, freeRunUserId)
 
         return this.jobs.create(userId, input, hasPassedChallenge)
     }
@@ -42,9 +67,11 @@ export class JobsController {
     async createFromSample(
         @CurrentUser() userId: string,
         @RequestIpSource() ipSource: IpSource,
+        @Req() req: Request,
         @Body(new ZodValidationPipe(createSampleJobInputSchema)) input: CreateSampleJobPayload,
     ): Promise<JobResponse> {
-        const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken)
+        const freeRunUserId = readFreeRunUserId(req)
+        const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken, freeRunUserId)
 
         const job = await this.jobs.createFromSample(userId, input, hasPassedChallenge)
 
@@ -57,8 +84,13 @@ export class JobsController {
         @CurrentUser() userId: string,
         @Param('id') id: string,
         @RequestIpSource() ipSource: IpSource,
+        @Res({ passthrough: true }) res: Response,
     ): Promise<JobResponse> {
-        const job = await this.analysis.start(userId, id, ipSource)
+        const { job, isFreeRun } = await this.analysis.start(userId, id, ipSource)
+
+        if (isFreeRun) {
+            writeFreeRunCookie(res, userId, this.isSecureCookie)
+        }
 
         return { job }
     }
