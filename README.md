@@ -309,6 +309,7 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it) | `{ url, expiresAt }`           |
 | `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
 | `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
+| `GET /v1/quota/visitor`     | What a visitor without a session gets from a first analysis (public): `used: 0`, `limit: 1` | `{ quota }`                    |
 | `POST /v1/contact/uploads`  | Signed uploads for a Contact form message's images (public, Turnstile-checked, rate-limited) | **201** `{ draftId, uploads }` |
 | `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited) | **204**                        |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |

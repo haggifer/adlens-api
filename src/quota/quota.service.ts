@@ -20,6 +20,9 @@ import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/use
 // gets a new anonymous user, so the network's anonymous allowance (IP_ANON_LIMIT) remains the real bound.
 const PROVISIONAL_QUOTA_LIMIT = 1
 
+// A visitor without a session: their first analysis starts an anonymous user, who gets the provisional allowance.
+export const VISITOR_QUOTA: Quota = { used: 0, limit: PROVISIONAL_QUOTA_LIMIT, nextFreeAt: null }
+
 // getUserAccess in a pipeline expression, for an account that isn't an admin.
 const IS_PROVISIONAL_EXPR = { $or: [{ $eq: ['$isAnonymous', true] }, { $ne: ['$emailVerified', true] }] }
 

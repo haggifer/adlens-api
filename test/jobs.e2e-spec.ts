@@ -153,6 +153,12 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.errorCode).toBe(RequestErrorCode.Unauthenticated)
     })
 
+    it('tells a visitor without a session what their first analysis allows', async () => {
+        const res = await request(app.getHttpServer()).get('/v1/quota/visitor').expect(200)
+
+        expect(res.body).toEqual({ quota: { used: 0, limit: 1, nextFreeAt: null } })
+    })
+
     it('indexes Better Auth’s collections when the app starts', async () => {
         const connection = app.get<Connection>(getConnectionToken())
 
