@@ -100,6 +100,7 @@ before(async () => {
         MONGODB_URI: mongo.getUri(),
         GOOGLE_CLOUD_PROJECT: 'test-project',
         STORAGE_BUCKET: 'test-bucket',
+        QUOTA_LIMIT: '3',
         BETTER_AUTH_SECRET: 'auth-flow-test-secret-auth-flow-test-secret',
         BETTER_AUTH_URL: API,
         WEB_ORIGIN: WEB,

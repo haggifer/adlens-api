@@ -23,6 +23,7 @@ describe('appConfigModule', () => {
             NODE_ENV: 'test',
             GOOGLE_CLOUD_PROJECT: 'test-project',
             STORAGE_BUCKET: 'test-bucket',
+            QUOTA_LIMIT: '5',
             SECRETS_FILE: path,
         }
 

@@ -27,5 +27,7 @@ RUN npm ci --omit=dev \
 # A segfault exits with 139; a refused connection with 1. Resolving localhost is enough to catch the static binary.
 RUN node_modules/ffprobe-static/bin/linux/x64/ffprobe -v quiet https://localhost:9/; test $? -ne 139
 COPY --from=build /app/dist ./dist
+# Public runtime config (QUOTA_LIMIT etc.); Cloud Run's own env vars take precedence over it.
+COPY .env ./
 EXPOSE 8080
 CMD ["node", "dist/main"]

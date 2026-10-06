@@ -35,7 +35,8 @@ const envSchema = z.object({
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
-    QUOTA_LIMIT: z.coerce.number().int().positive().default(3),
+    // No default: the committed .env, which ships in the image, is the one place it is set.
+    QUOTA_LIMIT: z.coerce.number().int().positive(),
     // Weekly caps per network (an IPv4 address or an IPv6 /64): analyses by anonymous users and unconfirmed accounts;
     // analyses by anyone before a Turnstile check is required; analyses by anyone at all.
     IP_ANON_LIMIT: z.coerce.number().int().positive().default(3),

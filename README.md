@@ -134,7 +134,7 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 
 | Rule | Limit per rolling 7 days | When hit |
 | --- | --- | --- |
-| Per confirmed account | `QUOTA_LIMIT` (3) | 429 `QUOTA_EXCEEDED` |
+| Per confirmed account | `QUOTA_LIMIT` (3, in `.env`) | 429 `QUOTA_EXCEEDED` |
 | Per anonymous user or unconfirmed account | 1 (`PROVISIONAL_QUOTA_LIMIT`) | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
 | Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
@@ -374,7 +374,8 @@ infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image re
 
 All variables are validated at startup by [`src/config/env.ts`](src/config/env.ts); a missing or malformed value stops
 the process with a readable error. Locally they come from `.env` (non-secret, committed) and `.env.local` (secrets).
-In production, secrets come from one Secret Manager secret, `API_SECRETS`, mounted as a JSON file and merged into the
+The image ships `.env` too, so a value set there (such as `QUOTA_LIMIT`) applies locally, to the API and to both jobs
+alike; Cloud Run's own env vars take precedence over it, and `.env.local` is never shipped. In production, secrets come from one Secret Manager secret, `API_SECRETS`, mounted as a JSON file and merged into the
 config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](infra/setup.sh).
 
 | Variable                 | Default                 | Purpose                                                                     |
@@ -401,7 +402,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `ANALYZE_JOB_NAME`       | `adlens-analyze`        | The Cloud Run Job the API executes                                          |
 | `ANALYZE_LOCAL`          | `0`                     | `1`: run each analysis as a local `node dist/worker` child process          |
 | `ANALYZE_MAX_RETRIES`    | `2`                     | Must equal the job's `--max-retries`, so the worker knows its last attempt  |
-| `QUOTA_LIMIT`            | `3`                     | Analyses per rolling 7-day window for a confirmed account (anonymous users and unconfirmed accounts get 1) |
+| `QUOTA_LIMIT`            | — (required, `3` in `.env`) | Analyses per rolling 7-day window for a confirmed account (anonymous users and unconfirmed accounts get 1) |
 | `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window |
 | `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
 | `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |

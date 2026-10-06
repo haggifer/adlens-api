@@ -22,6 +22,7 @@ describe('CleanupModule', () => {
             MONGODB_URI: mongo.uri,
             GOOGLE_CLOUD_PROJECT: 'test-project',
             STORAGE_BUCKET: 'test-bucket',
+            QUOTA_LIMIT: '5',
         }
 
         // Imported only now: the config module validates the environment as soon as it is loaded.

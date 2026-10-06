@@ -64,6 +64,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   files from loading, so tests can never reach a real database or bucket.
 - Production secrets go in the `API_SECRETS` Secret Manager bundle, via `infra/setup.sh` (put the key in the git-ignored
   `.env.production`, never `.env.local`, and run the script) — never as their own individual secret, and never as a plain env var in a deploy command.
+- The committed `.env` ships in the production image: only public values meant for every environment go there (it is
+  where `QUOTA_LIMIT` is set). Local-only values go in `.env.local`, secrets in the bundle above.
 - `ANALYZE_MAX_RETRIES` must equal the Cloud Run Job's `--max-retries` in `infra/setup.sh`.
 - Never delete a user's upload on a transient storage or network error; only a definite problem with the file
   deletes it.

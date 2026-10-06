@@ -8,7 +8,7 @@ describe('validateEnvWithSecretsFile', () => {
     let path: string
     let validateEnvWithSecretsFile: typeof ValidateEnvWithSecretsFile
 
-    const baseEnv = { GOOGLE_CLOUD_PROJECT: 'test-project', STORAGE_BUCKET: 'test-bucket' }
+    const baseEnv = { GOOGLE_CLOUD_PROJECT: 'test-project', STORAGE_BUCKET: 'test-bucket', QUOTA_LIMIT: '5' }
 
     beforeAll(async () => {
         // Importing ./env builds appConfigModule, which validates the real process.env once at import time (see
@@ -16,6 +16,7 @@ describe('validateEnvWithSecretsFile', () => {
         process.env.MONGODB_URI ??= 'mongodb://placeholder'
         process.env.GOOGLE_CLOUD_PROJECT ??= 'placeholder'
         process.env.STORAGE_BUCKET ??= 'placeholder'
+        process.env.QUOTA_LIMIT ??= '5'
         ;({ validateEnvWithSecretsFile } = await import('./env'))
     })
 
@@ -54,5 +55,13 @@ describe('validateEnvWithSecretsFile', () => {
         writeFileSync(path, JSON.stringify({ BETTER_AUTH_SECRET: 'shh' }))
 
         expect(() => validateEnvWithSecretsFile({ ...baseEnv, SECRETS_FILE: path })).toThrow('MONGODB_URI')
+    })
+
+    it('requires QUOTA_LIMIT, so the committed .env is the only place it is set', () => {
+        const { QUOTA_LIMIT: _, ...withoutQuota } = baseEnv
+
+        expect(() => validateEnvWithSecretsFile({ ...withoutQuota, MONGODB_URI: 'mongodb://local' })).toThrow(
+            'QUOTA_LIMIT',
+        )
     })
 })
