@@ -55,6 +55,8 @@ export class AbandonedUploadCleanupService {
                 {
                     status: { $nin: [JobStatus.Analyzed, ...IN_PROGRESS_STATUSES] },
                     sampleId: { $exists: false },
+                    // A demo's video is the maintainer's, under demos/: a demo that failed keeps it for the re-run.
+                    demo: { $exists: false },
                     videoDeletedAt: { $exists: false },
                     createdAt: { $lt: cutoff },
                 },

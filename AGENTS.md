@@ -73,6 +73,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   deletes it.
 - A job with a `sampleId` points at a shared sample video under `samples/`: it skips upload verification, and nothing
   that cleans up jobs or accounts may ever delete that object.
+- A job with a `demo` field (owner `DEMO_OWNER`) points at a maintainer video under `demos/`: no cleanup may delete that
+  object, and no route may let a user see, list or delete the job except `GET /v1/demos`.
 
 ## Conventions
 

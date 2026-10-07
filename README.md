@@ -298,7 +298,7 @@ answering is a plain reply; its text isn't stored.
 
 ## API
 
-Every `/v1/*` route except `GET /v1/samples` and `POST /v1/contact` (and `/uploads`) requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
+Every `/v1/*` route except `GET /v1/samples`, `GET /v1/demos` and `POST /v1/contact` (and `/uploads`) requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
 
@@ -318,6 +318,7 @@ session cookie (never from the body) and every query is scoped by it. Errors sha
 | `POST /v1/contact/uploads`  | Signed uploads for a Contact form message's images (public, Turnstile-checked, rate-limited) | **201** `{ draftId, uploads }` |
 | `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited) | **204**                        |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
+| `GET /v1/demos`             | Active, finished demo analyses with their summary and a video URL (public) | `{ demos }`                    |
 
 ## Ad-policy rules
 
@@ -369,11 +370,23 @@ document upserted by slug.
 
 Set `"isPublished": false` and publish again to hide a sample.
 
+## Demos
+
+The demo page shows a few finished analyses to anyone, so a visitor sees a report before spending their free run. A
+demo is an ordinary job with a `demo` field (slug, tab label, summary title and subtitle, display order, active flag),
+owned by `demo` (`DEMO_OWNER`), which matches no user: a demo is in nobody's History, no account can delete it, and the
+daily cleanup never deletes its video, stored under `demos/` in the uploads bucket. `GET /v1/demos` lists the active,
+analyzed demo jobs in order, each with its public job and a short-lived video URL. Only the latest analysis per demo
+is listed: a re-run demo stays on the page with its earlier job until the new one is analyzed, and the earlier job
+stays stored. Demos are managed by the maintainer: the video is measured
+and uploaded, the job created as `queued` and handed to the analysis worker like any other, so it runs the production
+pipeline and is billed like any run, outside every quota. Set `"isActive": false` and publish again to hide a demo.
+
 ## Layout
 
 ```
 src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs,
-            analysis, rules, samples, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
+            analysis, rules, samples, demos, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
             realtime, database, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image repository cleanup policy

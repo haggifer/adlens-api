@@ -51,6 +51,21 @@ const tokenUsageSchema = z.object({
     calls: z.array(modelCallSchema).optional(),
 })
 
+// Every demo job has this owner, which matches no user, so a demo shows up in nobody's History and no account can
+// delete it; only the maintainer's script creates and changes demos.
+export const DEMO_OWNER = 'demo'
+
+// Marks a job as one of the demo page's finished analyses, with the copy the page shows for it.
+const demoSchema = z.object({
+    slug: z.string().regex(/^[a-z0-9-]+$/),
+    label: z.string().min(1),
+    title: z.string().min(1),
+    subtitle: z.string().min(1),
+    order: z.number().int().default(0),
+    // An inactive demo stays stored but leaves the page.
+    isActive: z.boolean().default(true),
+})
+
 // The stored job: the public shape plus server-only fields (owner, storage location, execution, accounting). Built
 // from the shared building blocks so field shapes have a single source.
 const jobDocSchema = z.object({
@@ -79,9 +94,12 @@ const jobDocSchema = z.object({
     videoDeletedAt: z.date().optional(),
     // Set when the job analyzes a published sample; its file then points at the sample's object, never a user upload.
     sampleId: z.string().optional(),
+    // Set on a demo job: its file points at a video under demos/, which only the maintainer's script manages.
+    demo: demoSchema.optional(),
 })
 
 export type JobDoc = z.infer<typeof jobDocSchema>
+export type JobDemo = z.infer<typeof demoSchema>
 export type TokenUsage = z.infer<typeof tokenUsageSchema>
 export type ModelCall = z.infer<typeof modelCallSchema>
 
@@ -94,3 +112,7 @@ export interface StoredJob extends JobDoc {
 export const JobSchema = zodToMongoose(jobDocSchema, { timestamps: true, collection: 'jobs' })
 JobSchema.index({ userId: 1, _id: -1 })
 JobSchema.index({ status: 1, updatedAt: 1 })
+// The demo page's query; sparse, since all but a few jobs have no demo.
+JobSchema.index({ 'demo.isActive': 1, 'demo.order': 1 }, { sparse: true })
+// The maintainer's script finds a demo by its slug.
+JobSchema.index({ 'demo.slug': 1 }, { sparse: true })

@@ -14,7 +14,7 @@ import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { UserAccess } from '../src/common/user-access'
 import { CONTACT_DRAFT_MODEL, type ContactDraftDoc } from '../src/database/contact-draft.doc'
-import { JOB_MODEL, type JobDoc } from '../src/database/job.doc'
+import { DEMO_OWNER, JOB_MODEL, type JobDoc } from '../src/database/job.doc'
 import { RATE_LIMIT_COLLECTION } from '../src/database/rate-limit.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { USER_COLLECTION } from '../src/database/user.doc'
@@ -475,6 +475,85 @@ describe('Jobs API (e2e)', () => {
             await request(app.getHttpServer()).delete(`/v1/jobs/${created.body.job.id}`).set(as(SAMPLER)).expect(204)
 
             expect(deleteObject).not.toHaveBeenCalled()
+        })
+    })
+
+    describe('demos', () => {
+        const DEMO_FILE = {
+            name: 'kids-show-preview.mp4',
+            contentType: VideoMimeType.Mp4,
+            size: 4_000_000,
+            bucket: 'test-bucket',
+            path: 'demos/kids-show-preview.mp4',
+        }
+        const DEMO_MEDIA = {
+            durationS: 50,
+            width: 1920,
+            height: 1080,
+            hasAudio: true,
+            sizeBytes: 4_000_000,
+            contentType: VideoMimeType.Mp4,
+        }
+        const DEMO_ANALYSIS = {
+            model: 'gemini',
+            promptVersion: '7',
+            rulesetVersion: '1.2.2',
+            transcript: '',
+            findings: [],
+            metadataChecks: [],
+            advisories: [],
+            completedAt: '2026-10-07T10:00:00.000Z',
+        }
+        let jobs: Model<JobDoc>
+
+        const buildDemoJob = (slug: string, order: number, overrides: Partial<JobDoc> = {}) => ({
+            userId: DEMO_OWNER,
+            status: JobStatus.Analyzed,
+            settings: { platforms: ['Snapchat'], placements: [], markets: [] },
+            file: { ...DEMO_FILE, path: `demos/${slug}.mp4` },
+            media: DEMO_MEDIA,
+            analysis: DEMO_ANALYSIS,
+            chargedRunId: null,
+            chargedIpRunId: null,
+            demo: { slug, label: slug, title: `Title of ${slug}`, subtitle: 'Subtitle', order, isActive: true },
+            ...overrides,
+        })
+
+        beforeAll(async () => {
+            jobs = app.get(getModelToken(JOB_MODEL))
+
+            await jobs.create(buildDemoJob('first', 1, { file: { ...DEMO_FILE, name: 'superseded.mp4' } }))
+            await jobs.create([
+                buildDemoJob('second', 2),
+                buildDemoJob('first', 1),
+                buildDemoJob('inactive', 0, {
+                    demo: { slug: 'inactive', label: 'x', title: 'x', subtitle: 'x', order: 0, isActive: false },
+                }),
+                buildDemoJob('rerunning', 3, { status: JobStatus.Analyzing, analysis: undefined }),
+            ])
+        })
+
+        it('lists the latest finished analysis of each active demo to anyone, in order, with a video URL', async () => {
+            const res = await request(app.getHttpServer()).get('/v1/demos').expect(200)
+
+            expect(res.body.demos.map((demo: { slug: string }) => demo.slug)).toEqual(['first', 'second'])
+            expect(JSON.stringify(res.body)).not.toContain('superseded.mp4')
+            expect(res.body.demos[0]).toMatchObject({
+                slug: 'first',
+                label: 'first',
+                title: 'Title of first',
+                subtitle: 'Subtitle',
+                job: { status: JobStatus.Analyzed, media: { durationS: 50 }, analysis: { rulesetVersion: '1.2.2' } },
+                videoUrl: 'https://storage.googleapis.com/signed-read',
+            })
+            expect(JSON.stringify(res.body)).not.toContain('demos/first.mp4')
+            expect(res.body.demos[0].job).not.toHaveProperty('userId')
+        })
+
+        it('keeps demo jobs out of every user’s history', async () => {
+            const res = await request(app.getHttpServer()).get('/v1/jobs').set(as(OWNER)).expect(200)
+
+            expect(JSON.stringify(res.body)).not.toContain(DEMO_FILE.name)
         })
     })
 

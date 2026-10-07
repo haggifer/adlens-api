@@ -3,6 +3,7 @@ import { AuthModule } from './auth/auth.module'
 import { appConfigModule } from './config/env'
 import { ContactModule } from './contact/contact.module'
 import { DatabaseModule } from './database/database.module'
+import { DemosModule } from './demos/demos.module'
 import { HealthController } from './health.controller'
 import { JobsModule } from './jobs/jobs.module'
 import { MeModule } from './me/me.module'
@@ -18,6 +19,7 @@ import { SamplesModule } from './samples/samples.module'
         MeModule,
         RealtimeModule,
         SamplesModule,
+        DemosModule,
         ContactModule,
     ],
     controllers: [HealthController],
