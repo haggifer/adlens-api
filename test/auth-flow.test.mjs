@@ -896,7 +896,8 @@ test('an anonymous user gets one analysis, then is asked to sign up', async () =
     assert.equal(analyzed.status, 202)
     assert.equal(next.status, 429)
     assert.equal((await next.json()).errorCode, 'SIGN_UP_REQUIRED')
-    assert.deepEqual(pick(await getQuota(anonymous.cookie)), { used: 1, limit: 1 })
+    // The quota reports the weekly allowance; the one analysis before confirmation is enforced on its own.
+    assert.deepEqual(pick(await getQuota(anonymous.cookie)), { used: 1, limit: 3 })
 })
 
 test('an unconfirmed account gets one analysis behind the human check, then is asked to confirm its email', async () => {
@@ -916,7 +917,7 @@ test('an unconfirmed account gets one analysis behind the human check, then is a
     assert.equal(network.runs[0].anonymous, true)
     assert.equal(next.status, 429)
     assert.equal((await next.json()).errorCode, 'EMAIL_CONFIRMATION_REQUIRED')
-    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: 1 })
+    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: 3 })
 
     // Confirming lifts the limits at once: the next analysis needs no check and the full weekly quota applies.
     await confirmEmail(email, account.cookie)
