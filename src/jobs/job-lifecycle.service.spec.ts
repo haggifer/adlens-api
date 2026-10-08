@@ -47,9 +47,9 @@ const ANALYSIS: Analysis = {
 const CALL = buildModelCall()
 const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
 const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', access: UserAccess.Member, hasPassedChallenge: false }
-// JobLifecycle's own thresholds: a verification or an analysis idle for longer than these was abandoned.
+// JobLifecycle's own thresholds: a verification idle for longer, or an analysis queued for longer, was abandoned.
 const VERIFY_STALE_MS = 10 * 60 * 1000
-const ANALYSIS_STALE_MS = 60 * 60 * 1000
+const ANALYSIS_STALE_MS = 10 * 60 * 1000
 const NOW = new Date('2026-09-29T10:00:00Z')
 
 describe('JobLifecycle', () => {
@@ -116,6 +116,9 @@ describe('JobLifecycle', () => {
 
     const lastTouchedAt = (jobId: string, at: Date) =>
         jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { updatedAt: at } })
+
+    const wasQueuedAt = (jobId: string, at: Date) =>
+        jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { queuedAt: at } })
 
     beforeAll(async () => {
         mongo = await startMemoryMongo()
@@ -444,13 +447,15 @@ describe('JobLifecycle', () => {
     })
 
     describe('expiring abandoned jobs', () => {
-        it('fails a verification and an analysis, refunded, once each is idle past its limit', async () => {
+        it('fails a verification idle past its limit and an analysis queued past its, refunded', async () => {
             const verifying = await claimJob()
             const analyzing = await queueJob(NETWORK_CHARGE)
 
             await lifecycle.startAttempt(analyzing)
             await lastTouchedAt(verifying, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
-            await lastTouchedAt(analyzing, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await wasQueuedAt(analyzing, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            // A worker's later writes (an attempt, a model call) don't buy the analysis more time.
+            await lastTouchedAt(analyzing, NOW)
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -469,15 +474,16 @@ describe('JobLifecycle', () => {
             expect(await networkRuns()).toBe(0)
         })
 
-        it('keeps jobs idle for exactly their limit, and gives an analysis longer than a verification', async () => {
+        it('keeps jobs for exactly their limit', async () => {
             const verifying = await claimJob()
             const queued = await queueJob()
             const analyzing = await queueJob()
 
             await lifecycle.startAttempt(analyzing)
             await lastTouchedAt(verifying, new Date(NOW.getTime() - VERIFY_STALE_MS))
-            await lastTouchedAt(queued, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
-            await lastTouchedAt(analyzing, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
+            await wasQueuedAt(queued, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
+            await wasQueuedAt(analyzing, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
+            await lastTouchedAt(queued, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -485,6 +491,27 @@ describe('JobLifecycle', () => {
             expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
             expect((await findJob(analyzing))?.status).toBe(JobStatus.Analyzing)
             expect(await usedRuns()).toBe(2)
+        })
+
+        it('records when a job was queued, which starts its analysis time', async () => {
+            const before = new Date()
+            const jobId = await queueJob()
+
+            expect((await findJob(jobId))?.queuedAt?.getTime()).toBeGreaterThanOrEqual(before.getTime())
+        })
+
+        it('times an analysis queued before queuedAt was recorded from its last write', async () => {
+            const legacy = await createJob(JobStatus.Queued)
+            const recent = await createJob(JobStatus.Analyzing)
+
+            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+            await lastTouchedAt(legacy, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await lastTouchedAt(recent, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect((await findJob(legacy))?.errorCode).toBe(JobErrorCode.AnalysisTimedOut)
+            expect((await findJob(recent))?.status).toBe(JobStatus.Analyzing)
         })
 
         it('leaves the charges of in-flight and analyzed jobs alone', async () => {
@@ -583,8 +610,8 @@ describe('JobLifecycle', () => {
             const othersJob = await createJob(JobStatus.Analyzing, OTHER_USER)
 
             jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-            await lastTouchedAt(own, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
-            await lastTouchedAt(othersJob, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await wasQueuedAt(own, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await wasQueuedAt(othersJob, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
 
             expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 2, failed: 0 })
             expect(await findJob(own)).toMatchObject({

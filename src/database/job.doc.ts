@@ -78,6 +78,9 @@ const jobDocSchema = z.object({
     errorCode: jobErrorCodeSchema.optional(),
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
+    // When the verified, charged upload was queued: the analysis's time limit counts from here, whatever the worker
+    // writes later. Missing on jobs queued before 2026-10-08.
+    queuedAt: z.date().optional(),
     attempts: z.number().int().nonnegative().default(0),
     // Set just before a worker attempt calls Gemini, and cleared only when Vertex refused that call with an HTTP error
     // status (never billed). An attempt that finds it set doesn't call again: the earlier call may have been billed.

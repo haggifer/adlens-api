@@ -72,22 +72,22 @@ conditional update on the expected current status, so two racing callers can nev
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
    fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
    job twice, it creates a new one. The HTTP answer still says what went wrong.
-   - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
-   - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
-     metadata plus ffprobe over a signed read URL (range reads, no download; the image runs Debian's ffprobe, because
-     `ffprobe-static`'s Linux build segfaults on any hostname lookup, see the Dockerfile). A bad file (unreadable, too long, too
-     large, unsupported type) is rejected with 422 and deleted; a file ffprobe can't decode is probed a second time
-     first, since a range read cut off by the network looks the same. A missing upload (409 `UPLOAD_INCOMPLETE`)
-     ends the job as `UPLOAD_FAILED`, and a storage or network problem (503 `UNAVAILABLE`) as `VIDEO_CHECK_FAILED`;
-     neither deletes the user's file, which the daily cleanup deletes with every error job's video. A job on a
-     [sample ad](#sample-ads) skips this step: its video was measured when the sample was published, and a sample no
-     longer published answers 404 and ends the job as `VIDEO_CHECK_FAILED`;
-   - **charge** one run on the user's network, then one on the user, and move to `queued` (429 `QUOTA_EXCEEDED` when
-     the user's window is spent, `SIGN_UP_REQUIRED` or `EMAIL_CONFIRMATION_REQUIRED` for an anonymous user or an
-     unconfirmed account; the [network rules](#abuse-limits) answer with their own codes). If the user charge
-     fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
-     code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
-   - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
+    - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
+    - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
+      metadata plus ffprobe over a signed read URL (range reads, no download; the image runs Debian's ffprobe, because
+      `ffprobe-static`'s Linux build segfaults on any hostname lookup, see the Dockerfile). A bad file (unreadable, too long, too
+      large, unsupported type) is rejected with 422 and deleted; a file ffprobe can't decode is probed a second time
+      first, since a range read cut off by the network looks the same. A missing upload (409 `UPLOAD_INCOMPLETE`)
+      ends the job as `UPLOAD_FAILED`, and a storage or network problem (503 `UNAVAILABLE`) as `VIDEO_CHECK_FAILED`;
+      neither deletes the user's file, which the daily cleanup deletes with every error job's video. A job on a
+      [sample ad](#sample-ads) skips this step: its video was measured when the sample was published, and a sample no
+      longer published answers 404 and ends the job as `VIDEO_CHECK_FAILED`;
+    - **charge** one run on the user's network, then one on the user, and move to `queued` (429 `QUOTA_EXCEEDED` when
+      the user's window is spent, `SIGN_UP_REQUIRED` or `EMAIL_CONFIRMATION_REQUIRED` for an anonymous user or an
+      unconfirmed account; the [network rules](#abuse-limits) answer with their own codes). If the user charge
+      fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
+      code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
+    - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`.
@@ -102,9 +102,10 @@ conditional update on the expected current status, so two racing callers can nev
    job at once rather than leave it to a retry that could only do the same.
 5. **Nothing stays in flight forever**: when a user reads their jobs, and for every user in the daily cleanup, anything
    stuck (a worker that crashed or never started) is expired: `verifying` after 10 minutes ends as `VIDEO_CHECK_FAILED`,
-   `queued`/`analyzing` after 60 minutes ends as `ANALYSIS_TIMED_OUT`, refunded. A job still `pending` 6 hours after its
-   creation (its upload never came, or no run was started) ends as `UPLOAD_FAILED`; each of these is a conditional
-   update on the status it was found in, so a job started meanwhile runs on.
+   `queued`/`analyzing` 10 minutes after it was queued (`queuedAt`, so the worker's own writes don't extend it; the
+   slowest Gemini call seen took about 3 minutes) ends as `ANALYSIS_TIMED_OUT`, refunded. A job still `pending` 6 hours
+   after its creation (its upload never came, or no run was started) ends as `UPLOAD_FAILED`; each of these is a
+   conditional update on the status it was found in, so a job started meanwhile runs on.
 
 **Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
 confirmed account. An anonymous user and an account that hasn't confirmed its email get one
@@ -137,13 +138,13 @@ hasn't confirmed its email (`emailVerified` false on its user document, read by
 [`getUserAccess`](src/common/user-access.ts)) meets every rule of an anonymous user, and is asked to confirm its
 email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign up (`SIGN_UP_REQUIRED`):
 
-| Rule | Limit per rolling 7 days | When hit |
-| --- | --- | --- |
-| Per confirmed account | `QUOTA_LIMIT` (5, in `.env`) | 429 `QUOTA_EXCEEDED` |
-| Per anonymous user or unconfirmed account | 1 (`PROVISIONAL_QUOTA_LIMIT`) | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
-| Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED` |
-| Everyone per network, soft | `IP_SOFT_LIMIT` (10) | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
-| Everyone per network, hard | `IP_HARD_LIMIT` (30) | 429 `NETWORK_QUOTA_EXCEEDED` |
+| Rule                                                 | Limit per rolling 7 days      | When hit                                                                                   |
+| ---------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| Per confirmed account                                | `QUOTA_LIMIT` (5, in `.env`)  | 429 `QUOTA_EXCEEDED`                                                                       |
+| Per anonymous user or unconfirmed account            | 1 (`PROVISIONAL_QUOTA_LIMIT`) | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`                                     |
+| Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total  | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`                                     |
+| Everyone per network, soft                           | `IP_SOFT_LIMIT` (10)          | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
+| Everyone per network, hard                           | `IP_HARD_LIMIT` (30)          | 429 `NETWORK_QUOTA_EXCEEDED`                                                               |
 
 - **The network** is the IPv4 address or the IPv6 /64 prefix (an IPv4-mapped address counts as IPv4). The address is
   the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` from the right (1 on Cloud Run: the one Google's front end appends),
@@ -302,23 +303,23 @@ Every `/v1/*` route except `GET /v1/samples`, `GET /v1/demos` and `POST /v1/cont
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
 
-| Method & path               | Purpose                                                         | Returns                        |
-| --------------------------- | --------------------------------------------------------------- | ------------------------------ |
-| `ALL /api/auth/*`           | Better Auth (public)                                            | Better Auth                    |
-| `GET /health`               | Liveness (public)                                               | `{ status, service, time }`    |
-| `POST /v1/jobs`             | Admission check (optional challengeToken), then a pending job and its signed upload target | `{ job, upload }`              |
-| `POST /v1/jobs/from-sample` | Admission check, then a pending job on a published sample ad (no upload) | `{ job }`                      |
-| `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch                     | **202** `{ job }`              |
-| `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)    | `{ jobs, nextCursor }`         |
-| `GET /v1/jobs/:id`          | One owned job                                                   | `{ job }`                      |
-| `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it) | `{ url, expiresAt }`           |
-| `DELETE /v1/jobs/:id`      | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs) | **204**                        |
-| `GET /v1/me/quota`          | The caller's quota window                                       | `{ quota }`                    |
+| Method & path               | Purpose                                                                                                                                                                                                           | Returns                        |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `ALL /api/auth/*`           | Better Auth (public)                                                                                                                                                                                              | Better Auth                    |
+| `GET /health`               | Liveness (public)                                                                                                                                                                                                 | `{ status, service, time }`    |
+| `POST /v1/jobs`             | Admission check (optional challengeToken), then a pending job and its signed upload target                                                                                                                        | `{ job, upload }`              |
+| `POST /v1/jobs/from-sample` | Admission check, then a pending job on a published sample ad (no upload)                                                                                                                                          | `{ job }`                      |
+| `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch                                                                                                                                                                       | **202** `{ job }`              |
+| `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)                                                                                                                                                      | `{ jobs, nextCursor }`         |
+| `GET /v1/jobs/:id`          | One owned job                                                                                                                                                                                                     | `{ job }`                      |
+| `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                            | `{ url, expiresAt }`           |
+| `DELETE /v1/jobs/:id`       | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs)                                                                                                                   | **204**                        |
+| `GET /v1/me/quota`          | The caller's quota window                                                                                                                                                                                         | `{ quota }`                    |
 | `GET /v1/admission`         | Whether a new analysis would be admitted (public; a visitor without a session is judged as a new anonymous user): the same quota and network refusals as `POST /v1/jobs`, without charging or the Turnstile check | **204**, or the refusal        |
-| `POST /v1/contact/uploads`  | Signed uploads for a Contact form message's images (public, Turnstile-checked, rate-limited) | **201** `{ draftId, uploads }` |
-| `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited) | **204**                        |
-| `GET /v1/samples`           | Published sample ads with preview URLs (public)                 | `{ samples }`                  |
-| `GET /v1/demos`             | Active, finished demo analyses with their summary and a video URL (public) | `{ demos }`                    |
+| `POST /v1/contact/uploads`  | Signed uploads for a Contact form message's images (public, Turnstile-checked, rate-limited)                                                                                                                      | **201** `{ draftId, uploads }` |
+| `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited)                                                                                                        | **204**                        |
+| `GET /v1/samples`           | Published sample ads with preview URLs (public)                                                                                                                                                                   | `{ samples }`                  |
+| `GET /v1/demos`             | Active, finished demo analyses with their summary and a video URL (public)                                                                                                                                        | `{ demos }`                    |
 
 ## Ad-policy rules
 
@@ -400,40 +401,40 @@ The image ships `.env` too, so a value set there (such as `QUOTA_LIMIT`) applies
 alike; Cloud Run's own env vars take precedence over it, and `.env.local` is never shipped. In production, secrets come from one Secret Manager secret, `API_SECRETS`, mounted as a JSON file and merged into the
 config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](infra/setup.sh).
 
-| Variable                 | Default                 | Purpose                                                                     |
-| ------------------------ | ----------------------- | --------------------------------------------------------------------------- |
-| `SECRETS_FILE`           | —                       | Path to a mounted JSON file of secrets; unset locally. Its keys fill gaps in the environment, never override it |
-| `MONGODB_URI`            | required                | Atlas connection string (Mongoose, Better Auth, Change Stream)              |
-| `GOOGLE_CLOUD_PROJECT`   | required                | GCP project for Vertex and Cloud Run                                        |
-| `STORAGE_BUCKET`         | required                | The uploads bucket                                                          |
-| `BETTER_AUTH_SECRET`     | required by the API     | Better Auth signing secret                                                  |
-| `BETTER_AUTH_URL`        | `http://localhost:8080` | The API's own public URL                                                    |
-| `WEB_ORIGIN`             | `http://localhost:3000` | Web origin for CORS, Socket.IO, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
-| `COOKIE_DOMAIN`          | —                       | Parent domain for the session cookie in production (`useadlens.com`)        |
-| `RESEND_API_KEY`         | required by the API     | Resend sending key; the API won't start without it                          |
-| `CONTACT_EMAIL`          | —                       | Where Contact form messages go; unset, the form answers 503                 |
-| `GOOGLE_CLIENT_ID`       | —                       | Google sign-in; enabled with `GOOGLE_CLIENT_SECRET` (both or neither)       |
-| `GOOGLE_CLIENT_SECRET`   | —                       | Google OAuth client secret                                                  |
-| `GITHUB_CLIENT_ID`       | —                       | GitHub sign-in; enabled with `GITHUB_CLIENT_SECRET` (both or neither)       |
-| `GITHUB_CLIENT_SECRET`   | —                       | GitHub OAuth client secret                                                  |
-| `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                      |
-| `PORT`                   | `8080`                  | API listen port                                                             |
-| `LOG_FORMAT`             | `text`                  | `json` on Cloud Run: one Cloud Logging entry per line, with `severity`      |
-| `STORAGE_KEY_FILE`       | —                       | Local only: SA key used to sign V4 URLs (user ADC can't sign)               |
-| `GCP_REGION`             | `europe-west1`          | Region of the analysis Cloud Run Job                                        |
-| `ANALYZE_JOB_NAME`       | `adlens-analyze`        | The Cloud Run Job the API executes                                          |
-| `ANALYZE_LOCAL`          | `0`                     | `1`: run each analysis as a local `node dist/worker` child process          |
-| `ANALYZE_MAX_RETRIES`    | `2`                     | Must equal the job's `--max-retries`, so the worker knows its last attempt  |
-| `QUOTA_LIMIT`            | — (required, `5` in `.env`) | Analyses per rolling 7-day window for a confirmed account (anonymous users and unconfirmed accounts get 1) |
-| `IP_ANON_LIMIT`          | `3`                     | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window |
-| `IP_SOFT_LIMIT`          | `10`                    | Analyses per network before everyone needs a Turnstile check                |
-| `IP_HARD_LIMIT`          | `30`                    | Analyses per network, for everyone                                          |
-| `TRUSTED_PROXY_HOPS`     | `1`                     | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                   |
-| `TURNSTILE_SECRET_KEY`   | —                       | Cloudflare Turnstile secret; unset, a required check never passes           |
-| `GEMINI_MODEL`           | `gemini-3.8-flash`      | Model id                                                                    |
-| `GEMINI_LOCATION`        | `global`                | Vertex serving location                                                     |
-| `WORKER_JOB_ID`          | —                       | Worker only: set per execution by the dispatcher                            |
-| `CLOUD_RUN_TASK_ATTEMPT` | `0`                     | Worker only: set by Cloud Run on each attempt                               |
+| Variable                 | Default                                | Purpose                                                                                                                                                          |
+| ------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SECRETS_FILE`           | —                                      | Path to a mounted JSON file of secrets; unset locally. Its keys fill gaps in the environment, never override it                                                  |
+| `MONGODB_URI`            | required                               | Atlas connection string (Mongoose, Better Auth, Change Stream)                                                                                                   |
+| `GOOGLE_CLOUD_PROJECT`   | required                               | GCP project for Vertex and Cloud Run                                                                                                                             |
+| `STORAGE_BUCKET`         | required                               | The uploads bucket                                                                                                                                               |
+| `BETTER_AUTH_SECRET`     | required by the API                    | Better Auth signing secret                                                                                                                                       |
+| `BETTER_AUTH_URL`        | `http://localhost:8080`                | The API's own public URL                                                                                                                                         |
+| `WEB_ORIGIN`             | `http://localhost:3000`                | Web origin for CORS, Socket.IO, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
+| `COOKIE_DOMAIN`          | —                                      | Parent domain for the session cookie in production (`useadlens.com`)                                                                                             |
+| `RESEND_API_KEY`         | required by the API                    | Resend sending key; the API won't start without it                                                                                                               |
+| `CONTACT_EMAIL`          | —                                      | Where Contact form messages go; unset, the form answers 503                                                                                                      |
+| `GOOGLE_CLIENT_ID`       | —                                      | Google sign-in; enabled with `GOOGLE_CLIENT_SECRET` (both or neither)                                                                                            |
+| `GOOGLE_CLIENT_SECRET`   | —                                      | Google OAuth client secret                                                                                                                                       |
+| `GITHUB_CLIENT_ID`       | —                                      | GitHub sign-in; enabled with `GITHUB_CLIENT_SECRET` (both or neither)                                                                                            |
+| `GITHUB_CLIENT_SECRET`   | —                                      | GitHub OAuth client secret                                                                                                                                       |
+| `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                                                                                                                            |
+| `PORT`                   | `8080`                                 | API listen port                                                                                                                                                  |
+| `LOG_FORMAT`             | `text`                                 | `json` on Cloud Run: one Cloud Logging entry per line, with `severity`                                                                                           |
+| `STORAGE_KEY_FILE`       | —                                      | Local only: SA key used to sign V4 URLs (user ADC can't sign)                                                                                                    |
+| `GCP_REGION`             | `europe-west1`                         | Region of the analysis Cloud Run Job                                                                                                                             |
+| `ANALYZE_JOB_NAME`       | `adlens-analyze`                       | The Cloud Run Job the API executes                                                                                                                               |
+| `ANALYZE_LOCAL`          | `0`                                    | `1`: run each analysis as a local `node dist/worker` child process                                                                                               |
+| `ANALYZE_MAX_RETRIES`    | `2`                                    | Must equal the job's `--max-retries`, so the worker knows its last attempt                                                                                       |
+| `QUOTA_LIMIT`            | — (required, `5` in `.env`)            | Analyses per rolling 7-day window for a confirmed account (anonymous users and unconfirmed accounts get 1)                                                       |
+| `IP_ANON_LIMIT`          | `3`                                    | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window                                                                       |
+| `IP_SOFT_LIMIT`          | `10`                                   | Analyses per network before everyone needs a Turnstile check                                                                                                     |
+| `IP_HARD_LIMIT`          | `30`                                   | Analyses per network, for everyone                                                                                                                               |
+| `TRUSTED_PROXY_HOPS`     | `1`                                    | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                                                                                                        |
+| `TURNSTILE_SECRET_KEY`   | —                                      | Cloudflare Turnstile secret; unset, a required check never passes                                                                                                |
+| `GEMINI_MODEL`           | `gemini-3.8-flash`                     | Model id                                                                                                                                                         |
+| `GEMINI_LOCATION`        | `global`                               | Vertex serving location                                                                                                                                          |
+| `WORKER_JOB_ID`          | —                                      | Worker only: set per execution by the dispatcher                                                                                                                 |
+| `CLOUD_RUN_TASK_ATTEMPT` | `0`                                    | Worker only: set by Cloud Run on each attempt                                                                                                                    |
 
 ## Local development
 
@@ -621,7 +622,7 @@ Why the system is built this way, and what was rejected. Decisions that span the
   rolled to the same digest, the jobs first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
 - **Infrastructure as a gcloud script.** The infrastructure is a handful of set-once resources, so an idempotent,
   committed script is enough; Terraform or Pulumi would be the step up if it grows.
-- **One Secret Manager secret for all of the API's secrets.** The free tier caps active secret *versions* per billing
+- **One Secret Manager secret for all of the API's secrets.** The free tier caps active secret _versions_ per billing
   account, and every secret is at least one version; one JSON bundle (`API_SECRETS`) uses a single version however
   many keys it holds, and costs one access per instance start instead of one per secret. The trade-off is no per-key
   IAM binding — anything that can read the bundle can read every key in it — which is fine while the API and the
