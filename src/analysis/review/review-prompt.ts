@@ -1,6 +1,6 @@
 import type { AnalysisSettings } from 'adlens-shared'
 import { z } from 'zod'
-import type { AdvisoryProjection, ModelFinding, RuleProjection } from '../../rules'
+import { type AdvisoryProjection, type ModelFinding, resolveSettings, type RuleProjection } from '../../rules'
 
 export interface ReviewOutput {
     transcript: string
@@ -10,8 +10,9 @@ export interface ReviewOutput {
 
 type ParsedFinding = Omit<ModelFinding, 'time'> & { startS?: number; endS?: number }
 
-// Bump whenever the prompt or the output contract changes; it is stored with every analysis.
-export const PROMPT_VERSION = '7'
+// Bump whenever the prompt or the output contract changes; it is stored with every analysis. 8 was the parked
+// cost-optimised prompt (branch ai-costs-optimization), whose runs are stored with it.
+export const PROMPT_VERSION = '9'
 
 // Times are whole seconds: free decimals ran away (`0.000…` or `3.0134…1234567890…`, thousands of digits) until the
 // reply hit the token limit (gemini-3.8-flash, 2026-09-29: 5 of 6 runs of a 60-second ad). The model's schema also caps
@@ -38,14 +39,17 @@ const buildOutputSchema = (second: z.ZodInt) =>
 
 const reviewOutputSchema = buildOutputSchema(z.int().nonnegative())
 
-// With no platform or market chosen, every one's rules are sent (see selectRules), so the model must not read "none" as
-// "these rules don't apply here".
-const describeCampaign = (settings: AnalysisSettings): string =>
-    [
-        `Platforms: ${settings.platforms.join(', ') || 'all (none chosen)'}`,
-        `Placements: ${settings.placements.join(', ') || 'not specified'}`,
-        `Markets: ${settings.markets.join(', ') || 'all (none chosen)'}`,
+// Resolved like the rules (resolveSettings): a setting left empty is listed in full, so the model sees exactly the
+// campaign the rules were chosen for.
+const describeCampaign = (settings: AnalysisSettings): string => {
+    const { platforms, placements, markets } = resolveSettings(settings)
+
+    return [
+        `Platforms: ${platforms.join(', ')}`,
+        `Placements: ${placements.join(', ')}`,
+        `Markets: ${markets.join(', ')}`,
     ].join('\n')
+}
 
 const toModelFinding = ({ startS, endS, ...finding }: ParsedFinding): ModelFinding => ({
     ...finding,

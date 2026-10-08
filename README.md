@@ -333,16 +333,18 @@ records the `rulesetVersion` it ran with.
 
 Selection ([`src/rules/index.ts`](src/rules/index.ts)) targets the job's settings: its **platforms** (YouTube also pulls
 in Google Ads policy), its **markets** (global rules always apply; UK/EU/US rules only in their market) and, for
-format-specific rules such as the 6-second bumper cap, its **placements**. No platform chosen means every platform, and
-no market chosen means every market, so an ad is never checked against nothing; placement specs still apply only to
-their chosen placement, and the schema requires a rule's placements to belong to its platforms, so every video rule is
-selected by some settings. Selected rules are then routed by `modality`:
+format-specific rules such as the 6-second bumper cap, its **placements**. A setting left empty stands for every value
+(`resolveSettings`: every platform, every market, every placement of the chosen platforms), so leaving a setting empty
+and choosing all of it select the same rules and send the same prompt, which lists the resolved values; the schema
+requires a rule's placements to belong to its platforms, so every video rule is selected by some settings. Selected
+rules are then routed by `modality`:
 
 - `metadata` → checked in code against the measured media facts (duration, dimensions as displayed after the video's
   rotation, real object size); an aspect ratio can be one required ratio (`aspect_ratio_in`), a list
   (`aspect_ratio_one_of`, `params.ratios`) or a range (`aspect_ratio_between`, `params.min`/`max`, min not above
   max), written as `W:H` with both parts positive. Each check names its rule's platforms, the selected placements a
-  placement spec binds (none for a spec that binds every placement), the rule as a sentence (`check`), and a `detail`
+  placement spec binds (all of its own when none was chosen; none for a spec that binds every placement), the rule as
+  a sentence (`check`), and a `detail`
   sentence about the video ("It’s 30.4 seconds long, longer than the 6 seconds allowed."), so the report can say which
   placement the video won't work for;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
@@ -588,6 +590,10 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **Rules target placements and markets, not just platforms.** Format caps such as the 6-second bumper apply only to
   their placement, and UK/EU/US rules only in their market; the schema refuses a rule whose
   placements don't belong to its platforms, so every video rule is reachable by some settings.
+- **Nothing chosen means nothing ruled out, for every setting.** Placements used to be opt-in, so an analysis with
+  every setting left empty got no placement specs and no placement-bound policies, unlike the same ad with everything
+  chosen (2026-10-08: 2 findings and 1 spec against 6 and 18). Now an empty list resolves to every value before rules
+  are selected and before the prompt is written (prompt version 9).
 
 **Auth and hosting**
 

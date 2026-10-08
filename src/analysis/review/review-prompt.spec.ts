@@ -1,4 +1,4 @@
-import { Market, Platform } from 'adlens-shared'
+import { Market, Placement, Platform } from 'adlens-shared'
 import { buildReviewOutputJsonSchema, buildReviewPrompt, parseReviewOutput } from './review-prompt'
 
 const SETTINGS = { platforms: [], placements: [], markets: [] }
@@ -44,12 +44,18 @@ describe('buildReviewPrompt', () => {
         expect(prompt).toContain('use startS 0 and omit endS')
     })
 
-    it('tells the model that no platform or market chosen means all of them', () => {
+    it('lists every platform, placement and market when none is chosen, as if all were', () => {
         const prompt = buildReviewPrompt({ platforms: [], placements: [], markets: [] }, [], [])
+        const everything = {
+            platforms: Object.values(Platform),
+            placements: Object.values(Placement),
+            markets: Object.values(Market),
+        }
 
-        expect(prompt).toContain('Platforms: all (none chosen)')
-        expect(prompt).toContain('Markets: all (none chosen)')
-        expect(prompt).toContain('Placements: not specified')
+        expect(prompt).toContain(`Platforms: ${everything.platforms.join(', ')}`)
+        expect(prompt).toContain(`Placements: ${everything.placements.join(', ')}`)
+        expect(prompt).toContain(`Markets: ${everything.markets.join(', ')}`)
+        expect(prompt).toBe(buildReviewPrompt(everything, [], []))
     })
 
     it('lists the chosen platforms and markets', () => {

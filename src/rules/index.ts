@@ -3,8 +3,11 @@ import {
     type AnalysisSettings,
     type Finding,
     type JobMedia,
+    Market,
     type MetadataCheck,
-    type Placement,
+    Placement,
+    PLACEMENT_PLATFORM,
+    Platform,
     RulePlatform,
     type TimeRange,
 } from 'adlens-shared'
@@ -45,8 +48,8 @@ export interface ModelFinding {
 }
 
 interface RuleFilter {
-    platforms: Set<RulePlatform> | null
-    markets: Set<string> | null
+    platforms: Set<RulePlatform>
+    markets: Set<string>
     placements: Set<Placement>
 }
 
@@ -63,15 +66,15 @@ const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
     new Set([RulePlatform.All, ...settings.platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
 
 const toRuleFilter = (settings: AnalysisSettings): RuleFilter => ({
-    platforms: settings.platforms.length ? rulePlatformsFor(settings) : null,
-    markets: settings.markets.length ? new Set<string>(settings.markets) : null,
+    platforms: rulePlatformsFor(settings),
+    markets: new Set<string>(settings.markets),
     placements: new Set(settings.placements),
 })
 
 const isRelevant = (rule: Rule, { platforms, markets, placements }: RuleFilter): boolean =>
     rule.appliesTo !== 'image' &&
-    (!platforms || rule.platform.some((platform) => platforms.has(platform))) &&
-    (rule.region === 'global' || !markets || markets.has(rule.region)) &&
+    rule.platform.some((platform) => platforms.has(platform)) &&
+    (rule.region === 'global' || markets.has(rule.region)) &&
     (!rule.placements || rule.placements.some((placement) => placements.has(placement)))
 
 const citationOf = (ruleSet: RuleSet, rule: Rule): { quote: string; ref: string } => ({
@@ -179,12 +182,26 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
     }
 }
 
+// Nothing chosen means nothing ruled out: an empty list stands for every value (placements: every one of the chosen
+// platforms'), so leaving a setting empty and choosing all of it select the same rules and read the same in the
+// prompt. Two runs of one ad differed only by that (2026-10-08: 6 findings and 18 specs vs 2 and 1).
+export const resolveSettings = ({ platforms, placements, markets }: AnalysisSettings): AnalysisSettings => {
+    const resolvedPlatforms = platforms.length ? platforms : Object.values(Platform)
+
+    return {
+        platforms: resolvedPlatforms,
+        placements: placements.length
+            ? placements
+            : Object.values(Placement).filter((placement) => resolvedPlatforms.includes(PLACEMENT_PLATFORM[placement])),
+        markets: markets.length ? markets : Object.values(Market),
+    }
+}
+
 // The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives, to the
-// selected markets (global rules always apply) and, for placement-specific rules, to the selected placements. Then
-// split by how each one is checked. No platform (or market) chosen means none is ruled out, so the ad is checked
-// against all of them; placements stay opt-in, since a placement's specs (a bumper's 6 seconds) only bind that format.
+// markets (global rules always apply) and, for placement-specific rules, to the placements. Then split by how each one
+// is checked.
 export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): SelectedRules => {
-    const filter = toRuleFilter(settings)
+    const filter = toRuleFilter(resolveSettings(settings))
     const relevant = ruleSet.rules.filter((rule) => isRelevant(rule, filter))
 
     return {
@@ -210,8 +227,8 @@ export const projectForModel = (rules: Rule[]): RuleProjection[] =>
 export const projectAdvisoriesForModel = (rules: Rule[]): AdvisoryProjection[] =>
     rules.map(({ id, check }) => ({ id, check }))
 
-// A placement-specific rule binds the selected placements among its own; a rule without placements binds its
-// platforms' every placement and names none.
+// A placement-specific rule binds the selected placements among its own (all of them when none was chosen, as in
+// resolveSettings); a rule without placements binds its platforms' every placement and names none.
 export const evaluateMetadataRules = (
     ruleSet: RuleSet,
     rules: Rule[],
@@ -222,7 +239,9 @@ export const evaluateMetadataRules = (
         id: rule.id,
         platform: rule.platform,
         ...(rule.placements && {
-            placements: rule.placements.filter((placement) => selectedPlacements.includes(placement)),
+            placements: selectedPlacements.length
+                ? rule.placements.filter((placement) => selectedPlacements.includes(placement))
+                : rule.placements,
         }),
         topic: rule.topic,
         check: rule.check,

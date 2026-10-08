@@ -1,6 +1,6 @@
 import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
 import { TEST_RULESET } from '../testing/test-ruleset'
-import { evaluateMetadataRules, projectForModel, selectRules } from './index'
+import { evaluateMetadataRules, projectForModel, resolveSettings, selectRules } from './index'
 import type { Rule } from './schema'
 
 const ruleSet = TEST_RULESET
@@ -35,23 +35,32 @@ describe('selectRules', () => {
         expect(regionalRules.filter((id) => !noMarket.has(id))).toEqual([])
     })
 
-    it('still applies placement-specific rules only when their placement is chosen', () => {
+    it('checks every placement’s rules when no placement is chosen', () => {
         const placementRules = ruleSet.rules.filter((rule) => rule.placements).map((rule) => rule.id)
         const nothingChosen = selectedIds(settingsFor({}))
 
         expect(placementRules.length).toBeGreaterThan(0)
-        expect(placementRules.filter((id) => nothingChosen.has(id))).toEqual([])
+        expect(placementRules.filter((id) => !nothingChosen.has(id))).toEqual([])
     })
 
-    it('applies the 6-second bumper limit only when the bumper placement is chosen', () => {
-        const bumper = 'youtube.creative_spec.bumper_duration'
+    it('selects the same rules when nothing is chosen as when everything is', () => {
+        const everything = settingsFor({
+            platforms: Object.values(Platform),
+            placements: Object.values(Placement),
+            markets: Object.values(Market),
+        })
 
-        expect(selectedIds(settingsFor({ platforms: [Platform.YouTube] })).has(bumper)).toBe(false)
-        expect(
-            selectedIds(settingsFor({ platforms: [Platform.YouTube], placements: [Placement.YouTubeBumper] })).has(
-                bumper,
-            ),
-        ).toBe(true)
+        expect(selectedIds(settingsFor({}))).toEqual(selectedIds(everything))
+    })
+
+    it('applies the 6-second bumper limit unless other placements were chosen without it', () => {
+        const bumper = 'youtube.creative_spec.bumper_duration'
+        const withPlacements = (placements: Placement[]) =>
+            selectedIds(settingsFor({ platforms: [Platform.YouTube], placements }))
+
+        expect(withPlacements([]).has(bumper)).toBe(true)
+        expect(withPlacements([Placement.YouTubeBumper]).has(bumper)).toBe(true)
+        expect(withPlacements([Placement.YouTubeShorts]).has(bumper)).toBe(false)
     })
 
     it('applies market-specific rules only in their market', () => {
@@ -69,6 +78,33 @@ describe('selectRules', () => {
 
         expect(selectedIds(settingsFor({ platforms: [Platform.YouTube] })).has(googleOnly.id)).toBe(true)
         expect(selectedIds(settingsFor({ platforms: [Platform.Meta] })).has(googleOnly.id)).toBe(false)
+    })
+})
+
+describe('resolveSettings', () => {
+    it('stands every platform, placement and market for an empty list', () => {
+        expect(resolveSettings(settingsFor({}))).toEqual({
+            platforms: Object.values(Platform),
+            placements: Object.values(Placement),
+            markets: Object.values(Market),
+        })
+    })
+
+    it('stands only the chosen platforms’ placements for an empty placement list', () => {
+        expect(resolveSettings(settingsFor({ platforms: [Platform.TikTok, Platform.Amazon] })).placements).toEqual([
+            Placement.TikTokInFeed,
+            Placement.AmazonSponsoredBrandsVideo,
+        ])
+    })
+
+    it('keeps what was chosen', () => {
+        const chosen = settingsFor({
+            platforms: [Platform.Meta],
+            placements: [Placement.MetaReels],
+            markets: [Market.UK],
+        })
+
+        expect(resolveSettings(chosen)).toEqual(chosen)
     })
 })
 
@@ -236,6 +272,12 @@ describe('evaluateMetadataRules', () => {
             check: 'Bumper ads must be at most 6 seconds long.',
             detail: 'It’s 30.4 seconds long, longer than the 6 seconds allowed.',
         })
+    })
+
+    it('names every placement a placement spec binds when no placement was chosen', () => {
+        const bumper = ruleSet.rules.find((candidate) => candidate.id === 'youtube.creative_spec.bumper_duration')!
+
+        expect(evaluateMetadataRules(ruleSet, [bumper], MEDIA, [])[0].placements).toEqual(bumper.placements)
     })
 
     it('names no placement for a spec that binds every placement of its platforms', () => {
