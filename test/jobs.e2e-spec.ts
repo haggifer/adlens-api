@@ -1087,20 +1087,22 @@ describe('Jobs API (e2e)', () => {
                     cookie.startsWith('adlens_free_run='),
                 )
 
-            it('remembers which anonymous user used it, in a cookie scripts can’t read', async () => {
+            it('remembers which user used it, for 400 days, in a cookie scripts can’t read', async () => {
                 const anonymous = await addAnonymous()
                 const created = await createFrom(anonymous, '203.0.113.30', { challengeToken: 'pass' }).expect(201)
                 const started = await analyzeFrom(anonymous, '203.0.113.30', created.body.job.id).expect(202)
 
-                expect(freeRunCookieOf(started)).toMatch(new RegExp(`^adlens_free_run=${anonymous};.*HttpOnly`))
+                expect(freeRunCookieOf(started)).toMatch(
+                    new RegExp(`^adlens_free_run=${anonymous};.*Max-Age=${400 * 24 * 60 * 60};.*HttpOnly`),
+                )
             })
 
-            it('sets no such cookie for an account’s analysis', async () => {
+            it('counts an account’s analysis as the browser’s too', async () => {
                 const member = await addUser({ isAnonymous: false, emailVerified: true })
                 const created = await createFrom(member, '203.0.113.31').expect(201)
                 const started = await analyzeFrom(member, '203.0.113.31', created.body.job.id).expect(202)
 
-                expect(freeRunCookieOf(started)).toBeUndefined()
+                expect(freeRunCookieOf(started)).toMatch(new RegExp(`^adlens_free_run=${member};`))
             })
 
             it('asks a visitor or a new anonymous session in that browser to sign in, in advance and at creation', async () => {
@@ -1115,7 +1117,20 @@ describe('Jobs API (e2e)', () => {
                 expect(another.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
             })
 
-            it('lets the anonymous user that used it retry a refunded run, and never limits an account', async () => {
+            it('asks an unconfirmed account in that browser to confirm its email, in advance and at creation', async () => {
+                const used = new Types.ObjectId().toString()
+                const unconfirmed = await addUser({ isAnonymous: false, emailVerified: false })
+                const ahead = await request(app.getHttpServer())
+                    .get('/v1/admission')
+                    .set({ ...as(unconfirmed), ...from('203.0.113.34'), ...usedBy(used) })
+                    .expect(429)
+                const created = await createWithCookie(unconfirmed, '203.0.113.34', used).expect(429)
+
+                expect(ahead.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
+                expect(created.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
+            })
+
+            it('lets the user that used it retry a refunded run, and never limits a confirmed account', async () => {
                 const anonymous = await addAnonymous()
 
                 await createWithCookie(anonymous, '203.0.113.33', anonymous).expect(201)
@@ -1228,8 +1243,9 @@ describe('Jobs API (e2e)', () => {
             const next = await createFrom(anonymous, '203.0.113.13', { challengeToken: 'pass' }).expect(429)
             const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(anonymous)).expect(200)
 
+            // The report shows the weekly allowance; the one analysis before confirmation is enforced on its own.
             expect(next.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
-            expect(quota.body.quota).toMatchObject({ used: 1, limit: 1 })
+            expect(quota.body.quota).toMatchObject({ used: 1, limit: 3 })
         })
 
         it('gives an unconfirmed account one analysis, then asks it to confirm its email', async () => {
@@ -1242,7 +1258,7 @@ describe('Jobs API (e2e)', () => {
             const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(unconfirmed)).expect(200)
 
             expect(next.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
-            expect(quota.body.quota).toMatchObject({ used: 1, limit: 1 })
+            expect(quota.body.quota).toMatchObject({ used: 1, limit: 3 })
         })
 
         it('refuses a new job once the user has no analyses left', async () => {

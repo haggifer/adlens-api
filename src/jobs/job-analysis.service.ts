@@ -3,7 +3,6 @@ import { type ApiError, type Job, JobErrorCode, type JobMedia, RequestErrorCode 
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
-import { UserAccess } from '../common/user-access'
 import type { StoredJob } from '../database/job.doc'
 import type { IpSource } from '../ip-quota/client-ip'
 import { SamplesService } from '../samples/samples.service'
@@ -23,17 +22,6 @@ const REJECTION_MESSAGES: Record<JobErrorCode, string> = {
     [JobErrorCode.AnalysisTimedOut]: 'The analysis timed out',
     [JobErrorCode.VideoCheckFailed]: 'The upload could not be checked',
     [JobErrorCode.UploadFailed]: 'The upload has not finished',
-}
-
-export interface StartedRun {
-    job: Job
-    // Charged to an anonymous user: the browser has used its free analysis.
-    isFreeRun: boolean
-}
-
-interface QueuedRun {
-    job: StoredJob
-    isFreeRun: boolean
 }
 
 // The refusal's own code (e.g. QUOTA_EXCEEDED), never another error's message: a MongoDB error quotes the key it hit,
@@ -61,7 +49,7 @@ export class JobAnalysisService {
         private readonly admission: AnalysisAdmission,
     ) {}
 
-    async start(userId: string, jobId: string, ipSource: IpSource): Promise<StartedRun> {
+    async start(userId: string, jobId: string, ipSource: IpSource): Promise<Job> {
         const claimed = await this.lifecycle.claimForVerification(userId, jobId)
 
         if (!claimed) {
@@ -77,7 +65,7 @@ export class JobAnalysisService {
             await this.lifecycle.recordExecution(jobId, execution)
         }
 
-        return { job: toPublicJob(queued.job), isFreeRun: queued.isFreeRun }
+        return toPublicJob(queued)
     }
 
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
@@ -90,13 +78,11 @@ export class JobAnalysisService {
         job: StoredJob,
         media: JobMedia,
         ipSource: IpSource,
-    ): Promise<QueuedRun> {
+    ): Promise<StoredJob> {
         try {
             // Jobs created before the field existed have none: they get no pass.
             const ipCharge = await this.admission.ipChargeFor(userId, ipSource, Boolean(job.hasPassedChallenge))
-            const queued = await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
-
-            return { job: queued, isFreeRun: ipCharge?.access === UserAccess.Anonymous }
+            return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
         } catch (err) {
             // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.
             await this.lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed, describeChargeFailure(err))

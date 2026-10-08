@@ -16,12 +16,22 @@ import {
 import type { Env } from '../config/env'
 import { type QuotaRun, USER_COLLECTION, type UserExtras } from '../database/user.doc'
 
-// What an anonymous user or an unconfirmed account gets before it must sign up or confirm its email. Clearing cookies
-// gets a new anonymous user, so the network's anonymous allowance (IP_ANON_LIMIT) remains the real bound.
+// What a user gets before confirming an email, in total: an anonymous user and the account it signs up with share it
+// (freeRunId moves with the runs), and it never comes back with the window. Clearing cookies gets a new anonymous user,
+// so the network's anonymous allowance (IP_ANON_LIMIT) remains the real bound.
 const PROVISIONAL_QUOTA_LIMIT = 1
 
 // getUserAccess in a pipeline expression, for an account that isn't an admin.
 const IS_PROVISIONAL_EXPR = { $or: [{ $eq: ['$isAnonymous', true] }, { $ne: ['$emailVerified', true] }] }
+
+const HAS_FREE_RUN_EXPR = { $ne: [{ $ifNull: ['$freeRunId', null] }, null] }
+
+const USER_QUOTA_PROJECTION = { ...USER_ACCESS_PROJECTION, runs: 1, freeRunId: 1 }
+
+type QuotaFields = Pick<UserExtras, 'isAdmin' | 'isAnonymous' | 'emailVerified' | 'runs' | 'freeRunId'>
+
+const countRunsSince = (user: QuotaFields | null, cutoff: number): number =>
+    (user?.runs ?? []).filter((run) => run.startedAt.getTime() > cutoff).length
 
 export const toQuotaRefusal = (access: UserAccess): ApiException =>
     isProvisional(access)
@@ -68,27 +78,61 @@ export class QuotaService {
 
     // A run that has already left the window is no longer stored, so refunding it changes nothing.
     async refund(userId: string, runId: string): Promise<void> {
-        await this.users.updateOne({ _id: new Types.ObjectId(userId) }, { $pull: { runs: { id: runId } } })
+        const _id = new Types.ObjectId(userId)
+
+        await this.users.updateOne({ _id }, { $pull: { runs: { id: runId } } })
+        await this.users.updateOne({ _id, freeRunId: runId }, { $set: { freeRunId: null } })
     }
 
     // Moves an anonymous user's runs onto the account they signed up or in with, so signing up never resets the
-    // quota. $addToSet keeps a retried move from counting a run twice.
+    // quota, and its used free analysis with them. $addToSet keeps a retried move from counting a run twice.
     async transfer(fromUserId: string, toUserId: string): Promise<void> {
-        const from = await this.users.findOne({ _id: new Types.ObjectId(fromUserId) }, { projection: { runs: 1 } })
+        const from = await this.users.findOne(
+            { _id: new Types.ObjectId(fromUserId) },
+            { projection: { runs: 1, freeRunId: 1 } },
+        )
         const runs = from?.runs ?? []
+        const to = new Types.ObjectId(toUserId)
 
-        if (!runs.length) {
-            return
+        if (runs.length) {
+            await this.users.updateOne({ _id: to }, { $addToSet: { runs: { $each: runs } } })
         }
 
-        await this.users.updateOne({ _id: new Types.ObjectId(toUserId) }, { $addToSet: { runs: { $each: runs } } })
+        if (from?.freeRunId) {
+            await this.users.updateOne({ _id: to, freeRunId: null }, { $set: { freeRunId: from.freeRunId } })
+        }
+    }
+
+    // Throws the refusal a charge would meet now, so nobody uploads a video only to be refused at analyze; otherwise
+    // returns the user's access.
+    async check(userId: string, now = new Date()): Promise<UserAccess> {
+        const user = await this.users.findOne(
+            { _id: new Types.ObjectId(userId) },
+            { projection: USER_QUOTA_PROJECTION },
+        )
+        const access = getUserAccess(user)
+        const used = countRunsSince(user, now.getTime() - QUOTA_WINDOW_MS)
+
+        if (access === UserAccess.Admin) {
+            return access
+        }
+
+        const hasRunLeft = isProvisional(access)
+            ? !user?.freeRunId && used < PROVISIONAL_QUOTA_LIMIT
+            : used < this.limit
+
+        if (!hasRunLeft) {
+            throw toQuotaRefusal(access)
+        }
+
+        return access
     }
 
     async get(userId: string, now = new Date()): Promise<Quota> {
         const cutoff = now.getTime() - QUOTA_WINDOW_MS
         const user = await this.users.findOne(
             { _id: new Types.ObjectId(userId) },
-            { projection: { ...USER_ACCESS_PROJECTION, runs: 1 } },
+            { projection: USER_QUOTA_PROJECTION },
         )
         const starts = (user?.runs ?? []).map((run) => run.startedAt.getTime()).filter((start) => start > cutoff)
         const oldest = starts.length ? Math.min(...starts) : null
@@ -100,31 +144,39 @@ export class QuotaService {
         }
     }
 
+    // A provisional user's charge records its run as the free one, in the same update.
     private appendRun(userId: string, run: QuotaRun, cutoff: Date) {
+        const isFreeRun = { $and: [{ $ne: ['$isAdmin', true] }, IS_PROVISIONAL_EXPR] }
+
         return this.users.findOneAndUpdate({ _id: new Types.ObjectId(userId), $expr: this.admits(cutoff) }, [
-            { $set: { runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] } } },
+            {
+                $set: {
+                    runs: { $concatArrays: [countedRuns(cutoff), { $literal: [run] }] },
+                    freeRunId: { $cond: [isFreeRun, run.id, { $ifNull: ['$freeRunId', null] }] },
+                },
+            },
         ])
     }
 
     private admits(cutoff: Date): object {
+        const used = { $size: countedRuns(cutoff) }
+
         return {
             $or: [
                 { $eq: ['$isAdmin', true] },
                 {
-                    $lt: [
-                        { $size: countedRuns(cutoff) },
-                        { $cond: [IS_PROVISIONAL_EXPR, PROVISIONAL_QUOTA_LIMIT, this.limit] },
+                    $cond: [
+                        IS_PROVISIONAL_EXPR,
+                        { $and: [{ $not: [HAS_FREE_RUN_EXPR] }, { $lt: [used, PROVISIONAL_QUOTA_LIMIT] }] },
+                        { $lt: [used, this.limit] },
                     ],
                 },
             ],
         }
     }
 
+    // Everyone but an admin sees the weekly allowance; a provisional user's one analysis is enforced by the charge.
     private getLimit(access: UserAccess): number | null {
-        if (access === UserAccess.Admin) {
-            return null
-        }
-
-        return isProvisional(access) ? PROVISIONAL_QUOTA_LIMIT : this.limit
+        return access === UserAccess.Admin ? null : this.limit
     }
 }

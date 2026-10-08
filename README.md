@@ -108,14 +108,19 @@ conditional update on the expected current status, so two racing callers can nev
    conditional update on the status it was found in, so a job started meanwhile runs on.
 
 **Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
-confirmed account. An anonymous user and an account that hasn't confirmed its email get one
-(`PROVISIONAL_QUOTA_LIMIT`), and `GET /v1/me/quota` reports `limit: 1` for them; the runs an anonymous user brings to
-an account at sign-up or sign-in keep counting, so confirming lifts the limit to `QUOTA_LIMIT` without resetting it.
-The free analysis is one per browser, not per anonymous user: signing in deletes the anonymous user, so after signing
-out a new one would get another. Starting an anonymous user's analysis sets the API's own `adlens_free_run` cookie
-(httpOnly, host-only, 7 days) to that user's id, and admission (`GET /v1/admission` and job creation) then asks a
-visitor or any other anonymous user in that browser to sign in (`SIGN_UP_REQUIRED`); the one named may still retry a
-refunded run. Clearing cookies gets around it, which the network's anonymous allowance (`IP_ANON_LIMIT`) still bounds.
+confirmed account. Before an email is confirmed a user gets one analysis in total (`PROVISIONAL_QUOTA_LIMIT`), for
+good: the charge records it as `freeRunId` on the user document, which never leaves with the window, moves with the
+runs onto the account an anonymous user signs up or in with, and is cleared only when that run is refunded. So an
+anonymous run and an unconfirmed run are one analysis between them. `GET /v1/me/quota` reports `QUOTA_LIMIT` to
+everyone but an admin, so the web can show the account's weekly allowance from sign-up on (4 of 5 left after the one
+analysis, while Run asks to confirm the email); the runs an anonymous user brings keep counting, so confirming opens
+the rest of the week's allowance without resetting it.
+The one analysis is also one per browser: signing in deletes the anonymous user, so after signing out a new one (or a
+new unconfirmed account) would get another. Starting any analysis, whoever runs it, sets the API's own
+`adlens_free_run` cookie (httpOnly, host-only, 400 days, the most browsers keep) to that user's id, and admission
+(`GET /v1/admission` and job creation) then refuses a visitor, an anonymous user or an unconfirmed account in that
+browser (`SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`); the one named may still retry a refunded run. Clearing
+cookies gets around it, which the network's anonymous allowance (`IP_ANON_LIMIT`) still bounds.
 Each charged run is stored on the user's Better Auth document (`runs: { id, startedAt, jobId }[]`) and stops counting 7
 days after it started; `GET /v1/me/quota` reports `nextFreeAt`, when the oldest counted run does. A charge is one
 conditional pipeline update on that document: it counts the runs still in the window, drops older ones and appends
@@ -141,7 +146,7 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 | Rule                                                 | Limit per rolling 7 days      | When hit                                                                                   |
 | ---------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
 | Per confirmed account                                | `QUOTA_LIMIT` (5, in `.env`)  | 429 `QUOTA_EXCEEDED`                                                                       |
-| Per anonymous user or unconfirmed account            | 1 (`PROVISIONAL_QUOTA_LIMIT`) | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`                                     |
+| Per user before the email is confirmed, for good     | 1 (`PROVISIONAL_QUOTA_LIMIT`) | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`                                     |
 | Anonymous users and unconfirmed accounts per network | `IP_ANON_LIMIT` (3) in total  | 429 `SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`                                     |
 | Everyone per network, soft                           | `IP_SOFT_LIMIT` (10)          | a Turnstile check for each further analysis: 403 `CHALLENGE_REQUIRED` / `CHALLENGE_FAILED` |
 | Everyone per network, hard                           | `IP_HARD_LIMIT` (30)          | 429 `NETWORK_QUOTA_EXCEEDED`                                                               |
@@ -427,7 +432,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `ANALYZE_JOB_NAME`       | `adlens-analyze`                       | The Cloud Run Job the API executes                                                                                                                               |
 | `ANALYZE_LOCAL`          | `0`                                    | `1`: run each analysis as a local `node dist/worker` child process                                                                                               |
 | `ANALYZE_MAX_RETRIES`    | `2`                                    | Must equal the job's `--max-retries`, so the worker knows its last attempt                                                                                       |
-| `QUOTA_LIMIT`            | — (required, `5` in `.env`)            | Analyses per rolling 7-day window for a confirmed account (anonymous users and unconfirmed accounts get 1)                                                       |
+| `QUOTA_LIMIT`            | — (required, `5` in `.env`)            | Analyses per rolling 7-day window for a confirmed account (before confirmation a user gets 1 in total)                                                           |
 | `IP_ANON_LIMIT`          | `3`                                    | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window                                                                       |
 | `IP_SOFT_LIMIT`          | `10`                                   | Analyses per network before everyone needs a Turnstile check                                                                                                     |
 | `IP_HARD_LIMIT`          | `30`                                   | Analyses per network, for everyone                                                                                                                               |
@@ -605,7 +610,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
   had had the members' 3 a week since 2026-09-28. Clearing cookies gets a new anonymous user, so the per-network
   anonymous allowance (`IP_ANON_LIMIT`, kept at 3 a week so several people on one office or mobile network can each
   try once) stays the real bound. An unconfirmed account is limited the same way: otherwise signing up with any
-  address, which now signs in at once, would skip both limits.
+  address, which now signs in at once, would skip both limits. Since 2026-10-08 the one analysis is shared by the
+  anonymous user and the account and kept for good (`freeRunId`), and any analysis marks the browser: before that, a
+  run before sign-up and one before confirmation made two, and the allowance came back after a week.
 - **Linking moves ownership, not objects.** `jobs.userId` is rewritten and the runs are merged, but the GCS objects stay
   where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge

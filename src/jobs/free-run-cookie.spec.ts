@@ -4,7 +4,7 @@ import { FREE_RUN_COOKIE, readFreeRunUserId, writeFreeRunCookie } from './free-r
 const requestWith = (cookie?: string) => ({ headers: cookie === undefined ? {} : { cookie } }) as Request
 
 describe('free run cookie', () => {
-    it('reads the anonymous user that used the browser’s free analysis among other cookies', () => {
+    it('reads the user that last ran an analysis in the browser among other cookies', () => {
         expect(readFreeRunUserId(requestWith(`a=1; ${FREE_RUN_COOKIE}=user-1; b=2`))).toBe('user-1')
     })
 
@@ -14,7 +14,7 @@ describe('free run cookie', () => {
         expect(readFreeRunUserId(requestWith(`${FREE_RUN_COOKIE}=`))).toBeNull()
     })
 
-    it('keeps it from scripts for the quota window, secure over HTTPS', () => {
+    it('keeps it from scripts for 400 days, secure over HTTPS', () => {
         const cookie = jest.fn()
 
         writeFreeRunCookie({ cookie } as unknown as Response, 'user-1', true)
@@ -24,7 +24,7 @@ describe('free run cookie', () => {
             secure: true,
             sameSite: 'lax',
             path: '/',
-            maxAge: 7 * 24 * 60 * 60 * 1000,
+            maxAge: 400 * 24 * 60 * 60 * 1000,
         })
     })
 })

@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common'
 import { QUOTA_WINDOW_MS, RequestErrorCode } from 'adlens-shared'
 import { Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
+import { UserAccess } from '../common/user-access'
 import { USER_COLLECTION } from '../database/user.doc'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
@@ -134,7 +135,6 @@ describe('QuotaService', () => {
 
         await quota.consume(anonymousId, 'job-1', NOW)
 
-        expect(await quota.get(anonymousId, NOW)).toMatchObject({ used: 1, limit: 1 })
         await expect(quota.consume(anonymousId, 'job-2', NOW)).rejects.toMatchObject({
             status: HttpStatus.TOO_MANY_REQUESTS,
             response: { errorCode: RequestErrorCode.SignUpRequired },
@@ -146,9 +146,64 @@ describe('QuotaService', () => {
 
         await quota.consume(unconfirmedId, 'job-1', NOW)
 
-        expect(await quota.get(unconfirmedId, NOW)).toMatchObject({ used: 1, limit: 1 })
         await expect(quota.consume(unconfirmedId, 'job-2', NOW)).rejects.toMatchObject({
             status: HttpStatus.TOO_MANY_REQUESTS,
+            response: { errorCode: RequestErrorCode.EmailConfirmationRequired },
+        })
+    })
+
+    // The label shows the account's weekly allowance from sign-up on; the one analysis before confirmation is enforced
+    // by the charge and the admission check, not by this limit.
+    it('reports the weekly limit to anonymous users and unconfirmed accounts too', async () => {
+        const anonymousId = await addUser({ isAnonymous: true, emailVerified: false })
+        const unconfirmedId = await addUser({ emailVerified: false })
+
+        await quota.consume(unconfirmedId, 'job-1', NOW)
+
+        expect(await quota.get(anonymousId, NOW)).toMatchObject({ used: 0, limit: LIMIT })
+        expect(await quota.get(unconfirmedId, NOW)).toMatchObject({ used: 1, limit: LIMIT })
+    })
+
+    it('keeps the one analysis before confirmation used for good, past the window', async () => {
+        const unconfirmedId = await addUser({ emailVerified: false })
+
+        await quota.consume(unconfirmedId, 'job-1', NOW)
+
+        await expect(quota.consume(unconfirmedId, 'job-2', new Date(NOW.getTime() + 8 * DAY_MS))).rejects.toMatchObject(
+            { response: { errorCode: RequestErrorCode.EmailConfirmationRequired } },
+        )
+    })
+
+    it('gives the one analysis back when its run is refunded', async () => {
+        const anonymousId = await addUser({ isAnonymous: true, emailVerified: false })
+        const runId = await quota.consume(anonymousId, 'job-1', NOW)
+
+        await quota.refund(anonymousId, runId)
+
+        await expect(quota.consume(anonymousId, 'job-2', NOW)).resolves.toEqual(expect.any(String))
+    })
+
+    it('carries an anonymous user’s used analysis onto the account it signs up with', async () => {
+        const anonymousId = await addUser({ isAnonymous: true, emailVerified: false })
+        const accountId = await addUser({ emailVerified: false })
+
+        await quota.consume(anonymousId, 'job-1', NOW)
+        await quota.transfer(anonymousId, accountId)
+
+        await expect(quota.consume(accountId, 'job-2', new Date(NOW.getTime() + 8 * DAY_MS))).rejects.toMatchObject({
+            response: { errorCode: RequestErrorCode.EmailConfirmationRequired },
+        })
+    })
+
+    it('refuses in advance exactly what a charge would refuse', async () => {
+        const anonymousId = await addUser({ isAnonymous: true, emailVerified: false })
+        const unconfirmedId = await addUser({ emailVerified: false })
+
+        await quota.consume(unconfirmedId, 'job-1', NOW)
+
+        await expect(quota.check(userId, NOW)).resolves.toBe(UserAccess.Member)
+        await expect(quota.check(anonymousId, NOW)).resolves.toBe(UserAccess.Anonymous)
+        await expect(quota.check(unconfirmedId, new Date(NOW.getTime() + 8 * DAY_MS))).rejects.toMatchObject({
             response: { errorCode: RequestErrorCode.EmailConfirmationRequired },
         })
     })
