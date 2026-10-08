@@ -58,7 +58,7 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>
 
-export const validateEnv = (raw: Record<string, unknown>): Env => {
+const validateEnv = (raw: Record<string, unknown>): Env => {
     const result = envSchema.safeParse(raw)
 
     if (!result.success) {

@@ -33,7 +33,7 @@ type QuotaFields = Pick<UserExtras, 'isAdmin' | 'isAnonymous' | 'emailVerified' 
 const countRunsSince = (user: QuotaFields | null, cutoff: number): number =>
     (user?.runs ?? []).filter((run) => run.startedAt.getTime() > cutoff).length
 
-export const toQuotaRefusal = (access: UserAccess): ApiException =>
+const toQuotaRefusal = (access: UserAccess): ApiException =>
     isProvisional(access)
         ? toProvisionalRefusal(access)
         : new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.QuotaExceeded, 'Analysis limit reached')
