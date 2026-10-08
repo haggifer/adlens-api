@@ -466,6 +466,9 @@ npm run test:e2e  # Supertest against the Nest app with fake storage, prober, di
 npm run test:auth # after a build: sign-up, verification, reset, deletion, anonymous linking and rate limits against the real Better Auth
 ```
 
+`npm run knip` (also in CI) reports unused files, exports and dependencies, which ESLint can't see across files. Its
+config (`knip.json`) lists the three entry points (`main.ts`, `worker.ts`, `cleanup.ts`); add any new one there.
+
 The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, because the guarantees that matter
 (conditional transitions, concurrent charges, at-most-once refunds) live in query semantics that mocks can't prove.
 

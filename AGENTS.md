@@ -9,6 +9,7 @@ the job lifecycle, the environment and the design decisions behind them.
 npm run build            # nest build → dist/ (the API and the worker)
 npm run start:dev        # API with watch; keeps dist/ current for the local worker (ANALYZE_LOCAL=1)
 npm run lint
+npm run knip             # unused files, exports and dependencies (knip.json; list new entry points there)
 npx tsc --noEmit -p tsconfig.json
 npm test                 # unit tests (real MongoDB via mongodb-memory-server)
 npm run test:e2e         # Supertest against the app with fake storage, prober, dispatcher and auth

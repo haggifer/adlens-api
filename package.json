@@ -14,6 +14,7 @@
         "start:worker": "node dist/worker",
         "start:cleanup": "node dist/cleanup",
         "lint": "eslint .",
+        "knip": "knip",
         "format": "prettier --write .",
         "test": "jest",
         "test:e2e": "jest --config test/jest-e2e.json",
@@ -53,12 +54,11 @@
         "@types/supertest": "^6.0.2",
         "eslint": "^9.0.0",
         "jest": "^29.7.0",
+        "knip": "^5.88.1",
         "mongodb-memory-server": "^10.4.3",
         "prettier": "^3.9.5",
-        "source-map-support": "^0.5.21",
         "supertest": "^7.0.0",
         "ts-jest": "^29.2.5",
-        "tsconfig-paths": "^4.2.0",
         "typescript": "^5.7.0",
         "typescript-eslint": "^8.0.0"
     }
