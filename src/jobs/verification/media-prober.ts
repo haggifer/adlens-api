@@ -20,8 +20,20 @@ interface ProbeStream {
 
 const PROBE_TIMEOUT_MS = 30 * 1000
 
-// ffprobe's wording when it reached the input but couldn't read it as media.
-const UNDECODABLE_PATTERN = /invalid data found|moov atom not found|could not find codec|end of file/i
+// ffprobe detects the format from the content, whatever the declared type: a playlist or a DASH manifest uploaded as
+// MP4 would make it fetch the URLs inside (from our network) and measure another file than the one Gemini reads. Only
+// the containers of the accepted video types are read.
+const FORMAT_WHITELIST = 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm'
+
+// ffprobe's wording when it reached the input but couldn't read it as media, or read a format off the list.
+const UNDECODABLE_PATTERN =
+    /invalid data found|moov atom not found|could not find codec|end of file|format not on whitelist/i
+
+// ffprobe starts its message with the input, and a signed read URL in a log is a working credential for 15 minutes.
+// The query holds the signature; the rest names the object.
+const SIGNED_QUERY_PATTERN = /(https?:\/\/[^\s?]+)\?\S*?(?=:\s|\s|$)/g
+
+const redactSignedUrls = (text: string) => text.replace(SIGNED_QUERY_PATTERN, '$1')
 
 // Phones store a portrait video as landscape frames plus a rotation to apply on playback. Newer ffprobe reports it as
 // the display matrix's rotation; older files and builds as the legacy `rotate` tag.
@@ -66,8 +78,20 @@ export class MediaProber {
         return new Promise((resolve, reject) => {
             const proc = spawn(
                 ffprobeStatic.path,
-                ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', input],
-                { timeout: PROBE_TIMEOUT_MS },
+                [
+                    '-v',
+                    'error',
+                    '-format_whitelist',
+                    FORMAT_WHITELIST,
+                    '-print_format',
+                    'json',
+                    '-show_format',
+                    '-show_streams',
+                    input,
+                ],
+                // Not the API's environment, which holds its secrets: ffprobe runs on user content. On Windows, Node
+                // adds the system variables a process needs itself.
+                { timeout: PROBE_TIMEOUT_MS, env: { PATH: process.env.PATH } },
             )
             let stdout = ''
             let stderr = ''
@@ -81,7 +105,7 @@ export class MediaProber {
             proc.on('error', reject)
             proc.on('close', (code) => {
                 if (code !== 0) {
-                    const message = stderr.trim() || `ffprobe exited with ${code}`
+                    const message = redactSignedUrls(stderr.trim()) || `ffprobe exited with ${code}`
 
                     reject(UNDECODABLE_PATTERN.test(stderr) ? new UndecodableMediaError(message) : new Error(message))
                     return

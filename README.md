@@ -583,7 +583,10 @@ Why the system is built this way, and what was rejected. Decisions that span the
   loop into an 18k-token malformed reply in testing.
 - **Verification trusts the stored object, not the client.** Size and type come from object metadata and ffprobe, and
   the signed upload URL binds the exact declared size and can only create the object, never overwrite it. Only a definite problem with the file deletes it; storage or
-  network trouble ends the job as `VIDEO_CHECK_FAILED` and leaves the file to the daily cleanup.
+  network trouble ends the job as `VIDEO_CHECK_FAILED` and leaves the file to the daily cleanup. ffprobe reads only
+  the accepted containers (`-format_whitelist`; a playlist or manifest uploaded as MP4 would otherwise make it fetch
+  the URLs inside, and is rejected as unreadable instead), runs with `PATH` as its only environment (never the API's
+  secrets), and its errors are logged without the signed URL's query, which is a working read credential.
 - **A failed start ends the job; it never goes back to `pending`.** Until 2026-10-02 a missing upload, a storage or
   prober failure, a sample gone, a refused charge or a worker that couldn't be started put the job back to `pending` so
   the same job could be started again. The web never does that (it creates a new job for every run), so those jobs
