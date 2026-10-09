@@ -1,4 +1,4 @@
-import type { AnalysisSettings } from 'adlens-shared'
+import type { AnalysisSettings, TimeRange } from 'adlens-shared'
 import { z } from 'zod'
 import { type AdvisoryProjection, type ModelFinding, resolveSettings, type RuleProjection } from '../../rules'
 
@@ -51,9 +51,19 @@ const describeCampaign = (settings: AnalysisSettings): string => {
     ].join('\n')
 }
 
+// The shared time range accepts an end at or before its start, which a report can't show as a range; the moment it
+// starts still holds.
+const toTimeRange = (startS: number | undefined, endS: number | undefined): TimeRange | undefined => {
+    if (startS === undefined) {
+        return undefined
+    }
+
+    return endS !== undefined && endS > startS ? { startS, endS } : { startS }
+}
+
 const toModelFinding = ({ startS, endS, ...finding }: ParsedFinding): ModelFinding => ({
     ...finding,
-    time: startS === undefined ? undefined : { startS, endS },
+    time: toTimeRange(startS, endS),
 })
 
 // Structured-output contract for the model, generated from the same Zod schema that parses the reply.

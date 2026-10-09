@@ -122,6 +122,21 @@ describe('parseReviewOutput', () => {
         expect(parseReviewOutput(JSON.stringify({ transcript: [], findings: [], advisories: [] })).transcript).toBe('')
     })
 
+    it('keeps a finding’s time range, and drops an end that doesn’t come after its start', () => {
+        const finding = (startS: number, endS: number) => ({ id: 'r', verdict: 'fail', evidence: 'e', startS, endS })
+        const text = JSON.stringify({
+            transcript: [],
+            findings: [finding(3, 7), finding(5, 5), finding(9, 4)],
+            advisories: [],
+        })
+
+        expect(parseReviewOutput(text).findings.map((parsed) => parsed.time)).toEqual([
+            { startS: 3, endS: 7 },
+            { startS: 5 },
+            { startS: 9 },
+        ])
+    })
+
     it('rejects a decimal finding time', () => {
         const text = JSON.stringify({
             transcript: [],
