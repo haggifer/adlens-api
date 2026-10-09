@@ -11,6 +11,7 @@ import { format } from 'node:util'
 import { describeError } from '../common/error-message'
 import { allowedWebOrigins } from '../config/web-origins'
 import { USER_COLLECTION } from '../database/user.doc'
+import { moveFreeRunCookie } from '../jobs/free-run-cookie'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
 import { ACCOUNT_LINK_FAILED, EMAIL_MISMATCH, EMAIL_NOT_SENT, SIGN_IN_REQUIRED } from './auth-error-codes'
@@ -155,6 +156,8 @@ export const createAuth = ({
     onLinkAnonymous,
 }: AuthOptions) => {
     const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
+    // Secure only over HTTPS, as JobsController writes it: locally the API runs on plain http://localhost.
+    const isSecureCookie = new URL(baseURL).protocol === 'https:'
     const rateLimits = createRateLimitStorage(db, secret)
 
     // Fails open: a database blip must not stop a real user's email.
@@ -290,7 +293,7 @@ export const createAuth = ({
                 // An APIError stops the delete, so a failed move leaves the anonymous user and its data in place.
                 // Sign-up and sign-in link (they need the visitor's new password or own credentials); /verify-email
                 // never does, since it never creates a session.
-                onLinkAccount: async ({ anonymousUser, newUser }) => {
+                onLinkAccount: async ({ anonymousUser, newUser, ctx }) => {
                     const fromId = anonymousUser.user.id
                     const toId = newUser.user.id
 
@@ -303,6 +306,8 @@ export const createAuth = ({
                             message: 'The earlier analyses could not be moved',
                         })
                     }
+
+                    moveFreeRunCookie(ctx, fromId, toId, isSecureCookie)
                 },
             }),
         ],

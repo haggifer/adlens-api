@@ -122,8 +122,11 @@ The one analysis is also one per browser: signing in deletes the anonymous user,
 new unconfirmed account) would get another. Starting any analysis, whoever runs it, sets the API's own
 `adlens_free_run` cookie (httpOnly, host-only, 400 days, the most browsers keep) to that user's id, and admission
 (`GET /v1/admission` and job creation) then refuses a visitor, an anonymous user or an unconfirmed account in that
-browser (`SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`); the one named may still retry a refunded run. Clearing
-cookies gets around it, which the network's anonymous allowance (`IP_ANON_LIMIT`) still bounds.
+browser (`SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`), unless that run was refunded: a cookie naming an
+anonymous user or unconfirmed account without a `freeRunId` holds nothing, while one naming a user that is gone or an
+account that was confirmed (whose runs never record one) still counts. Linking moves the cookie to the account when it
+named the anonymous user, as the run moves. The one named may still retry a refunded run. Clearing cookies gets around
+it, which the network's anonymous allowance (`IP_ANON_LIMIT`) still bounds.
 Each charged run is stored on the user's Better Auth document (`runs: { id, startedAt, jobId }[]`) and stops counting 7
 days after it started; `GET /v1/me/quota` reports `nextFreeAt`, when the oldest counted run does. A charge is one
 conditional pipeline update on that document: it counts the runs still in the window, drops older ones and appends

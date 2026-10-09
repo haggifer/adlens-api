@@ -5,6 +5,7 @@ import { JobErrorCode, JobStatus, MAX_DURATION_S, RequestErrorCode, VideoMimeTyp
 import { type Connection, type Model, Types } from 'mongoose'
 import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
+import { AccountDataService } from '../src/account/account-data.service'
 import { AnalysisDispatcher } from '../src/analysis/dispatch/analysis-dispatcher'
 import { AppModule } from '../src/app.module'
 import { AUTH_INDEXES } from '../src/auth/auth-indexes'
@@ -20,6 +21,7 @@ import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
 import { USER_COLLECTION } from '../src/database/user.doc'
 import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
 import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
+import { JobLifecycle } from '../src/jobs/job-lifecycle.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { JobEventsService } from '../src/realtime/job-events.service'
@@ -1135,6 +1137,68 @@ describe('Jobs API (e2e)', () => {
 
                 await createWithCookie(anonymous, '203.0.113.33', anonymous).expect(201)
                 await createWithCookie(MEMBER, '203.0.113.33', anonymous).expect(201)
+            })
+
+            // The run the cookie names: started, then failed and refunded.
+            const runAndRefund = async (userId: string, network: string): Promise<string> => {
+                const created = await createFrom(userId, network, { challengeToken: 'pass' }).expect(201)
+                const jobId = created.body.job.id
+
+                await analyzeFrom(userId, network, jobId).expect(202)
+                await app.get(JobLifecycle).fail(jobId, JobErrorCode.AnalysisFailed, 'failed')
+
+                return jobId
+            }
+
+            const admissionWithCookie = (network: string, freeRunUserId: string, userId?: string) =>
+                request(app.getHttpServer())
+                    .get('/v1/admission')
+                    .set({ ...(userId ? as(userId) : {}), ...from(network), ...usedBy(freeRunUserId) })
+
+            it('lets the browser run again once the anonymous run it remembers was refunded, not before', async () => {
+                const anonymous = await addAnonymous()
+                const created = await createFrom(anonymous, '203.0.113.35', { challengeToken: 'pass' }).expect(201)
+
+                await analyzeFrom(anonymous, '203.0.113.35', created.body.job.id).expect(202)
+                const held = await admissionWithCookie('203.0.113.35', anonymous, await addAnonymous()).expect(429)
+                await app.get(JobLifecycle).fail(created.body.job.id, JobErrorCode.AnalysisFailed, 'failed')
+
+                await admissionWithCookie('203.0.113.35', anonymous).expect(204)
+                await createWithCookie(await addAnonymous(), '203.0.113.35', anonymous).expect(201)
+                expect(held.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
+            })
+
+            it('admits the account an anonymous user with a refunded run linked to, which the cookie then names', async () => {
+                const anonymous = await addAnonymous()
+                const account = await addUnconfirmed()
+
+                await runAndRefund(anonymous, '203.0.113.36')
+                // What linking does: the account adopts the anonymous user's data, the anonymous user is deleted and
+                // the cookie is moved to the account (auth-flow tests cover the move through Better Auth).
+                await app.get(AccountDataService).adopt(anonymous, account)
+                await app
+                    .get<Connection>(getConnectionToken())
+                    .collection(USER_COLLECTION)
+                    .deleteOne({ _id: new Types.ObjectId(anonymous) })
+
+                await admissionWithCookie('203.0.113.36', account, account).expect(204)
+                await admissionWithCookie('203.0.113.36', account, await addAnonymous()).expect(204)
+            })
+
+            it('still counts a refunded run of a confirmed account, or of a user that is gone', async () => {
+                const member = await addUser({ isAnonymous: false, emailVerified: true })
+                const gone = await addAnonymous()
+
+                await runAndRefund(member, '203.0.113.37')
+                await runAndRefund(gone, '203.0.113.38')
+                await app
+                    .get<Connection>(getConnectionToken())
+                    .collection(USER_COLLECTION)
+                    .deleteOne({ _id: new Types.ObjectId(gone) })
+
+                await admissionWithCookie('203.0.113.37', member, await addAnonymous()).expect(429)
+                await admissionWithCookie('203.0.113.38', gone, await addAnonymous()).expect(429)
+                await admissionWithCookie('203.0.113.38', 'not-an-id', await addAnonymous()).expect(429)
             })
         })
 

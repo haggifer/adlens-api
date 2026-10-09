@@ -1,23 +1,36 @@
 import { Injectable } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose'
-import type { Connection } from 'mongoose'
+import { type Connection, Types } from 'mongoose'
 import { challengeFailed, ChallengeVerifier } from '../challenge/challenge-verifier'
-import { isProvisional, readUserAccess, toProvisionalRefusal, UserAccess } from '../common/user-access'
+import {
+    getUserAccess,
+    isProvisional,
+    readUserAccess,
+    toProvisionalRefusal,
+    USER_ACCESS_PROJECTION,
+    UserAccess,
+} from '../common/user-access'
+import { USER_COLLECTION, type UserExtras } from '../database/user.doc'
 import type { IpSource } from '../ip-quota/client-ip'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import { checkIpRules, type IpCharge, IpVerdict, toIpRefusal } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
 
+type FreeRunHolder = Pick<UserExtras, 'isAdmin' | 'isAnonymous' | 'emailVerified' | 'freeRunId'>
+
 interface Admission {
     hasPassedChallenge: boolean
 }
 
-// One analysis per browser before an email is confirmed: once anyone ran one there (freeRunUserId), a visitor, an
-// anonymous user or an unconfirmed account in that browser must sign up or confirm. The user who ran it may still retry
-// a run that was refunded.
-const isFreeRunUsedByAnother = (access: UserAccess, userId: string | null, freeRunUserId: string | null) =>
-    isProvisional(access) && freeRunUserId !== null && freeRunUserId !== userId
+const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i
+
+// A provisional user's charge records its run as freeRunId and a refund clears it, so a provisional user without one
+// holds no run: the analysis the cookie remembers was refunded. Anyone else counts: a user that is gone (an anonymous
+// user deleted after a week, or linked from another browser), or an account that was confirmed, whose runs never
+// record a freeRunId; any analysis there uses up the browser's one.
+const isRunHeldBy = (holder: FreeRunHolder | null): boolean =>
+    !holder || !isProvisional(getUserAccess(holder)) || Boolean(holder.freeRunId)
 
 // Whether a user may start one more analysis from their network. Admins skip every network rule, as they skip the
 // user cap; an unconfirmed account meets the rules of an anonymous user.
@@ -41,9 +54,7 @@ export class AnalysisAdmission {
     ): Promise<Admission> {
         const access = await this.quota.check(userId)
 
-        if (isFreeRunUsedByAnother(access, userId, freeRunUserId)) {
-            throw toProvisionalRefusal(access)
-        }
+        await this.checkFreeRun(access, userId, freeRunUserId)
 
         if (access === UserAccess.Admin) {
             return { hasPassedChallenge: false }
@@ -73,9 +84,7 @@ export class AnalysisAdmission {
     async preview(userId: string | null, ipSource: IpSource, freeRunUserId: string | null): Promise<void> {
         const access = userId ? await this.quota.check(userId) : UserAccess.Anonymous
 
-        if (isFreeRunUsedByAnother(access, userId, freeRunUserId)) {
-            throw toProvisionalRefusal(access)
-        }
+        await this.checkFreeRun(access, userId, freeRunUserId)
 
         if (access === UserAccess.Admin) {
             return
@@ -97,6 +106,32 @@ export class AnalysisAdmission {
         }
 
         return { bucketKey: this.network.resolve(ipSource).bucketKey, access, hasPassedChallenge }
+    }
+
+    // One analysis per browser before an email is confirmed: once anyone ran one there (freeRunUserId), a visitor, an
+    // anonymous user or an unconfirmed account in that browser must sign up or confirm, unless that run was refunded.
+    // The user who ran it may retry a refunded run; the quota check stops them otherwise.
+    private async checkFreeRun(access: UserAccess, userId: string | null, freeRunUserId: string | null): Promise<void> {
+        if (!isProvisional(access) || freeRunUserId === null || freeRunUserId === userId) {
+            return
+        }
+
+        const holder = await this.findFreeRunHolder(freeRunUserId)
+
+        if (isRunHeldBy(holder)) {
+            throw toProvisionalRefusal(access)
+        }
+    }
+
+    // null for a value that names no user, a hand-edited cookie among them.
+    private findFreeRunHolder(userId: string): Promise<FreeRunHolder | null> {
+        if (!OBJECT_ID_PATTERN.test(userId)) {
+            return Promise.resolve(null)
+        }
+
+        return this.connection
+            .collection<UserExtras>(USER_COLLECTION)
+            .findOne({ _id: new Types.ObjectId(userId) }, { projection: { ...USER_ACCESS_PROJECTION, freeRunId: 1 } })
     }
 
     private async checkNetwork(

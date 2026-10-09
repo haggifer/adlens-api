@@ -619,6 +619,33 @@ test('deleting an account also deletes the videos it adopted from an anonymous s
     assert.equal(purgedPrefixes.at(-1), `users/${linker._id.toString()}/`)
 })
 
+test("linking names the account in the browser's free-run cookie when it named the anonymous user", async () => {
+    const freeRunCookieOf = (res) => res.headers.getSetCookie().find((cookie) => cookie.startsWith('adlens_free_run='))
+    const ran = await signInAnonymously()
+    const other = await signInAnonymously()
+    const moved = await post(
+        '/api/auth/sign-up/email',
+        { name: 'Flow', email: 'cookie-mover@example.com', password: 'first-password' },
+        `${ran.cookie}; adlens_free_run=${ran.user.id}`,
+    )
+    const kept = await post(
+        '/api/auth/sign-up/email',
+        { name: 'Flow', email: 'cookie-keeper@example.com', password: 'first-password' },
+        `${other.cookie}; adlens_free_run=${ran.user.id}`,
+    )
+    const mover = await storedUser('cookie-mover@example.com')
+
+    assert.equal(moved.status, 200)
+    assert.match(
+        freeRunCookieOf(moved),
+        new RegExp(`^adlens_free_run=${mover._id.toString()};.*Max-Age=${400 * 24 * 60 * 60}`),
+    )
+    assert.match(freeRunCookieOf(moved), /HttpOnly/i)
+    assert.match(freeRunCookieOf(moved), /SameSite=Lax/i)
+    assert.equal(kept.status, 200)
+    assert.equal(freeRunCookieOf(kept), undefined)
+})
+
 test('signing in to an unconfirmed account from an anonymous session moves its analyses and runs, and deletes it', async () => {
     const { ObjectId } = require('mongodb')
     const email = 'returning@example.com'
