@@ -34,7 +34,7 @@ export class ClientNetworkResolver {
 
     resolve(source: IpSource): ClientNetwork {
         // The entry count, never an address: enough to confirm the header's shape in production logs.
-        this.logger.log(`x-forwarded-for entries: ${countForwardedEntries(source.forwardedFor)}`)
+        this.logger.debug(`x-forwarded-for entries: ${countForwardedEntries(source.forwardedFor)}`)
 
         const ip = pickClientIp(source, this.trustedHops)
         const bucket = (ip && ipBucket(ip)) ?? UNKNOWN_NETWORK

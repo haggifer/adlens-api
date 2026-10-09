@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { configStub } from '../testing/config-stub'
 import { ClientNetworkResolver } from './client-network.resolver'
 
@@ -34,6 +35,17 @@ describe('ClientNetworkResolver', () => {
         expect(missing.ip).toBeNull()
         expect(missing.bucketKey).toBe(unreadable.bucketKey)
         expect(real.bucketKey).not.toBe(unreadable.bucketKey)
+    })
+
+    it('logs the header’s entry count only at debug level, since the public admission check resolves on every call', () => {
+        const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined)
+        const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+
+        resolver.resolve({ forwardedFor: '198.51.100.1, 203.0.113.7', socketAddress: undefined })
+
+        expect(log).not.toHaveBeenCalled()
+        expect(debug).toHaveBeenCalledWith('x-forwarded-for entries: 2')
+        jest.restoreAllMocks()
     })
 
     it('refuses to start without the secret the key is derived from', () => {

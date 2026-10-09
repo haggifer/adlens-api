@@ -160,7 +160,7 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 - **The network** is the IPv4 address or the IPv6 /64 prefix (an IPv4-mapped address counts as IPv4). The address is
   the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` from the right (1 on Cloud Run: the one Google's front end appends),
   or the socket address when the header is absent; never the leftmost entry, which the client controls
-  ([`ClientNetworkResolver`](src/ip-quota/client-network.resolver.ts)). Each lookup logs only the header's entry count.
+  ([`ClientNetworkResolver`](src/ip-quota/client-network.resolver.ts)). Each lookup logs only the header's entry count, at debug level.
 - **Storage** ([`IpQuotaService`](src/ip-quota/ip-quota.service.ts)): one `ip_quotas` document per network, keyed by
   `HMAC-SHA256(key, network)`, the key derived from `BETTER_AUTH_SECRET` with HKDF. It holds
   `runs: { id, startedAt, jobId, anonymous }[]` (`anonymous`: counted against the anonymous allowance) and a TTL `expiresAt` 7 days after the last charge. The address itself
