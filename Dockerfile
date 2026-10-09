@@ -2,6 +2,9 @@
 # overrides the command to `node dist/worker`, the daily cleanup job to `node dist/cleanup`.
 FROM node:24-slim AS build
 WORKDIR /app
+# The build runs no tests: without this, mongodb-memory-server's postinstall downloads a ~100 MB MongoDB binary on every
+# uncached build.
+ENV MONGOMS_DISABLE_POSTINSTALL=1
 COPY package*.json ./
 RUN npm ci
 COPY . .
