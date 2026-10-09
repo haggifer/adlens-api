@@ -280,6 +280,17 @@ describe('Jobs API (e2e)', () => {
         expect(dispatch).not.toHaveBeenCalled()
     })
 
+    it('still answers a rejected video with its 422 when deleting the upload fails', async () => {
+        const jobId = await createJob()
+
+        probe = { ...probe, durationS: MAX_DURATION_S + 1 }
+        deleteObject.mockRejectedValueOnce(new Error('GCS 503'))
+
+        const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(422)
+
+        expect(res.body.errorCode).toBe(JobErrorCode.VideoTooLong)
+    })
+
     it.each([
         ['storage', () => (storedObject = new Error('GCS 503'))],
         ['the prober', () => (probeFailure = new Error('Connection reset by peer'))],

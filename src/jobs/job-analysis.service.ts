@@ -156,12 +156,21 @@ export class JobAnalysisService {
                 )
             case 'rejected':
                 await this.lifecycle.failStart(jobId, outcome.errorCode)
-                await this.storage.delete(job.file.path)
+                await this.tryDeleteUpload(jobId, job.file.path)
                 throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     outcome.errorCode,
                     REJECTION_MESSAGES[outcome.errorCode],
                 )
+        }
+    }
+
+    // The user still learns why the video was refused; the daily cleanup deletes an error job's video later.
+    private async tryDeleteUpload(jobId: string, path: string): Promise<void> {
+        try {
+            await this.storage.delete(path)
+        } catch (err) {
+            this.logger.error(`could not delete the rejected upload of job ${jobId}: ${describeError(err)}`)
         }
     }
 }
