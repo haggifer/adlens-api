@@ -56,6 +56,9 @@ interface RuleFilter {
 type MetadataVerdict = Pick<MetadataCheck, 'verdict' | 'detail'>
 
 const ASPECT_RATIO_TOLERANCE = 0.02
+// Encoders round a video to whole frames and containers add a few milliseconds, so a 6-second bumper probes at 6.02 to
+// 6.04 s; a tenth of a second covers that without letting a visibly longer video through.
+const DURATION_TOLERANCE_S = 0.1
 // Decimal megabytes, as the platforms state their file-size limits.
 const BYTES_PER_MB = 1000 * 1000
 
@@ -87,7 +90,12 @@ const getAspectRatio = (media: JobMedia): number | null =>
     media.width === undefined || media.height === undefined ? null : media.width / media.height
 
 // "30.4 seconds": one decimal at most, none for whole seconds.
-const formatSeconds = (seconds: number) => `${Number(seconds.toFixed(1))} seconds`
+const formatSeconds = (seconds: number, decimals = 1) => `${Number(seconds.toFixed(decimals))} seconds`
+
+// Two decimals when one would round the duration to the limit itself, so "It’s 6 seconds long" never sits next to a
+// 6-second limit it was measured against as different.
+const formatDuration = (seconds: number, limit: number) =>
+    formatSeconds(seconds, Number(seconds.toFixed(1)) === limit ? 2 : 1)
 
 const formatSize = (media: JobMedia) => `${media.width}×${media.height}`
 
@@ -144,16 +152,16 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
 
     switch (rule.checkType) {
         case 'duration_max': {
-            const length = `It’s ${formatSeconds(media.durationS)} long`
+            const length = `It’s ${formatDuration(media.durationS, value)} long`
 
-            return media.durationS > value
+            return media.durationS > value + DURATION_TOLERANCE_S
                 ? { verdict: 'fail', detail: `${length}, longer than the ${formatSeconds(value)} allowed.` }
                 : { verdict: 'pass', detail: `${length}, within the ${formatSeconds(value)} allowed.` }
         }
         case 'duration_min': {
-            const length = `It’s ${formatSeconds(media.durationS)} long`
+            const length = `It’s ${formatDuration(media.durationS, value)} long`
 
-            return media.durationS < value
+            return media.durationS < value - DURATION_TOLERANCE_S
                 ? { verdict: 'fail', detail: `${length}, shorter than the ${formatSeconds(value)} required.` }
                 : { verdict: 'pass', detail: `${length}, at least the ${formatSeconds(value)} required.` }
         }

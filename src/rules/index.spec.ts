@@ -159,11 +159,39 @@ describe('evaluateMetadataRules', () => {
 
     const verdictOf = (ruleId: string, media: Partial<JobMedia>) => checkOf(ruleId, media).verdict
 
-    it('passes a duration at its limits and fails one past them', () => {
+    it('passes a duration within a tenth of a second of its limits and fails one further past them', () => {
         expect(verdictOf('amazon.creative_spec.video_max_length', { durationS: 45 })).toBe('pass')
-        expect(verdictOf('amazon.creative_spec.video_max_length', { durationS: 45.1 })).toBe('fail')
+        expect(verdictOf('amazon.creative_spec.video_max_length', { durationS: 45.1 })).toBe('pass')
+        expect(verdictOf('amazon.creative_spec.video_max_length', { durationS: 45.11 })).toBe('fail')
         expect(verdictOf('amazon.creative_spec.video_min_length', { durationS: 6 })).toBe('pass')
-        expect(verdictOf('amazon.creative_spec.video_min_length', { durationS: 5.9 })).toBe('fail')
+        expect(verdictOf('amazon.creative_spec.video_min_length', { durationS: 5.9 })).toBe('pass')
+        expect(verdictOf('amazon.creative_spec.video_min_length', { durationS: 5.89 })).toBe('fail')
+    })
+
+    it('lets a bumper the encoder made a few frames long pass, and a video a few frames short too', () => {
+        const bumper = ruleSet.rules.find((candidate) => candidate.id === 'youtube.creative_spec.bumper_duration')!
+        const [check] = evaluateMetadataRules(ruleSet, [bumper], { ...MEDIA, durationS: 6.05 }, [])
+
+        expect(check).toMatchObject({
+            verdict: 'pass',
+            detail: 'It’s 6.05 seconds long, within the 6 seconds allowed.',
+        })
+        expect(checkOf('amazon.creative_spec.video_min_length', { durationS: 5.95 })).toMatchObject({
+            verdict: 'pass',
+            detail: 'It’s 5.95 seconds long, at least the 6 seconds required.',
+        })
+    })
+
+    it('shows two decimals only when one would read as the limit itself', () => {
+        expect(checkOf('amazon.creative_spec.video_max_length', { durationS: 44.96 }).detail).toBe(
+            'It’s 44.96 seconds long, within the 45 seconds allowed.',
+        )
+        expect(checkOf('amazon.creative_spec.video_max_length', { durationS: 45 }).detail).toBe(
+            'It’s 45 seconds long, within the 45 seconds allowed.',
+        )
+        expect(checkOf('amazon.creative_spec.video_max_length', { durationS: 45.14 }).detail).toBe(
+            'It’s 45.1 seconds long, longer than the 45 seconds allowed.',
+        )
     })
 
     it('checks the height against the minimum, and says so when the height is unknown', () => {

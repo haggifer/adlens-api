@@ -360,7 +360,8 @@ rules are then routed by `modality`:
   names only Meta and Meta's placements on a Meta-only run; none for a spec that binds every placement), the rule as
   a sentence (`check`), and a `detail`
   sentence about the video ("It’s 30.4 seconds long, longer than the 6 seconds allowed."), so the report can say which
-  placement the video won't work for;
+  placement the video won't work for. Durations are compared with a 0.1 s tolerance (a 6-second bumper probes at
+  6.02–6.04 s), and shown with two decimals when one would round them to the limit;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
   source link are attached back by id, and ids the model invents are dropped;
 - `out_of_creative` → an advisory checklist, never judged: the model only names the advisories whose subject the ad
