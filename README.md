@@ -433,6 +433,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `MONGODB_URI`            | required                               | Atlas connection string (Mongoose, Better Auth, Change Stream)                                                                                                   |
 | `GOOGLE_CLOUD_PROJECT`   | required                               | GCP project for Vertex and Cloud Run                                                                                                                             |
 | `STORAGE_BUCKET`         | required                               | The uploads bucket                                                                                                                                               |
+| `PUBLIC_MEDIA_BUCKET`    | —                                      | Publicly readable bucket of demo and sample videos, served at their plain address; unset, they are signed                                                        |
 | `BETTER_AUTH_SECRET`     | required by the API                    | Better Auth signing secret                                                                                                                                       |
 | `BETTER_AUTH_URL`        | `http://localhost:8080`                | The API's own public URL                                                                                                                                         |
 | `WEB_ORIGIN`             | `http://localhost:3000`                | Web origin for CORS, Socket.IO, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
@@ -640,6 +641,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
   address, which now signs in at once, would skip both limits. Since 2026-10-08 the one analysis is shared by the
   anonymous user and the account and kept for good (`freeRunId`), and any analysis marks the browser: before that, a
   run before sign-up and one before confirmation made two, and the allowance came back after a week.
+- **Demo and sample videos live in a public bucket.** They're public content, so `GET /v1/demos` and `GET /v1/samples`
+  answer their plain address in `PUBLIC_MEDIA_BUCKET` instead of a 15-minute signed URL: no IAM `signBlob` call per
+  video per request, no player failing after 15 minutes on the page, and a stable URL browsers can cache. It's a
+  separate bucket because GCS refuses a public grant limited to a prefix ("Conditions are not allowed on public
+  resources", tested 2026-10-09) and the uploads bucket holds every user's video. A sample job's replay URL follows its
+  file's bucket the same way; everything else is still signed against its own bucket.
 - **Linking moves ownership, not objects.** `jobs.userId` is rewritten and the runs are merged, but the GCS objects stay
   where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge

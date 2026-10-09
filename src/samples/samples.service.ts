@@ -15,7 +15,8 @@ export class SamplesService {
         private readonly storage: StorageService,
     ) {}
 
-    // Published samples in display order, each with a short-lived preview URL; storage paths stay server-side.
+    // Published samples in display order, each with a preview URL (public once moved to the public media bucket);
+    // storage paths stay server-side.
     async list(): Promise<SampleListResponse> {
         const samples = await this.model.find({ isPublished: true }).sort({ order: 1, _id: 1 }).lean<StoredSample[]>()
         const listed = await Promise.all(samples.map((sample) => this.toPublicSample(sample)))
@@ -45,7 +46,7 @@ export class SamplesService {
     }
 
     private async toPublicSample(sample: StoredSample): Promise<Sample> {
-        const { url } = await this.storage.createReadUrl(sample.file.path)
+        const { url } = await this.storage.createFileReadUrl(sample.file)
 
         return {
             id: sample._id.toString(),

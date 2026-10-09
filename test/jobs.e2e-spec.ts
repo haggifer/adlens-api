@@ -79,6 +79,10 @@ describe('Jobs API (e2e)', () => {
                     url: 'https://storage.googleapis.com/signed-read',
                     expiresAt: new Date(),
                 }),
+                createFileReadUrl: async () => ({
+                    url: 'https://storage.googleapis.com/signed-read',
+                    expiresAt: new Date(),
+                }),
                 getObjectInfo: async () => {
                     if (storedObject instanceof Error) {
                         throw storedObject

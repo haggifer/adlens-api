@@ -20,6 +20,8 @@ const envSchema = z.object({
     GCP_REGION: z.string().default('europe-west1'),
     STORAGE_BUCKET: z.string().min(1),
     STORAGE_KEY_FILE: z.string().optional(),
+    // The publicly readable bucket demo and sample videos live in; unset, they're signed like any other object.
+    PUBLIC_MEDIA_BUCKET: z.string().optional(),
     WEB_ORIGIN: z.url().default('http://localhost:3000'),
     BETTER_AUTH_URL: z.url().default('http://localhost:8080'),
     BETTER_AUTH_SECRET: z.string().optional(),

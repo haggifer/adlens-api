@@ -19,7 +19,7 @@ export class DemosService {
         private readonly storage: StorageService,
     ) {}
 
-    // The active demos in display order, each with a short-lived video URL. Only a finished analysis is shown, and only
+    // The active demos in display order, each with its video's URL (public once moved to the public media bucket). Only a finished analysis is shown, and only
     // the latest per demo: a demo being re-run keeps its earlier job on the page until the new one is done.
     async list(): Promise<DemoListResponse> {
         const jobs = await this.jobs
@@ -32,7 +32,7 @@ export class DemosService {
     }
 
     private async toDemo(job: StoredDemoJob): Promise<Demo> {
-        const { url } = await this.storage.createReadUrl(job.file.path)
+        const { url } = await this.storage.createFileReadUrl(job.file)
         const { slug, label, title, subtitle } = job.demo
 
         return { id: job._id.toString(), slug, label, title, subtitle, job: toPublicJob(job), videoUrl: url }

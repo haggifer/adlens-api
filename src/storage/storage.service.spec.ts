@@ -54,6 +54,40 @@ describe('StorageService', () => {
         })
     })
 
+    describe('createFileReadUrl', () => {
+        const withPublicBucket = () =>
+            new StorageService(
+                configStub({
+                    STORAGE_BUCKET: 'bucket',
+                    STORAGE_KEY_FILE: join(dir, 'key.json'),
+                    PUBLIC_MEDIA_BUCKET: 'public-media',
+                }),
+            )
+
+        it('serves a file in the public media bucket at its plain public address, nothing signed', async () => {
+            const { url } = await withPublicBucket().createFileReadUrl({
+                bucket: 'public-media',
+                path: 'demos/kids show/1.mp4',
+            })
+
+            expect(url).toBe('https://storage.googleapis.com/public-media/demos/kids%20show/1.mp4')
+        })
+
+        it('signs a file in any other bucket against that bucket', async () => {
+            const { url } = await withPublicBucket().createFileReadUrl({ bucket: 'other', path: PATH })
+            const signed = new URL(url)
+
+            expect(signed.pathname).toBe(`/other/${PATH}`)
+            expect(signed.searchParams.get('X-Goog-Signature')).toEqual(expect.any(String))
+        })
+
+        it('signs every file when no public media bucket is configured', async () => {
+            const { url } = await storage.createFileReadUrl({ bucket: 'public-media', path: PATH })
+
+            expect(new URL(url).searchParams.get('X-Goog-Signature')).toEqual(expect.any(String))
+        })
+    })
+
     describe('deletePrefix', () => {
         const fakeFile = (name: string) => ({ name, delete: jest.fn(async () => undefined) })
 

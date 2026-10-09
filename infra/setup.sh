@@ -43,6 +43,8 @@ PROJECT=adlens-ca57f
 PROJECT_NUMBER=629217115736
 REGION=europe-west1
 BUCKET=adlens-ca57f-uploads
+# Demo and sample videos only, readable by anyone; user uploads never go here.
+PUBLIC_MEDIA_BUCKET=adlens-ca57f-public-media
 RUNTIME_SA="adlens-run@${PROJECT}.iam.gserviceaccount.com"
 DEPLOY_SA="adlens-deploy@${PROJECT}.iam.gserviceaccount.com"
 IMAGE_REPO=adlens
@@ -84,6 +86,14 @@ gcloud storage buckets describe "gs://$BUCKET" >/dev/null 2>&1 || \
 gcloud storage buckets update "gs://$BUCKET" --cors-file="$(dirname "$0")/cors.json"
 # Images attached to Contact form messages are only needed until the message is read.
 gcloud storage buckets update "gs://$BUCKET" --lifecycle-file="$(dirname "$0")/lifecycle.json"
+
+echo "== public media bucket (demo and sample videos) =="
+# A separate bucket because GCS refuses a public grant limited to a prefix ("Conditions are not allowed on public
+# resources"), and a public grant on the uploads bucket would expose every user's video.
+gcloud storage buckets describe "gs://$PUBLIC_MEDIA_BUCKET" >/dev/null 2>&1 || \
+    gcloud storage buckets create "gs://$PUBLIC_MEDIA_BUCKET" --location="$REGION" --uniform-bucket-level-access
+gcloud storage buckets add-iam-policy-binding "gs://$PUBLIC_MEDIA_BUCKET" --member=allUsers --role="roles/storage.objectViewer"
+gcloud storage buckets update "gs://$PUBLIC_MEDIA_BUCKET" --cors-file="$(dirname "$0")/cors.json"
 
 echo "== runtime service account =="
 gcloud iam service-accounts describe "$RUNTIME_SA" >/dev/null 2>&1 || \
@@ -427,7 +437,7 @@ gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-a
     --min-instances=0 --max-instances=3 --concurrency=80 --timeout=300 \
     --cpu=1 --memory=512Mi --cpu-throttling \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,PUBLIC_MEDIA_BUCKET=$PUBLIC_MEDIA_BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 
 echo "== prune old API_SECRETS versions (the free tier counts disabled versions too) =="
 # CI and this script always roll forward from :latest, so nothing needs an old version — ENABLED or DISABLED. Keep

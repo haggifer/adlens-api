@@ -19,7 +19,19 @@ interface SignedReadUrl {
     expiresAt: Date
 }
 
+// A stored object's own location: demo and sample videos may sit in another bucket than uploads.
+interface StoredFile {
+    bucket: string
+    path: string
+}
+
 export const SIGNED_URL_TTL_MS = 15 * 60 * 1000
+
+// A public object's URL never expires; this only tells a client when to ask again, as for a signed one.
+const PUBLIC_URL_REFRESH_MS = 24 * 60 * 60 * 1000
+
+const toPublicUrl = ({ bucket, path }: StoredFile) =>
+    `https://storage.googleapis.com/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`
 
 const isNotFound = (err: unknown): boolean => (err as { code?: unknown })?.code === 404
 
@@ -29,12 +41,14 @@ const isNotFound = (err: unknown): boolean => (err as { code?: unknown })?.code 
 export class StorageService {
     private readonly storage: Storage
     readonly bucketName: string
+    private readonly publicMediaBucket: string | undefined
 
     constructor(config: ConfigService<Env, true>) {
         const keyFilename = config.get('STORAGE_KEY_FILE', { infer: true })
 
         this.storage = new Storage(keyFilename ? { keyFilename } : {})
         this.bucketName = config.get('STORAGE_BUCKET', { infer: true })
+        this.publicMediaBucket = config.get('PUBLIC_MEDIA_BUCKET', { infer: true })
     }
 
     private object(path: string) {
@@ -54,8 +68,25 @@ export class StorageService {
     }
 
     async createReadUrl(path: string): Promise<SignedReadUrl> {
+        return this.signReadUrl({ bucket: this.bucketName, path })
+    }
+
+    // Demo and sample videos in the public media bucket get their plain address: nothing to sign (an IAM call each
+    // without a key file), and a stable URL browsers can cache. Anything else is signed against its own bucket.
+    async createFileReadUrl(file: StoredFile): Promise<SignedReadUrl> {
+        if (this.publicMediaBucket && file.bucket === this.publicMediaBucket) {
+            return { url: toPublicUrl(file), expiresAt: new Date(Date.now() + PUBLIC_URL_REFRESH_MS) }
+        }
+
+        return this.signReadUrl(file)
+    }
+
+    private async signReadUrl({ bucket, path }: StoredFile): Promise<SignedReadUrl> {
         const expiresAt = new Date(Date.now() + SIGNED_URL_TTL_MS)
-        const [url] = await this.object(path).getSignedUrl({ version: 'v4', action: 'read', expires: expiresAt })
+        const [url] = await this.storage
+            .bucket(bucket)
+            .file(path)
+            .getSignedUrl({ version: 'v4', action: 'read', expires: expiresAt })
 
         return { url, expiresAt }
     }

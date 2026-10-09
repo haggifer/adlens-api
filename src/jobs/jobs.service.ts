@@ -152,7 +152,8 @@ export class JobsService {
             throw notFound()
         }
 
-        const { url, expiresAt } = await this.storage.createReadUrl(job.file.path)
+        // A sample job's video is the sample's own object, which may sit in the public media bucket.
+        const { url, expiresAt } = await this.storage.createFileReadUrl(job.file)
 
         return { url, expiresAt: expiresAt.toISOString() }
     }
