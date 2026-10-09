@@ -62,11 +62,11 @@ const BYTES_PER_MB = 1000 * 1000
 const SCOPE_RANK: Record<Rule['scope'], number> = { compliance: 0, best_practice: 1 }
 const SEVERITY_RANK: Record<Rule['severity'], number> = { blocker: 0, warning: 1, info: 2 }
 
-const rulePlatformsFor = (settings: AnalysisSettings): Set<RulePlatform> =>
-    new Set([RulePlatform.All, ...settings.platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
+const rulePlatformsFor = (platforms: Platform[]): Set<RulePlatform> =>
+    new Set([RulePlatform.All, ...platforms.flatMap((platform) => RULE_PLATFORMS[platform])])
 
 const toRuleFilter = (settings: AnalysisSettings): RuleFilter => ({
-    platforms: rulePlatformsFor(settings),
+    platforms: rulePlatformsFor(settings.platforms),
     markets: new Set<string>(settings.markets),
     placements: new Set(settings.placements),
 })
@@ -116,6 +116,18 @@ const evaluateAspectRatio = (rule: Rule, media: JobMedia): MetadataVerdict => {
     return isInRange
         ? { verdict: 'pass', detail: `It’s ${size}, within the shapes allowed: ${min} to ${max}.` }
         : { verdict: 'fail', detail: `It’s ${size}, outside the shapes allowed: ${min} to ${max}.` }
+}
+
+// The rule's platforms the selected ones reach; all of them when none were given.
+const narrowPlatforms = (rule: Rule, selectedPlatforms: Platform[] | undefined): RulePlatform[] => {
+    if (!selectedPlatforms) {
+        return rule.platform
+    }
+
+    const reached = rulePlatformsFor(selectedPlatforms)
+    const narrowed = rule.platform.filter((platform) => reached.has(platform))
+
+    return narrowed.length ? narrowed : rule.platform
 }
 
 // The details are sentences the report shows as they are, about the video ("It’s 30.4 seconds long, …").
@@ -228,16 +240,19 @@ export const projectAdvisoriesForModel = (rules: Rule[]): AdvisoryProjection[] =
     rules.map(({ id, check }) => ({ id, check }))
 
 // A placement-specific rule binds the selected placements among its own (all of them when none was chosen, as in
-// resolveSettings); a rule without placements binds its platforms' every placement and names none.
+// resolveSettings); a rule without placements binds its platforms' every placement and names none. A rule spanning
+// several platforms names only those the selected platforms reach, so a Meta-only run never reads "won't work on
+// YouTube". Pass both lists resolved (resolveSettings); without platforms the rule's own are named.
 export const evaluateMetadataRules = (
     ruleSet: RuleSet,
     rules: Rule[],
     media: JobMedia,
     selectedPlacements: Placement[],
+    selectedPlatforms?: Platform[],
 ): MetadataCheck[] =>
     rules.map((rule) => ({
         id: rule.id,
-        platform: rule.platform,
+        platform: narrowPlatforms(rule, selectedPlatforms),
         ...(rule.placements && {
             placements: selectedPlacements.length
                 ? rule.placements.filter((placement) => selectedPlacements.includes(placement))

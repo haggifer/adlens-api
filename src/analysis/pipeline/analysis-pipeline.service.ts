@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { type Analysis, JobErrorCode, type JobMedia, type Placement } from 'adlens-shared'
+import { type Analysis, type AnalysisSettings, JobErrorCode, type JobMedia } from 'adlens-shared'
 import { describeError } from '../../common/error-message'
 import { gcsUri } from '../../common/paths'
 import type { ModelCall, StoredJob } from '../../database/job.doc'
@@ -10,6 +10,7 @@ import {
     evaluateMetadataRules,
     projectAdvisoriesForModel,
     projectForModel,
+    resolveSettings,
     type SelectedRules,
     selectRules,
 } from '../../rules'
@@ -45,14 +46,14 @@ const buildAnalysis = (
     selected: SelectedRules,
     review: VideoReview,
     media: JobMedia,
-    placements: Placement[],
+    settings: AnalysisSettings,
 ): Analysis => ({
     model: review.model,
     promptVersion: review.promptVersion,
     rulesetVersion: ruleSet.meta.version,
     transcript: review.transcript,
     findings: buildFindings(ruleSet, selected.content, review.findings),
-    metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, media, placements),
+    metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, media, settings.placements, settings.platforms),
     advisories: buildAdvisories(
         ruleSet,
         selected.advisory.filter((rule) => review.advisoryIds.includes(rule.id)),
@@ -135,7 +136,7 @@ export class AnalysisPipeline {
         const review = await this.review(jobId, toReviewRequest(job, job.media, selected), mark)
 
         return {
-            analysis: buildAnalysis(ruleSet, selected, review, job.media, job.settings.placements),
+            analysis: buildAnalysis(ruleSet, selected, review, job.media, resolveSettings(job.settings)),
             call: review.call,
         }
     }

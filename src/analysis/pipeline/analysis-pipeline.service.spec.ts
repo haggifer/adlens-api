@@ -174,6 +174,30 @@ describe('AnalysisPipeline', () => {
         })
     })
 
+    it('names only the chosen platforms, and their placements, for a spec spanning several platforms', async () => {
+        const bumper = ruleSet.rules.find((rule) => rule.id === 'youtube.creative_spec.bumper_duration')!
+        const crossPlatform = {
+            ...bumper,
+            id: 'test.creative_spec.short_video_duration',
+            platform: [RulePlatform.Meta, RulePlatform.YouTube],
+            placements: [Placement.MetaReels, Placement.YouTubeShorts],
+        }
+        const withCrossPlatformRule = {
+            current: async () => ({ ...ruleSet, rules: [...ruleSet.rules, crossPlatform] }),
+        }
+        const jobId = await queueJob()
+
+        pipeline = new AnalysisPipeline(lifecycle, reviewer, withCrossPlatformRule as unknown as RulesetService)
+        await pipeline.run(jobId, { isLast: false })
+
+        const checks = (await findJob(jobId))?.analysis?.metadataChecks ?? []
+
+        expect(checks.find((check) => check.id === crossPlatform.id)).toMatchObject({
+            platform: [RulePlatform.Meta],
+            placements: [Placement.MetaReels],
+        })
+    })
+
     it('offers the reviewer the selected advisories to choose from', async () => {
         const jobId = await queueJob()
 

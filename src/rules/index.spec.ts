@@ -274,6 +274,43 @@ describe('evaluateMetadataRules', () => {
         })
     })
 
+    it('names only the selected platforms and their placements for a spec that spans several platforms', () => {
+        const bumper = ruleSet.rules.find((candidate) => candidate.id === 'youtube.creative_spec.bumper_duration')!
+        const crossPlatform: Rule = {
+            ...bumper,
+            platform: [RulePlatform.Meta, RulePlatform.YouTube],
+            placements: [Placement.MetaReels, Placement.YouTubeShorts],
+        }
+        const forMeta = resolveSettings(settingsFor({ platforms: [Platform.Meta] }))
+        const forYouTube = resolveSettings(settingsFor({ platforms: [Platform.YouTube] }))
+        const [metaCheck] = evaluateMetadataRules(
+            ruleSet,
+            [crossPlatform],
+            MEDIA,
+            forMeta.placements,
+            forMeta.platforms,
+        )
+        const [youTubeCheck] = evaluateMetadataRules(
+            ruleSet,
+            [crossPlatform],
+            MEDIA,
+            forYouTube.placements,
+            forYouTube.platforms,
+        )
+
+        expect(metaCheck).toMatchObject({ platform: [RulePlatform.Meta], placements: [Placement.MetaReels] })
+        expect(youTubeCheck).toMatchObject({ platform: [RulePlatform.YouTube], placements: [Placement.YouTubeShorts] })
+    })
+
+    it('keeps a cross-platform spec naming every platform it applies to', () => {
+        const rule = { ...ruleSet.rules.find((candidate) => candidate.id === 'amazon.creative_spec.video_max_length')! }
+        const everywhere: Rule = { ...rule, platform: [RulePlatform.All], placements: undefined }
+
+        expect(evaluateMetadataRules(ruleSet, [everywhere], MEDIA, SELECTED, [Platform.Amazon])[0].platform).toEqual([
+            RulePlatform.All,
+        ])
+    })
+
     it('names every placement a placement spec binds when no placement was chosen', () => {
         const bumper = ruleSet.rules.find((candidate) => candidate.id === 'youtube.creative_spec.bumper_duration')!
 

@@ -355,8 +355,9 @@ rules are then routed by `modality`:
 - `metadata` → checked in code against the measured media facts (duration, dimensions as displayed after the video's
   rotation, real object size); an aspect ratio can be one required ratio (`aspect_ratio_in`), a list
   (`aspect_ratio_one_of`, `params.ratios`) or a range (`aspect_ratio_between`, `params.min`/`max`, min not above
-  max), written as `W:H` with both parts positive. Each check names its rule's platforms, the selected placements a
-  placement spec binds (all of its own when none was chosen; none for a spec that binds every placement), the rule as
+  max), written as `W:H` with both parts positive. Each check names those of its rule's platforms the chosen ones
+  reach, the chosen placements a placement spec binds (both resolved as above, so a spec spanning Meta and YouTube
+  names only Meta and Meta's placements on a Meta-only run; none for a spec that binds every placement), the rule as
   a sentence (`check`), and a `detail`
   sentence about the video ("It’s 30.4 seconds long, longer than the 6 seconds allowed."), so the report can say which
   placement the video won't work for;
