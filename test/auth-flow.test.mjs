@@ -537,6 +537,29 @@ test('refreshing an anonymous session marks its user as seen again', async () =>
     assert.ok(user.lastSeenAt > longAgo)
 })
 
+test("the API's own session reads never extend a session, since its refreshed cookie would never reach the browser", async () => {
+    const { ObjectId } = require('mongodb')
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const expiresAt = new Date(Date.now() + 5 * DAY_MS)
+    const anonymous = await signInAnonymously()
+    const userId = new ObjectId(anonymous.user.id)
+    const sessionsOf = (db) => db.collection('session').find({ userId: { $in: [userId, anonymous.user.id] } })
+
+    // Last refreshed two days ago, which Better Auth's own session check would refresh.
+    await withDb((db) =>
+        db.collection('session').updateMany({ userId: { $in: [userId, anonymous.user.id] } }, { $set: { expiresAt } }),
+    )
+
+    const res = await fetch(`${API}/v1/me/quota`, { headers: headers(anonymous.cookie) })
+    const sessions = await withDb((db) => sessionsOf(db).toArray())
+
+    assert.equal(res.status, 200)
+    assert.deepEqual(
+        sessions.map((stored) => stored.expiresAt.getTime()),
+        [expiresAt.getTime()],
+    )
+})
+
 test('an anonymous user never gets email, even when asking for a confirmation link', async () => {
     const anonymous = await signInAnonymously()
     const sentBefore = outbox.length
