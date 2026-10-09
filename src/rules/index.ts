@@ -165,16 +165,19 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
                 ? { verdict: 'fail', detail: `${length}, shorter than the ${formatSeconds(value)} required.` }
                 : { verdict: 'pass', detail: `${length}, at least the ${formatSeconds(value)} required.` }
         }
+        // The platforms state a minimum resolution per orientation (640×480 or 480×640 for YouTube's SD), which is
+        // a minimum on the short side; the dimensions are already as displayed, after the video's rotation.
         case 'resolution_min': {
-            if (media.height === undefined) {
-                return { verdict: 'unknown', detail: 'Its height couldn’t be read.' }
+            if (media.width === undefined || media.height === undefined) {
+                return { verdict: 'unknown', detail: 'Its dimensions couldn’t be read.' }
             }
 
-            const height = `It’s ${media.height} px tall`
+            const shortSide = Math.min(media.width, media.height)
+            const size = `It’s ${formatSize(media)}, ${shortSide} px on its short side`
 
-            return media.height < value
-                ? { verdict: 'fail', detail: `${height}, less than the ${value} px required.` }
-                : { verdict: 'pass', detail: `${height}, at least the ${value} px required.` }
+            return shortSide < value
+                ? { verdict: 'fail', detail: `${size}, less than the ${value} px required.` }
+                : { verdict: 'pass', detail: `${size}, at least the ${value} px required.` }
         }
         case 'filesize_max': {
             const size = `It’s ${Number((media.sizeBytes / BYTES_PER_MB).toFixed(1))} MB`

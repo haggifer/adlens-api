@@ -194,10 +194,16 @@ describe('evaluateMetadataRules', () => {
         )
     })
 
-    it('checks the height against the minimum, and says so when the height is unknown', () => {
-        expect(verdictOf('amazon.creative_spec.video_resolution_min', { height: 720 })).toBe('pass')
-        expect(verdictOf('amazon.creative_spec.video_resolution_min', { height: 719 })).toBe('fail')
-        expect(verdictOf('amazon.creative_spec.video_resolution_min', { height: undefined })).toBe('unknown')
+    it('checks the short side against the minimum, and says so when the dimensions are unknown', () => {
+        const rule = 'amazon.creative_spec.video_resolution_min'
+
+        expect(verdictOf(rule, { width: 1280, height: 720 })).toBe('pass')
+        expect(verdictOf(rule, { width: 1280, height: 719 })).toBe('fail')
+        expect(verdictOf(rule, { width: 720, height: 1280 })).toBe('pass')
+        // A vertical video is as tall as the limit asks but narrower than it on its short side.
+        expect(verdictOf(rule, { width: 405, height: 720 })).toBe('fail')
+        expect(verdictOf(rule, { height: undefined })).toBe('unknown')
+        expect(verdictOf(rule, { width: undefined })).toBe('unknown')
     })
 
     it('measures the file size in decimal megabytes', () => {
@@ -278,8 +284,11 @@ describe('evaluateMetadataRules', () => {
         expect(checkOf('amazon.creative_spec.video_max_length', { durationS: 50.04 }).detail).toBe(
             'It’s 50 seconds long, longer than the 45 seconds allowed.',
         )
-        expect(checkOf('amazon.creative_spec.video_resolution_min', { height: 1080 }).detail).toBe(
-            'It’s 1080 px tall, at least the 720 px required.',
+        expect(checkOf('amazon.creative_spec.video_resolution_min', { width: 1920, height: 1080 }).detail).toBe(
+            'It’s 1920×1080, 1080 px on its short side, at least the 720 px required.',
+        )
+        expect(checkOf('amazon.creative_spec.video_resolution_min', { width: 360, height: 640 }).detail).toBe(
+            'It’s 360×640, 360 px on its short side, less than the 720 px required.',
         )
         expect(checkOf('amazon.creative_spec.video_filesize_max', { sizeBytes: 512_340_000 }).detail).toBe(
             'It’s 512.3 MB, more than the 500 MB allowed.',

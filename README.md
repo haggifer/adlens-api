@@ -361,7 +361,8 @@ rules are then routed by `modality`:
   a sentence (`check`), and a `detail`
   sentence about the video ("It’s 30.4 seconds long, longer than the 6 seconds allowed."), so the report can say which
   placement the video won't work for. Durations are compared with a 0.1 s tolerance (a 6-second bumper probes at
-  6.02–6.04 s), and shown with two decimals when one would round them to the limit;
+  6.02–6.04 s), and shown with two decimals when one would round them to the limit. `resolution_min` is a minimum
+  on the short side, `min(width, height)`, as the platforms state it per orientation;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
   source link are attached back by id, and ids the model invents are dropped;
 - `out_of_creative` → an advisory checklist, never judged: the model only names the advisories whose subject the ad
