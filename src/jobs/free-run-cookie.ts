@@ -9,6 +9,15 @@ export const FREE_RUN_COOKIE = 'adlens_free_run'
 // For good, as far as browsers allow: Chrome caps a cookie's lifetime at 400 days.
 const FREE_RUN_COOKIE_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000
 
+// A value that isn't valid percent-encoding (a stray `%`) can only come from a hand-edited cookie: read as none.
+const decodeCookieValue = (value: string): string | null => {
+    try {
+        return decodeURIComponent(value) || null
+    } catch {
+        return null
+    }
+}
+
 export const readFreeRunUserId = (req: Request): string | null => {
     const prefix = `${FREE_RUN_COOKIE}=`
     const pair = (req.headers.cookie ?? '')
@@ -16,7 +25,7 @@ export const readFreeRunUserId = (req: Request): string | null => {
         .map((part) => part.trim())
         .find((part) => part.startsWith(prefix))
 
-    return pair ? decodeURIComponent(pair.slice(prefix.length)) || null : null
+    return pair ? decodeCookieValue(pair.slice(prefix.length)) : null
 }
 
 // Host-only on the API, which alone reads it.

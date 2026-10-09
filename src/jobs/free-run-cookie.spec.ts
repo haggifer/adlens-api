@@ -14,6 +14,10 @@ describe('free run cookie', () => {
         expect(readFreeRunUserId(requestWith(`${FREE_RUN_COOKIE}=`))).toBeNull()
     })
 
+    it('reads a value that is not valid percent-encoding as no cookie', () => {
+        expect(readFreeRunUserId(requestWith(`${FREE_RUN_COOKIE}=%E0%A4%A`))).toBeNull()
+    })
+
     it('keeps it from scripts for 400 days, secure over HTTPS', () => {
         const cookie = jest.fn()
 
