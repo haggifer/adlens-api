@@ -1,6 +1,7 @@
 {
     "name": "adlens-api",
     "version": "0.2.0",
+    "license": "PolyForm-Noncommercial-1.0.0",
     "private": true,
     "description": "AdLens backend: NestJS API + on-demand Cloud Run analysis worker (MongoDB, GCS, Gemini on Vertex)",
     "engines": {

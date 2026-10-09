@@ -674,3 +674,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
   many keys it holds, and costs one access per instance start instead of one per secret. The trade-off is no per-key
   IAM binding — anything that can read the bundle can read every key in it — which is fine while the API and the
   worker share one runtime service account; split into per-identity secrets when the worker gets its own.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md): free to read, run and learn from, not for commercial use. The analysis
+lab ([adlens-lab](https://github.com/haggifer/adlens-lab)) and the contract package
+([adlens-shared](https://github.com/haggifer/adlens-shared)) are MIT.
