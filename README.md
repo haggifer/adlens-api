@@ -314,7 +314,8 @@ answering is a plain reply; its text isn't stored.
 
 Every `/v1/*` route except `GET /v1/samples`, `GET /v1/demos` and `POST /v1/contact` (and `/uploads`) requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
-`{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`.
+`{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`; a body that isn't valid JSON (400),
+is over 1 MB (413) or comes in an unsupported charset or encoding (415) answers `VALIDATION_FAILED` with that status.
 
 | Method & path               | Purpose                                                                                                                                                                                                           | Returns                        |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |

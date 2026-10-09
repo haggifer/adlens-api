@@ -176,6 +176,22 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.issues.length).toBeGreaterThan(0)
     })
 
+    it('answers a body too large or in an unsupported charset with its own status, in the error shape', async () => {
+        const tooLarge = await request(app.getHttpServer())
+            .post('/v1/jobs')
+            .set(as(OWNER))
+            .send({ settings: SETTINGS, file: FILE, padding: 'x'.repeat(2 * 1024 * 1024) })
+            .expect(413)
+        const unsupported = await request(app.getHttpServer())
+            .post('/v1/jobs')
+            .set({ ...as(OWNER), 'Content-Type': 'application/json; charset=latin1' })
+            .send(JSON.stringify({ settings: SETTINGS, file: FILE }))
+            .expect(415)
+
+        expect(tooLarge.body).toMatchObject({ statusCode: 413, errorCode: RequestErrorCode.ValidationFailed })
+        expect(unsupported.body).toMatchObject({ statusCode: 415, errorCode: RequestErrorCode.ValidationFailed })
+    })
+
     it('rejects an option chosen twice', async () => {
         const res = await request(app.getHttpServer())
             .post('/v1/jobs')
