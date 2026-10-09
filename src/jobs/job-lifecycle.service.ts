@@ -23,9 +23,12 @@ interface RefundSweepResult {
 }
 
 const VERIFY_STALE_MS = 10 * 60 * 1000
-// Counted from the queueing, not from the last write. The slowest Gemini call seen in production took about 3 minutes
-// (2026-10-08), so a job still in flight 10 minutes after its upload was queued is taken as abandoned.
-const ANALYSIS_STALE_MS = 10 * 60 * 1000
+// Counted from the queueing, not from the last write: a worker that hasn't started its Gemini call 5 minutes after the
+// job was queued (dispatch, boot and the ruleset take under a minute) never will.
+const STARTING_STALE_MS = 5 * 60 * 1000
+// Counted from the start of the Gemini call: longer than the reviewer's 10-minute request timeout, so a live worker
+// always settles the job itself and a billed answer is never thrown away by the sweep.
+const MODEL_CALL_STALE_MS = 12 * 60 * 1000
 
 const IN_FLIGHT = [JobStatus.Queued, JobStatus.Analyzing]
 // A job keeps its charges while its run is in flight and once it has a result. In any other status, charges it still
@@ -262,7 +265,7 @@ export class JobLifecycle {
     }
 
     private findStaleJobs(userId: string | undefined, now: Date): Promise<Pick<StoredJob, '_id' | 'status'>[]> {
-        const analysisCutoff = new Date(now.getTime() - ANALYSIS_STALE_MS)
+        const startingCutoff = new Date(now.getTime() - STARTING_STALE_MS)
 
         return this.model
             .find(
@@ -272,12 +275,22 @@ export class JobLifecycle {
                         // Aged from its creation: no step of the upload touches the job.
                         { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
                         { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
-                        { status: { $in: IN_FLIGHT }, queuedAt: { $lt: analysisCutoff } },
+                        // A refused call clears the mark, so its job is timed from the queueing again.
+                        {
+                            status: { $in: IN_FLIGHT },
+                            modelCallStartedAt: { $exists: false },
+                            queuedAt: { $lt: startingCutoff },
+                        },
                         // Queued before queuedAt was recorded: timed from its last write instead.
                         {
                             status: { $in: IN_FLIGHT },
+                            modelCallStartedAt: { $exists: false },
                             queuedAt: { $exists: false },
-                            updatedAt: { $lt: analysisCutoff },
+                            updatedAt: { $lt: startingCutoff },
+                        },
+                        {
+                            status: { $in: IN_FLIGHT },
+                            modelCallStartedAt: { $lt: new Date(now.getTime() - MODEL_CALL_STALE_MS) },
                         },
                     ],
                 },

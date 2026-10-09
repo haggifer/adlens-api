@@ -47,9 +47,11 @@ const ANALYSIS: Analysis = {
 const CALL = buildModelCall()
 const IP_LIMITS = { IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }
 const NETWORK_CHARGE: IpCharge = { bucketKey: 'network-key', access: UserAccess.Member, hasPassedChallenge: false }
-// JobLifecycle's own thresholds: a verification idle for longer, or an analysis queued for longer, was abandoned.
+// JobLifecycle's own thresholds: a verification idle for longer, an analysis queued for longer without its Gemini call
+// started, or a Gemini call running for longer, was abandoned.
 const VERIFY_STALE_MS = 10 * 60 * 1000
-const ANALYSIS_STALE_MS = 10 * 60 * 1000
+const STARTING_STALE_MS = 5 * 60 * 1000
+const MODEL_CALL_STALE_MS = 12 * 60 * 1000
 const NOW = new Date('2026-09-29T10:00:00Z')
 
 describe('JobLifecycle', () => {
@@ -119,6 +121,11 @@ describe('JobLifecycle', () => {
 
     const wasQueuedAt = (jobId: string, at: Date) =>
         jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { queuedAt: at } })
+
+    const callStartedAt = async (jobId: string, at: Date) => {
+        await lifecycle.startAttempt(jobId)
+        await lifecycle.markModelCall(jobId, at)
+    }
 
     beforeAll(async () => {
         mongo = await startMemoryMongo()
@@ -453,8 +460,8 @@ describe('JobLifecycle', () => {
 
             await lifecycle.startAttempt(analyzing)
             await lastTouchedAt(verifying, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
-            await wasQueuedAt(analyzing, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
-            // A worker's later writes (an attempt, a model call) don't buy the analysis more time.
+            await wasQueuedAt(analyzing, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
+            // A worker's later writes (an attempt) don't buy the analysis more time.
             await lastTouchedAt(analyzing, NOW)
 
             await lifecycle.expireStale(USER, NOW)
@@ -481,9 +488,9 @@ describe('JobLifecycle', () => {
 
             await lifecycle.startAttempt(analyzing)
             await lastTouchedAt(verifying, new Date(NOW.getTime() - VERIFY_STALE_MS))
-            await wasQueuedAt(queued, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
-            await wasQueuedAt(analyzing, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
-            await lastTouchedAt(queued, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await wasQueuedAt(queued, new Date(NOW.getTime() - STARTING_STALE_MS))
+            await wasQueuedAt(analyzing, new Date(NOW.getTime() - STARTING_STALE_MS))
+            await lastTouchedAt(queued, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -491,6 +498,40 @@ describe('JobLifecycle', () => {
             expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
             expect((await findJob(analyzing))?.status).toBe(JobStatus.Analyzing)
             expect(await usedRuns()).toBe(2)
+        })
+
+        it('gives a job whose Gemini call started 12 minutes from that start, however long ago it was queued', async () => {
+            const overdue = await queueJob(NETWORK_CHARGE)
+            const running = await queueJob(NETWORK_CHARGE)
+
+            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+            await wasQueuedAt(overdue, new Date(NOW.getTime() - MODEL_CALL_STALE_MS * 2))
+            await wasQueuedAt(running, new Date(NOW.getTime() - MODEL_CALL_STALE_MS * 2))
+            await callStartedAt(overdue, new Date(NOW.getTime() - MODEL_CALL_STALE_MS - 1))
+            await callStartedAt(running, new Date(NOW.getTime() - MODEL_CALL_STALE_MS))
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(await findJob(overdue)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode: JobErrorCode.AnalysisTimedOut,
+                chargedRunId: null,
+            })
+            expect((await findJob(running))?.status).toBe(JobStatus.Analyzing)
+            expect(await usedRuns()).toBe(1)
+        })
+
+        it('times a job whose call Vertex refused from its queueing again', async () => {
+            const jobId = await queueJob()
+
+            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+            await wasQueuedAt(jobId, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
+            await callStartedAt(jobId, NOW)
+            await lifecycle.clearModelCall(jobId)
+
+            await lifecycle.expireStale(USER, NOW)
+
+            expect((await findJob(jobId))?.errorCode).toBe(JobErrorCode.AnalysisTimedOut)
         })
 
         it('records when a job was queued, which starts its analysis time', async () => {
@@ -505,8 +546,8 @@ describe('JobLifecycle', () => {
             const recent = await createJob(JobStatus.Analyzing)
 
             jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-            await lastTouchedAt(legacy, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
-            await lastTouchedAt(recent, new Date(NOW.getTime() - ANALYSIS_STALE_MS))
+            await lastTouchedAt(legacy, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
+            await lastTouchedAt(recent, new Date(NOW.getTime() - STARTING_STALE_MS))
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -598,7 +639,7 @@ describe('JobLifecycle', () => {
         it("only expires the given user's jobs", async () => {
             const othersJob = await createJob(JobStatus.Verifying, OTHER_USER)
 
-            await lastTouchedAt(othersJob, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await lastTouchedAt(othersJob, new Date(NOW.getTime() - VERIFY_STALE_MS - 1))
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -610,8 +651,8 @@ describe('JobLifecycle', () => {
             const othersJob = await createJob(JobStatus.Analyzing, OTHER_USER)
 
             jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-            await wasQueuedAt(own, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
-            await wasQueuedAt(othersJob, new Date(NOW.getTime() - ANALYSIS_STALE_MS - 1))
+            await wasQueuedAt(own, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
+            await wasQueuedAt(othersJob, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
 
             expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 2, failed: 0 })
             expect(await findJob(own)).toMatchObject({

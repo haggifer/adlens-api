@@ -89,7 +89,14 @@ export class AnalysisPipeline {
             const { analysis, call } = await this.analyze(job, mark)
             const isCompleted = await this.lifecycle.complete(jobId, analysis, call)
 
-            return isCompleted ? 'analyzed' : 'skipped'
+            if (isCompleted) {
+                return 'analyzed'
+            }
+
+            // The job ended meanwhile (it expired as stale), but Gemini billed the call all the same.
+            await this.lifecycle.addUsage(jobId, call)
+
+            return 'skipped'
         } catch (err) {
             const detail = describeError(err)
 

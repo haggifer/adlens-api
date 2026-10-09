@@ -389,7 +389,7 @@ describe('AnalysisPipeline', () => {
         })
     })
 
-    it("doesn't store a result for a job that expired while it was analyzed", async () => {
+    it("doesn't store a result for a job that expired while it was analyzed, but records its billed call", async () => {
         const jobId = await queueJob()
         const review = reviewer.next
 
@@ -403,7 +403,11 @@ describe('AnalysisPipeline', () => {
 
         const job = await findJob(jobId)
 
-        expect(job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisTimedOut })
+        expect(job).toMatchObject({
+            status: JobStatus.Error,
+            errorCode: JobErrorCode.AnalysisTimedOut,
+            usage: usageOf(CALL),
+        })
         expect(job).not.toHaveProperty('analysis')
         expect(await used()).toBe(0)
     })
