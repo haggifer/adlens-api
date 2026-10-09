@@ -84,9 +84,10 @@ export class JobsController {
         @CurrentUser() userId: string,
         @Param('id') id: string,
         @RequestIpSource() ipSource: IpSource,
+        @Req() req: Request,
         @Res({ passthrough: true }) res: Response,
     ): Promise<JobResponse> {
-        const job = await this.analysis.start(userId, id, ipSource)
+        const job = await this.analysis.start(userId, id, ipSource, readFreeRunUserId(req))
 
         // Any analysis, an account's too, uses up the browser's one analysis before an email is confirmed.
         writeFreeRunCookie(res, userId, this.isSecureCookie)

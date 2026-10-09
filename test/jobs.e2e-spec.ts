@@ -1200,6 +1200,27 @@ describe('Jobs API (e2e)', () => {
                 await admissionWithCookie('203.0.113.38', gone, await addAnonymous()).expect(429)
                 await admissionWithCookie('203.0.113.38', 'not-an-id', await addAnonymous()).expect(429)
             })
+
+            it('refuses to start a job made before another user in the browser used the analysis', async () => {
+                const unconfirmed = await addUnconfirmed()
+                const other = await addAnonymous()
+                const pending = await createFrom(unconfirmed, '203.0.113.39', { challengeToken: 'pass' }).expect(201)
+                const othersJob = await createFrom(other, '203.0.113.39', { challengeToken: 'pass' }).expect(201)
+
+                await analyzeFrom(other, '203.0.113.39', othersJob.body.job.id).expect(202)
+                const refused = await request(app.getHttpServer())
+                    .post(`/v1/jobs/${pending.body.job.id}/analyze`)
+                    .set({ ...as(unconfirmed), ...from('203.0.113.39'), ...usedBy(other) })
+                    .expect(429)
+                const job = await request(app.getHttpServer())
+                    .get(`/v1/jobs/${pending.body.job.id}`)
+                    .set(as(unconfirmed))
+                    .expect(200)
+
+                expect(refused.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
+                expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+                expect(await usage('203.0.113.39')).toEqual({ total: 1, anonymous: 1 })
+            })
         })
 
         describe('the admission check', () => {

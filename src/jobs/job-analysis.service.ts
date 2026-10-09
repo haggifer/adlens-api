@@ -49,7 +49,7 @@ export class JobAnalysisService {
         private readonly admission: AnalysisAdmission,
     ) {}
 
-    async start(userId: string, jobId: string, ipSource: IpSource): Promise<Job> {
+    async start(userId: string, jobId: string, ipSource: IpSource, freeRunUserId: string | null): Promise<Job> {
         const claimed = await this.lifecycle.claimForVerification(userId, jobId)
 
         if (!claimed) {
@@ -58,7 +58,7 @@ export class JobAnalysisService {
         }
 
         const media = await this.verifyVideo(claimed)
-        const queued = await this.queueRun(userId, jobId, claimed, media, ipSource)
+        const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
         const execution = await this.startWorker(jobId)
 
         if (execution) {
@@ -74,14 +74,21 @@ export class JobAnalysisService {
 
     private async queueRun(
         userId: string,
-        jobId: string,
         job: StoredJob,
         media: JobMedia,
         ipSource: IpSource,
+        freeRunUserId: string | null,
     ): Promise<StoredJob> {
+        const jobId = job._id.toString()
+
         try {
             // Jobs created before the field existed have none: they get no pass.
-            const ipCharge = await this.admission.ipChargeFor(userId, ipSource, Boolean(job.hasPassedChallenge))
+            const ipCharge = await this.admission.ipChargeFor(
+                userId,
+                ipSource,
+                Boolean(job.hasPassedChallenge),
+                freeRunUserId,
+            )
             return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
         } catch (err) {
             // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.

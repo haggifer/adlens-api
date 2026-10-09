@@ -97,9 +97,17 @@ export class AnalysisAdmission {
         }
     }
 
-    // At analyze: what to charge the network, or null for an admin.
-    async ipChargeFor(userId: string, ipSource: IpSource, hasPassedChallenge: boolean): Promise<IpCharge | null> {
+    // At analyze: what to charge the network, or null for an admin. Refuses as admit would when another user ran the
+    // browser's one analysis since the job was created.
+    async ipChargeFor(
+        userId: string,
+        ipSource: IpSource,
+        hasPassedChallenge: boolean,
+        freeRunUserId: string | null,
+    ): Promise<IpCharge | null> {
         const access = await readUserAccess(this.connection, userId)
+
+        await this.checkFreeRun(access, userId, freeRunUserId)
 
         if (access === UserAccess.Admin) {
             return null

@@ -121,7 +121,7 @@ the rest of the week's allowance without resetting it.
 The one analysis is also one per browser: signing in deletes the anonymous user, so after signing out a new one (or a
 new unconfirmed account) would get another. Starting any analysis, whoever runs it, sets the API's own
 `adlens_free_run` cookie (httpOnly, host-only, 400 days, the most browsers keep) to that user's id, and admission
-(`GET /v1/admission` and job creation) then refuses a visitor, an anonymous user or an unconfirmed account in that
+(`GET /v1/admission`, job creation and the start of a run, before it is charged) then refuses a visitor, an anonymous user or an unconfirmed account in that
 browser (`SIGN_UP_REQUIRED` / `EMAIL_CONFIRMATION_REQUIRED`), unless that run was refunded: a cookie naming an
 anonymous user or unconfirmed account without a `freeRunId` holds nothing, while one naming a user that is gone or an
 account that was confirmed (whose runs never record one) still counts. Linking moves the cookie to the account when it
