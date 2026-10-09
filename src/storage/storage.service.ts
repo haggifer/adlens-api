@@ -19,7 +19,7 @@ interface SignedReadUrl {
     expiresAt: Date
 }
 
-const SIGNED_URL_TTL_MS = 15 * 60 * 1000
+export const SIGNED_URL_TTL_MS = 15 * 60 * 1000
 
 const isNotFound = (err: unknown): boolean => (err as { code?: unknown })?.code === 404
 

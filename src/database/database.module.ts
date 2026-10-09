@@ -8,6 +8,7 @@ import { JOB_MODEL, JobSchema } from './job.doc'
 import { RATE_LIMIT_MODEL, RateLimitSchema } from './rate-limit.doc'
 import { RULESET_MODEL, RulesetSchema } from './ruleset.doc'
 import { SAMPLE_MODEL, SampleSchema } from './sample.doc'
+import { UPLOAD_TOMBSTONE_MODEL, UploadTombstoneSchema } from './upload-tombstone.doc'
 
 const models = MongooseModule.forFeature([
     { name: JOB_MODEL, schema: JobSchema },
@@ -16,6 +17,7 @@ const models = MongooseModule.forFeature([
     { name: CONTACT_DRAFT_MODEL, schema: ContactDraftSchema },
     { name: IP_QUOTA_MODEL, schema: IpQuotaSchema },
     { name: RATE_LIMIT_MODEL, schema: RateLimitSchema },
+    { name: UPLOAD_TOMBSTONE_MODEL, schema: UploadTombstoneSchema },
 ])
 
 // The Mongo connection and every model, registered once for both the API and the worker.

@@ -15,8 +15,9 @@ import { z } from 'zod'
 import { ApiException } from '../common/api-exception'
 import { jobVideoPath } from '../common/paths'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
+import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../database/upload-tombstone.doc'
 import { SamplesService } from '../samples/samples.service'
-import { StorageService } from '../storage/storage.service'
+import { SIGNED_URL_TTL_MS, StorageService } from '../storage/storage.service'
 import { JobLifecycle } from './job-lifecycle.service'
 import { IN_PROGRESS_STATUSES } from './job-status'
 import { toPublicJob } from './job.mapper'
@@ -31,6 +32,10 @@ export const listJobsQuerySchema = z.object({
 
 export type ListJobsQuery = z.output<typeof listJobsQuerySchema>
 
+// The upload URL is signed just after the job is created, and an upload that started before it expired may still be
+// arriving after it.
+const UPLOAD_URL_MARGIN_MS = 60 * 60 * 1000
+
 const inProgress = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobInProgress, 'The analysis is still running')
 
@@ -40,6 +45,7 @@ const notFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestErrorCode.N
 export class JobsService {
     constructor(
         @InjectModel(JOB_MODEL) private readonly model: Model<JobDoc>,
+        @InjectModel(UPLOAD_TOMBSTONE_MODEL) private readonly tombstones: Model<UploadTombstoneDoc>,
         private readonly storage: StorageService,
         private readonly lifecycle: JobLifecycle,
         private readonly samples: SamplesService,
@@ -122,6 +128,7 @@ export class JobsService {
         }
 
         if (!job.sampleId) {
+            await this.recordUploadTombstone(job)
             await this.storage.delete(job.file.path)
         }
 
@@ -162,6 +169,19 @@ export class JobsService {
         }
 
         return job
+    }
+
+    // The upload URL signed at creation is create-only, so with the object deleted a PUT to it would store a video no
+    // job references. Recorded before the delete, so no failure in between can lose it; the cleanup leaves a path
+    // that a job still references.
+    private async recordUploadTombstone(job: StoredJob, now = new Date()): Promise<void> {
+        const deleteAfter = new Date(job.createdAt.getTime() + SIGNED_URL_TTL_MS + UPLOAD_URL_MARGIN_MS)
+
+        if (deleteAfter <= now) {
+            return
+        }
+
+        await this.tombstones.create({ path: job.file.path, deleteAfter })
     }
 
     private findPage(userId: string, cursor: string | undefined, limit: number): Promise<StoredJob[]> {

@@ -5,6 +5,7 @@ import { JobLifecycle } from '../jobs/job-lifecycle.service'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { AbandonedUploadCleanupService } from './abandoned-upload-cleanup.service'
 import { AnonymousCleanupService } from './anonymous-cleanup.service'
+import { UploadTombstoneCleanupService } from './upload-tombstone-cleanup.service'
 
 // Like the analysis worker, the cleanup job needs none of the API's own secrets and must start without them.
 const API_ONLY_SECRETS = ['BETTER_AUTH_SECRET', 'TURNSTILE_SECRET_KEY', 'RESEND_API_KEY']
@@ -42,11 +43,13 @@ describe('CleanupModule', () => {
         const expired = await cleanup.get(JobLifecycle).expireStaleJobs()
         const anonymous = await cleanup.get(AnonymousCleanupService).run()
         const uploads = await cleanup.get(AbandonedUploadCleanupService).run()
+        const lateUploads = await cleanup.get(UploadTombstoneCleanupService).run()
         const refunds = await cleanup.get(JobLifecycle).refundOwedCharges()
 
         expect(expired).toEqual({ expired: 0, failed: 0 })
         expect(anonymous).toEqual({ deleted: 0, failed: 0 })
         expect(uploads).toEqual({ deleted: 0, failed: 0 })
+        expect(lateUploads).toEqual({ deleted: 0, failed: 0 })
         expect(refunds).toEqual({ refunded: 0, failed: 0 })
     })
 })

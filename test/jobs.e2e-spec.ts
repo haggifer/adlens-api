@@ -15,9 +15,10 @@ import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { UserAccess } from '../src/common/user-access'
 import { CONTACT_DRAFT_MODEL, type ContactDraftDoc } from '../src/database/contact-draft.doc'
-import { DEMO_OWNER, JOB_MODEL, type JobDoc } from '../src/database/job.doc'
+import { DEMO_OWNER, JOB_MODEL, type JobDoc, type StoredJob } from '../src/database/job.doc'
 import { RATE_LIMIT_COLLECTION } from '../src/database/rate-limit.doc'
 import { SAMPLE_MODEL, type SampleDoc } from '../src/database/sample.doc'
+import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../src/database/upload-tombstone.doc'
 import { USER_COLLECTION } from '../src/database/user.doc'
 import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
 import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
@@ -504,6 +505,9 @@ describe('Jobs API (e2e)', () => {
             await request(app.getHttpServer()).delete(`/v1/jobs/${created.body.job.id}`).set(as(SAMPLER)).expect(204)
 
             expect(deleteObject).not.toHaveBeenCalled()
+            expect(
+                await app.get<Model<UploadTombstoneDoc>>(getModelToken(UPLOAD_TOMBSTONE_MODEL)).countDocuments(),
+            ).toBe(0)
         })
     })
 
@@ -628,6 +632,42 @@ describe('Jobs API (e2e)', () => {
             await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(204)
 
             expect(deleteObject).toHaveBeenCalledWith(path)
+        })
+
+        describe('while its upload URL may still work', () => {
+            const URL_TTL_MS = 15 * 60 * 1000
+            let tombstones: Model<UploadTombstoneDoc>
+
+            const tombstonesFor = (jobId: string) =>
+                tombstones.find({ path: `users/${DELETER}/jobs/${jobId}/video` }).lean<UploadTombstoneDoc[]>()
+
+            beforeAll(() => {
+                tombstones = app.get(getModelToken(UPLOAD_TOMBSTONE_MODEL))
+            })
+
+            it('leaves the daily cleanup the upload path to delete once that URL has expired', async () => {
+                const jobId = await createAs(DELETER)
+                const createdAt = (await jobs.findById(jobId).lean<StoredJob>())!.createdAt.getTime()
+
+                await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(204)
+
+                const [tombstone] = await tombstonesFor(jobId)
+
+                expect(tombstone.deleteAfter.getTime()).toBeGreaterThanOrEqual(createdAt + URL_TTL_MS)
+                await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(404)
+            })
+
+            it('leaves nothing for a job whose upload URL has expired', async () => {
+                const jobId = await createAs(DELETER)
+
+                await jobs.collection.updateOne(
+                    { _id: new Types.ObjectId(jobId) },
+                    { $set: { createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) } },
+                )
+                await request(app.getHttpServer()).delete(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(204)
+
+                expect(await tombstonesFor(jobId)).toEqual([])
+            })
         })
 
         it("refuses to delete another user's analysis", async () => {

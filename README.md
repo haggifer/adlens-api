@@ -41,7 +41,11 @@ their own repos.
   in progress after the expiry is running, and keeps its video. Every object's path is made from its user and job ids,
   so the jobs find them all. The job document stays, marked `videoDeletedAt` so it is handled once (with no upper age
   bound, a missed or failed day is caught up the next). An analyzed job keeps its video, which its findings'
-  timestamps replay, and a sample's shared video is never deleted.
+  timestamps replay, and a sample's shared video is never deleted. Deleting a job removes its document, so a job
+  deleted while the create-only upload URL signed at its creation still worked (15 minutes, plus an hour's margin for
+  an upload still arriving) leaves a tombstone (`upload_tombstones`: path, `deleteAfter`), and the cleanup then
+  deletes that path, which a late PUT could have filled, unless a job still references it
+  ([`UploadTombstoneCleanupService`](src/cleanup/upload-tombstone-cleanup.service.ts)).
   Last, it retries the refunds that ended jobs still owe (see Quota), including any the expiry couldn't make. A step
   that fails for one job or user logs it and goes on; any failure makes the execution exit 1.
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through

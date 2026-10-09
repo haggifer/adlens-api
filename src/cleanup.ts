@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core'
 import { AbandonedUploadCleanupService } from './cleanup/abandoned-upload-cleanup.service'
 import { AnonymousCleanupService } from './cleanup/anonymous-cleanup.service'
 import { CleanupModule } from './cleanup/cleanup.module'
+import { UploadTombstoneCleanupService } from './cleanup/upload-tombstone-cleanup.service'
 import { createLogger } from './common/cloud-logger'
 import { describeErrorWithStack } from './common/error-message'
 import { readLogFormat } from './config/log-format'
@@ -28,9 +29,10 @@ const run = async (): Promise<number> => {
         const expired = await lifecycle.expireStaleJobs()
         const anonymous = await app.get(AnonymousCleanupService).run()
         const uploads = await app.get(AbandonedUploadCleanupService).run()
+        const lateUploads = await app.get(UploadTombstoneCleanupService).run()
         const refunds = await lifecycle.refundOwedCharges()
 
-        const failed = expired.failed + anonymous.failed + uploads.failed + refunds.failed
+        const failed = expired.failed + anonymous.failed + uploads.failed + lateUploads.failed + refunds.failed
 
         return failed > 0 ? EXIT_FAILED : EXIT_DONE
     } finally {
