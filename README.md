@@ -482,7 +482,9 @@ npm run test:auth # after a build: sign-up, verification, reset, deletion, anony
 ```
 
 `npm run knip` (also in CI) reports unused files, exports and dependencies, which ESLint can't see across files. Its
-config (`knip.json`) lists the three entry points (`main.ts`, `worker.ts`, `cleanup.ts`); add any new one there.
+config (`knip.json`) lists the three entry points (`main.ts`, `worker.ts`, `cleanup.ts`); add any new one there. It
+also lists the e2e and auth-flow tests itself, with Knip's Node.js plugin off: that plugin takes every `test-*` file
+for a `node --test` entry, so the unused exports of a helper like `src/testing/test-ruleset.ts` went unreported.
 
 The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, because the guarantees that matter
 (conditional transitions, concurrent charges, at-most-once refunds) live in query semantics that mocks can't prove.

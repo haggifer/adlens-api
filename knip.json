@@ -1,5 +1,6 @@
 {
     "$schema": "https://unpkg.com/knip@5/schema.json",
-    "entry": ["src/main.ts", "src/worker.ts", "src/cleanup.ts"],
-    "ignoreExportsUsedInFile": { "interface": true, "type": true }
+    "entry": ["src/main.ts", "src/worker.ts", "src/cleanup.ts", "test/**/*.e2e-spec.ts", "test/**/*.test.mjs"],
+    "ignoreExportsUsedInFile": { "interface": true, "type": true },
+    "node": false
 }
