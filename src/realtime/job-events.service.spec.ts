@@ -25,6 +25,15 @@ describe('JobEventsService', () => {
         await jest.runOnlyPendingTimersAsync()
     }
 
+    // Until the restart has closed the broken stream and is waiting to reopen.
+    const waitForRestartTimer = async () => {
+        for (let i = 0; i < 10 && jest.getTimerCount() === 0; i++) {
+            await Promise.resolve()
+        }
+
+        expect(jest.getTimerCount()).toBe(1)
+    }
+
     beforeEach(() => {
         jest.useFakeTimers()
         streams = []
@@ -66,5 +75,31 @@ describe('JobEventsService', () => {
 
         expect(watch).toHaveBeenCalledTimes(2)
         expect(lastOptions()).not.toHaveProperty('resumeAfter')
+    })
+
+    it('never reopens once the module is being destroyed, even when an error came just before', async () => {
+        streams[0].emit('error', mongoError('connection reset', 6))
+        await waitForRestartTimer()
+
+        await service.onModuleDestroy()
+        await jest.runAllTimersAsync()
+
+        expect(watch).toHaveBeenCalledTimes(1)
+        expect(jest.getTimerCount()).toBe(0)
+    })
+
+    it('doesn’t open a stream when the database connects while the module is being destroyed', async () => {
+        const watchLater = jest.fn()
+        const conn = Object.assign(new EventEmitter(), {
+            readyState: 0,
+            db: { collection: () => ({ watch: watchLater }) },
+        }) as unknown as Connection
+        const later = new JobEventsService(conn, {} as JobsGateway)
+
+        later.onModuleInit()
+        await later.onModuleDestroy()
+        ;(conn as unknown as EventEmitter).emit('open')
+
+        expect(watchLater).not.toHaveBeenCalled()
     })
 })

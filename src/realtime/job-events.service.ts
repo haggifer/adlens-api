@@ -22,6 +22,7 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(JobEventsService.name)
     private stream?: mongo.ChangeStream
     private resumeToken?: unknown
+    private restartTimer?: NodeJS.Timeout
     private isClosing = false
 
     constructor(
@@ -37,12 +38,18 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    // A restart pending at shutdown would reopen a stream on a connection Nest is closing, and keep the process alive.
     async onModuleDestroy(): Promise<void> {
         this.isClosing = true
+        clearTimeout(this.restartTimer)
         await this.stream?.close()
     }
 
     private watch(): void {
+        if (this.isClosing) {
+            return
+        }
+
         const db = this.conn.db
 
         if (!db) {
@@ -92,6 +99,6 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
             return
         }
 
-        setTimeout(() => this.watch(), RESTART_DELAY_MS)
+        this.restartTimer = setTimeout(() => this.watch(), RESTART_DELAY_MS)
     }
 }
