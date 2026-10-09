@@ -230,9 +230,11 @@ answering is a plain reply; its text isn't stored.
 
 - **Sessions are httpOnly, `SameSite=Lax` cookies.** The web app (`www.useadlens.com`) and the API (`api.useadlens.com`)
   share the parent domain (`COOKIE_DOMAIN`), so the cookie is first-party for both and no token ever sits in
-  JavaScript-readable storage. Socket.IO authenticates its handshake with the same cookie. The API's own session
-  reads (`AuthService.getUserId`: the guard, admission, the socket handshake) never refresh a session, since the
-  refreshed cookie would be dropped while the database row is extended; the web's `get-session` refreshes it.
+  JavaScript-readable storage. Socket.IO authenticates its handshake with the same cookie, and accepts a handshake
+  only from the web app's origins (CORS never applies to a WebSocket; a missing `Origin` is refused, since browsers
+  always send one). The API's own session reads (`AuthService.getUserId`: the guard, admission, the socket handshake)
+  never refresh a session, since the refreshed cookie would be dropped while the database row is extended; the web's
+  `get-session` refreshes it.
 - **Anonymous sessions** (Better Auth's `anonymous` plugin): the web signs a visitor in anonymously right before their
   first analysis, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
   `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
