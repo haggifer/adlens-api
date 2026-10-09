@@ -280,6 +280,35 @@ describe('evaluateMetadataRules', () => {
         })
     })
 
+    // TikTok in-feed: 540 px on the short side, but 640×640 for a square video.
+    describe('a minimum resolution with its own minimum for square videos', () => {
+        const checkSquare = (width: number, height: number) => {
+            const base = ruleSet.rules.find(
+                (candidate) => candidate.id === 'amazon.creative_spec.video_resolution_min',
+            )!
+            const rule = { ...base, value: 540, params: { squareMin: 640 } }
+
+            return evaluateMetadataRules(ruleSet, [rule], { ...MEDIA, width, height }, SELECTED)[0]
+        }
+
+        it('holds a square video to the square minimum', () => {
+            expect(checkSquare(600, 600)).toMatchObject({
+                verdict: 'fail',
+                detail: 'It’s 600×600, a square video, less than the 640 px required for square videos.',
+            })
+            expect(checkSquare(640, 640)).toMatchObject({
+                verdict: 'pass',
+                detail: 'It’s 640×640, a square video, at least the 640 px required for square videos.',
+            })
+        })
+
+        it('holds any other shape to the short-side minimum', () => {
+            expect(checkSquare(540, 960).verdict).toBe('pass')
+            expect(checkSquare(960, 540).verdict).toBe('pass')
+            expect(checkSquare(500, 900).verdict).toBe('fail')
+        })
+    })
+
     it('says what was measured against the limit, as a sentence', () => {
         expect(checkOf('amazon.creative_spec.video_max_length', { durationS: 50.04 }).detail).toBe(
             'It’s 50 seconds long, longer than the 45 seconds allowed.',

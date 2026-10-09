@@ -44,6 +44,20 @@ describe('ruleSchema', () => {
         )
     })
 
+    it('accepts a separate minimum for square videos on a minimum resolution, and nothing else in its params', () => {
+        const resolution = (params: Record<string, unknown> | undefined) => ({
+            ...METADATA_RULE,
+            checkType: 'resolution_min',
+            value: 540,
+            params,
+        })
+
+        expect(ruleSchema.safeParse(resolution(undefined)).success).toBe(true)
+        expect(ruleSchema.safeParse(resolution({ squareMin: 640 })).success).toBe(true)
+        expect(ruleSchema.safeParse(resolution({ squareMinimum: 640 })).success).toBe(false)
+        expect(ruleSchema.safeParse(resolution({ squareMin: -1 })).success).toBe(false)
+    })
+
     it('still needs a threshold for the other metadata checks', () => {
         expect(ruleSchema.safeParse({ ...METADATA_RULE, value: undefined }).success).toBe(false)
     })

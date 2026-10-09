@@ -14,6 +14,7 @@ import {
 import {
     aspectRatioListParamsSchema,
     aspectRatioRangeParamsSchema,
+    resolutionParamsSchema,
     resolveRef,
     type Rule,
     RULE_PLATFORMS,
@@ -173,6 +174,20 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
             }
 
             const shortSide = Math.min(media.width, media.height)
+            const { squareMin } = resolutionParamsSchema.parse(rule.params ?? {})
+            const isSquare = Math.abs(media.width / media.height - 1) <= ASPECT_RATIO_TOLERANCE
+
+            if (squareMin !== undefined && isSquare) {
+                const square = `It’s ${formatSize(media)}, a square video`
+
+                return shortSide < squareMin
+                    ? {
+                          verdict: 'fail',
+                          detail: `${square}, less than the ${squareMin} px required for square videos.`,
+                      }
+                    : { verdict: 'pass', detail: `${square}, at least the ${squareMin} px required for square videos.` }
+            }
+
             const size = `It’s ${formatSize(media)}, ${shortSide} px on its short side`
 
             return shortSide < value

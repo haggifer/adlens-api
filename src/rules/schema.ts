@@ -34,6 +34,10 @@ export const aspectRatioRangeParamsSchema = z
     .object({ min: aspectRatioSchema, max: aspectRatioSchema })
     .refine(({ min, max }) => toRatio(min) <= toRatio(max), { message: 'min must not be above max' })
 
+// A minimum resolution is on the short side (`value`); TikTok asks more of a square video (640×640 against 540 on the
+// short side otherwise), so `squareMin` may raise it for squares.
+export const resolutionParamsSchema = z.strictObject({ squareMin: z.number().int().positive() }).partial()
+
 const RATIO_PARAMS_SCHEMAS: Partial<Record<string, z.ZodType>> = {
     aspect_ratio_one_of: aspectRatioListParamsSchema,
     aspect_ratio_between: aspectRatioRangeParamsSchema,
@@ -69,6 +73,9 @@ export const ruleSchema = z
         unit: z.string().optional(),
         params: z.record(z.string(), z.unknown()).optional(),
         weight: z.number().int().min(1).max(5).optional(),
+    })
+    .refine((r) => r.checkType !== 'resolution_min' || resolutionParamsSchema.optional().safeParse(r.params).success, {
+        message: "a resolution_min rule's params may only hold squareMin, a positive whole number of pixels",
     })
     .refine((r) => (r.modality === 'metadata') === (r.checkType !== 'judgment'), {
         message: 'metadata rules need a deterministic checkType; all others must be judgment',
