@@ -365,7 +365,8 @@ rules are then routed by `modality`:
   6.02–6.04 s), and shown with two decimals when one would round them to the limit. `resolution_min` is a minimum
   on the short side, `min(width, height)`, as the platforms state it per orientation;
 - `text` / `visual` / `audiovisual` → sent to the model as `{ id, check, severity, modality }`; quote and resolved
-  source link are attached back by id, and ids the model invents are dropped;
+  source link are attached back by id (the ruleset schema refuses two rules with one id), ids the model invents are
+  dropped, and a rule it answers twice keeps its first verdict;
 - `out_of_creative` → an advisory checklist, never judged: the model only names the advisories whose subject the ad
   falls under (`advisories` in its output), and only those are stored. Content rules reach the model ordered by
   importance (blocker policies first, best-practice advice last).

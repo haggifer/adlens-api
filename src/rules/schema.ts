@@ -93,12 +93,21 @@ export const ruleSetSchema = z
         rules: z.array(ruleSchema).min(1),
     })
     .superRefine((set, ctx) => {
+        const ids = new Set<string>()
+
         for (const r of set.rules) {
             const key = r.ref.match(/^\{\{([A-Z0-9_]+)\}\}/)?.[1]
 
             if (key && !set.sources[key]) {
                 ctx.addIssue({ code: 'custom', message: `ref uses unknown source ${key} in ${r.id}` })
             }
+
+            // The model's findings and the report are matched to rules by id.
+            if (ids.has(r.id)) {
+                ctx.addIssue({ code: 'custom', message: `duplicate rule id ${r.id}` })
+            }
+
+            ids.add(r.id)
         }
     })
 

@@ -1,6 +1,6 @@
 import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
 import { TEST_RULESET } from '../testing/test-ruleset'
-import { evaluateMetadataRules, projectForModel, resolveSettings, selectRules } from './index'
+import { buildFindings, evaluateMetadataRules, projectForModel, resolveSettings, selectRules } from './index'
 import type { Rule } from './schema'
 
 const ruleSet = TEST_RULESET
@@ -368,5 +368,29 @@ describe('evaluateMetadataRules', () => {
             quote: 'Between 6 and 45 seconds (20 secs or less highly recommended)',
             ref: expect.stringMatching(/^https:\/\/advertising\.amazon\.com\/resources\/ad-specs\//),
         })
+    })
+})
+
+describe('buildFindings', () => {
+    const contentRule = ruleSet.rules.find((rule) => rule.modality === 'visual')!
+
+    it('keeps the first verdict on a rule the model answered twice, so the report counts it once', () => {
+        const findings = buildFindings(
+            ruleSet,
+            [contentRule],
+            [
+                { id: contentRule.id, verdict: 'fail', evidence: 'first' },
+                { id: contentRule.id, verdict: 'warning', evidence: 'second' },
+            ],
+        )
+
+        expect(findings).toHaveLength(1)
+        expect(findings[0]).toMatchObject({ id: contentRule.id, verdict: 'fail', evidence: 'first' })
+    })
+
+    it('drops ids the model invented', () => {
+        expect(buildFindings(ruleSet, [contentRule], [{ id: 'made.up_rule', verdict: 'fail', evidence: 'e' }])).toEqual(
+            [],
+        )
     })
 })

@@ -286,16 +286,20 @@ export const buildAdvisories = (ruleSet: RuleSet, rules: Rule[]): Advisory[] =>
         ...citationOf(ruleSet, rule),
     }))
 
-// Maps the model's verdicts back to full findings by rule id. Ids that weren't sent are dropped (hallucination guard).
+// Maps the model's verdicts back to full findings by rule id. Ids that weren't sent are dropped (hallucination guard),
+// and a rule answered twice keeps its first verdict, so the report counts it once.
 export const buildFindings = (ruleSet: RuleSet, contentRules: Rule[], modelFindings: ModelFinding[]): Finding[] => {
     const byId = new Map(contentRules.map((rule) => [rule.id, rule]))
+    const answered = new Set<string>()
 
     return modelFindings.flatMap((finding) => {
         const rule = byId.get(finding.id)
 
-        if (!rule) {
+        if (!rule || answered.has(rule.id)) {
             return []
         }
+
+        answered.add(rule.id)
 
         return [
             {
