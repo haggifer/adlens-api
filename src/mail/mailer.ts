@@ -9,6 +9,8 @@ export interface MailMessage {
     text: string
     html: string
     replyTo?: string
+    // Replaces MAIL_FROM's display name for this message; the address stays MAIL_FROM's.
+    fromName?: string
     attachments?: MailAttachment[]
 }
 
@@ -17,8 +19,20 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 const encodeAttachments = (attachments: MailAttachment[] | undefined) =>
     attachments?.map(({ filename, content }) => ({ filename, content: content.toString('base64') }))
 
-const toResendPayload = (from: string, { to, subject, text, html, replyTo, attachments }: MailMessage) => ({
-    from,
+// MAIL_FROM is either an address or "Name <address>".
+const withDisplayName = (from: string, name: string | undefined): string => {
+    if (!name) {
+        return from
+    }
+
+    const address = /<([^>]+)>/.exec(from)?.[1] ?? from
+
+    // Quotes and backslashes would break out of the quoted name.
+    return `"${name.replace(/["\\]/g, '')}" <${address}>`
+}
+
+const toResendPayload = (from: string, { to, subject, text, html, replyTo, fromName, attachments }: MailMessage) => ({
+    from: withDisplayName(from, fromName),
     to: [to],
     subject,
     text,

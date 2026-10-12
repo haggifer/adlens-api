@@ -8,7 +8,8 @@ import {
     type SendContactMessagePayload,
 } from 'adlens-shared'
 import { Model } from 'mongoose'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
+import type { IncomingHttpHeaders } from 'node:http'
 import { challengeFailed, ChallengeVerifier } from '../challenge/challenge-verifier'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
@@ -20,6 +21,7 @@ import { type MailAttachment, Mailer } from '../mail/mailer'
 import { type ObjectContent, StorageService } from '../storage/storage.service'
 import { attachmentFilename, contactAttachmentPath } from './contact-attachments'
 import { contactEmail } from './contact-email'
+import { ContactSenderReader } from './contact-sender'
 import { ContactLimits } from './contact-limits'
 
 // Long enough to upload five images on a slow connection and finish writing; the signed URLs expire sooner.
@@ -33,6 +35,9 @@ const invalidDraft = (message: string) =>
 
 const rateLimited = () =>
     new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.RateLimited, 'Too many messages')
+
+// "3F9A2C": short enough to say or search for, in the subject and the logs.
+const createRef = (): string => randomBytes(3).toString('hex').toUpperCase()
 
 const toDraftFiles = (draftId: string, files: CreateContactUploadsInput['files']): ContactDraftFile[] =>
     files.map(({ name, contentType, size }, index) => ({
@@ -54,6 +59,7 @@ export class ContactService {
         private readonly storage: StorageService,
         private readonly mailer: Mailer,
         private readonly config: ConfigService<Env, true>,
+        private readonly senders: ContactSenderReader,
     ) {}
 
     // A draft and one signed, create-only upload per declared image; the message then sends the draft id instead of
@@ -83,7 +89,8 @@ export class ContactService {
         return { draftId, uploads }
     }
 
-    async send(input: SendContactMessagePayload, ipSource: IpSource): Promise<void> {
+    // The request's headers name the sender's session, if any, and device, for the facts under the message.
+    async send(input: SendContactMessagePayload, ipSource: IpSource, headers: IncomingHttpHeaders): Promise<void> {
         // A bot filled in the hidden field: answer as if it worked, so it learns nothing.
         if (input.website) {
             this.logger.warn('dropped a contact message that filled in the honeypot')
@@ -103,12 +110,20 @@ export class ContactService {
             throw rateLimited()
         }
 
+        const sender = await this.senders.read(headers)
+        const ref = createRef()
+        const apiVersion = this.config.get('K_REVISION', { infer: true }) ?? null
+
         try {
-            await this.mailer.send(contactEmail(to, { ...input, email }, attachments))
+            await this.mailer.send(
+                contactEmail({ to, message: { ...input, email }, sender, ref, apiVersion, attachments }),
+            )
         } catch (err) {
-            this.logger.error(`could not send a contact message: ${describeError(err)}`)
+            this.logger.error(`could not send contact message ${ref}: ${describeError(err)}`)
             throw unavailable('The message could not be sent')
         }
+
+        this.logger.log(`sent contact message ${ref} from user ${sender.account?.id ?? 'none'}`)
     }
 
     private getRecipient(): string {

@@ -30,6 +30,21 @@ describe('ResendMailer', () => {
         ])
     })
 
+    it('keeps the configured sender when a message names none', async () => {
+        await new ResendMailer('key', 'AdLens <hello@mail.adlens.test>').send(MESSAGE)
+
+        expect(sentBody().from).toBe('AdLens <hello@mail.adlens.test>')
+    })
+
+    it("replaces the sender's display name, never its address, when a message names one", async () => {
+        await new ResendMailer('key', 'AdLens <hello@mail.adlens.test>').send({
+            ...MESSAGE,
+            fromName: 'ann "x" via AdLens',
+        })
+
+        expect(sentBody().from).toBe('"ann x via AdLens" <hello@mail.adlens.test>')
+    })
+
     it('sends no attachments field without attachments', async () => {
         await new ResendMailer('key', 'AdLens <hello@mail.adlens.test>').send(MESSAGE)
 

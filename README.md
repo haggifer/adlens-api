@@ -198,6 +198,16 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
 adlens-shared `CONTACT_MESSAGE_MAX_LENGTH`) goes to `CONTACT_EMAIL` through Resend with the visitor as Reply-To, so
 answering is a plain reply; its text isn't stored.
 
+- **The email is built for a busy support inbox** ([`contact-email.ts`](src/contact/contact-email.ts)):
+    - It comes from "\<the sender's local part\> via AdLens", never their full address, which spam filters read as
+      spoofing.
+    - Its subject is `[AdLens] <the message's first line, cut at 60 characters> · #<ref>`: the prefix for filters, the
+      preview for triage, and a reference that keeps each message in its own thread. The same reference is logged.
+    - The message comes first, then the facts: who wrote, their account (access, id, created, its own address when it
+      isn't the reply address), analyses in the last 7 days, their last analysis (id, status, error code), their browser
+      and system, the screenshots, and the reference with the API revision (`K_REVISION`).
+    - The facts come from the request's session, if any ([`ContactSenderReader`](src/contact/contact-sender.ts)). Reading
+      them never fails the message: the email then says the account couldn't be read. The IP address is never included.
 - **Honeypot**: the form hides a `website` field; a message that fills it in answers 204 and sends nothing.
 - **Turnstile**: a message carries either a `challengeToken` or the `draftId` of its images (exactly one, else 400
   `VALIDATION_FAILED`). The token is verified with Cloudflare's `siteverify` before anything is counted (403

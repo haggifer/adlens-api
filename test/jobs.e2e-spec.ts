@@ -757,6 +757,28 @@ describe('Jobs API (e2e)', () => {
             expect(sendMail.mock.calls[0][0].text).toContain(MESSAGE.message)
         })
 
+        it('describes a signed-in sender, their device and a reference for the support inbox', async () => {
+            await request(app.getHttpServer())
+                .post('/v1/contact')
+                .set({
+                    'x-forwarded-for': nextNetwork(),
+                    'user-agent':
+                        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36',
+                    ...as(OWNER),
+                })
+                .send(MESSAGE)
+                .expect(204)
+
+            const mail = sendMail.mock.calls[0][0]
+
+            expect(mail.subject).toMatch(/^\[AdLens\] .+ · #[0-9A-F]{6}$/)
+            expect(mail.fromName).toBe(`${MESSAGE.email.split('@')[0]} via AdLens`)
+            expect(mail.text).toContain(`Account: member · ${OWNER}`)
+            expect(mail.text).toContain(`Account email: ${OWNER}@example.com`)
+            expect(mail.text).toMatch(/Analyses: \d+ of \d+ in the last 7 days/)
+            expect(mail.text).toContain('Device: Chrome 154 · Android 10')
+        })
+
         it('escapes the message in the HTML version', async () => {
             await sendContact({ ...MESSAGE, message: '<script>alert(1)</script> hello there' }).expect(204)
 
