@@ -93,10 +93,6 @@ const toFacts = ({ message, sender, ref, apiVersion, attachments = [] }: Contact
     return facts
 }
 
-// "ann via AdLens" in the inbox list, so it reads like mail from the person; never their full address, which spam
-// filters take for a spoofed sender.
-const toSenderName = (email: string): string => `${email.split('@')[0]} via AdLens`
-
 const toText = (message: string, facts: Fact[]): string =>
     `${message}\n\n—\n${facts.map(([label, value]) => `${label}: ${value}`).join('\n')}`
 
@@ -120,7 +116,9 @@ export const contactEmail = (input: ContactEmailInput): MailMessage => {
 
     return {
         to,
-        fromName: toSenderName(message.email),
+        // The inbox list names the person. Some corporate spam filters distrust an address as a display name; mail from
+        // our own verified domain to the team's inbox isn't judged on it.
+        fromName: message.email,
         replyTo: message.email,
         // "ref", not "#": a # and six hex digits read as a CSS colour.
         subject: `[AdLens] ${toPreview(message.message)} · ref ${ref}`,

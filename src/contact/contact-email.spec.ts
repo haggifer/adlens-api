@@ -32,7 +32,7 @@ describe('contactEmail', () => {
 
         expect(mail.subject).toBe('[AdLens] The upload didn’t finish on my phone. · ref 3F9A2C')
         expect(mail.replyTo).toBe('ann@example.com')
-        expect(mail.fromName).toBe('ann via AdLens')
+        expect(mail.fromName).toBe('ann@example.com')
     })
 
     it('cuts a long first line in the subject', () => {
