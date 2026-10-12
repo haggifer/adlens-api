@@ -450,7 +450,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `WEB_ORIGIN`             | `http://localhost:3000`                | Web origin for CORS, Socket.IO, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
 | `COOKIE_DOMAIN`          | —                                      | Parent domain for the session cookie in production (`useadlens.com`)                                                                                             |
 | `RESEND_API_KEY`         | required by the API                    | Resend sending key; the API won't start without it                                                                                                               |
-| `CONTACT_EMAIL`          | —                                      | Where Contact form messages go; unset, the form answers 503                                                                                                      |
+| `CONTACT_EMAIL`          | required by the API                    | Where Contact form messages go; the API won't start without it                                                                                                   |
 | `GOOGLE_CLIENT_ID`       | —                                      | Google sign-in; enabled with `GOOGLE_CLIENT_SECRET` (both or neither)                                                                                            |
 | `GOOGLE_CLIENT_SECRET`   | —                                      | Google OAuth client secret                                                                                                                                       |
 | `GITHUB_CLIENT_ID`       | —                                      | GitHub sign-in; enabled with `GITHUB_CLIENT_SECRET` (both or neither)                                                                                            |
@@ -479,7 +479,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 ```bash
 gcloud auth application-default login   # once; the account needs Vertex AI User
 npm install
-# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, RESEND_API_KEY, ANALYZE_LOCAL=1, STORAGE_KEY_FILE, TURNSTILE_SECRET_KEY
+# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, RESEND_API_KEY, CONTACT_EMAIL, ANALYZE_LOCAL=1, STORAGE_KEY_FILE, TURNSTILE_SECRET_KEY
 npm run start:dev                        # keeps dist/ built, which the local worker process runs
 ```
 

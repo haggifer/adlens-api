@@ -36,6 +36,18 @@ const invalidDraft = (message: string) =>
 const rateLimited = () =>
     new ApiException(HttpStatus.TOO_MANY_REQUESTS, RequestErrorCode.RateLimited, 'Too many messages')
 
+// The API can't start without it: a Contact form with nowhere to send to would fail every message. The worker, which
+// shares the env schema, sends no email.
+const readRecipient = (config: ConfigService<Env, true>): string => {
+    const to = config.get('CONTACT_EMAIL', { infer: true })
+
+    if (!to) {
+        throw new Error('CONTACT_EMAIL is required: Contact form messages are sent to it')
+    }
+
+    return to
+}
+
 // "3F9A2C": short enough to say or search for, in the subject and the logs.
 const createRef = (): string => randomBytes(3).toString('hex').toUpperCase()
 
@@ -50,6 +62,7 @@ const toDraftFiles = (draftId: string, files: CreateContactUploadsInput['files']
 @Injectable()
 export class ContactService {
     private readonly logger = new Logger(ContactService.name)
+    private readonly recipient: string
 
     constructor(
         @InjectModel(CONTACT_DRAFT_MODEL) private readonly drafts: Model<ContactDraftDoc>,
@@ -60,13 +73,13 @@ export class ContactService {
         private readonly mailer: Mailer,
         private readonly config: ConfigService<Env, true>,
         private readonly senders: ContactSenderReader,
-    ) {}
+    ) {
+        this.recipient = readRecipient(config)
+    }
 
     // A draft and one signed, create-only upload per declared image; the message then sends the draft id instead of
     // a second Turnstile token.
     async createUploads(input: CreateContactUploadsInput, ipSource: IpSource): Promise<CreateContactUploadsResponse> {
-        this.getRecipient()
-
         const { ip, bucketKey } = this.network.resolve(ipSource)
 
         await this.verifyChallenge(input.challengeToken, ip)
@@ -97,7 +110,6 @@ export class ContactService {
             return
         }
 
-        const to = this.getRecipient()
         const { ip, bucketKey } = this.network.resolve(ipSource)
         // Before the caps, so requests without a passed check can't use them up.
         const files = await this.admit(input, ip)
@@ -116,7 +128,14 @@ export class ContactService {
 
         try {
             await this.mailer.send(
-                contactEmail({ to, message: { ...input, email }, sender, ref, apiVersion, attachments }),
+                contactEmail({
+                    to: this.recipient,
+                    message: { ...input, email },
+                    sender,
+                    ref,
+                    apiVersion,
+                    attachments,
+                }),
             )
         } catch (err) {
             this.logger.error(`could not send contact message ${ref}: ${describeError(err)}`)
@@ -124,16 +143,6 @@ export class ContactService {
         }
 
         this.logger.log(`sent contact message ${ref} from user ${sender.account?.id ?? 'none'}`)
-    }
-
-    private getRecipient(): string {
-        const to = this.config.get('CONTACT_EMAIL', { infer: true })
-
-        if (!to) {
-            throw unavailable('Contact is not set up')
-        }
-
-        return to
     }
 
     private async verifyChallenge(token: string | undefined, ip: string | null): Promise<void> {
