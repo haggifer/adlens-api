@@ -16,6 +16,7 @@ import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
 import { ACCOUNT_LINK_FAILED, EMAIL_MISMATCH, EMAIL_NOT_SENT, SIGN_IN_REQUIRED } from './auth-error-codes'
 import { isDisposableEmail } from './disposable-email'
+import { buildMailboxPattern } from './email-alias'
 import { createRateLimitStorage } from './rate-limit-storage'
 import type { SocialProviderOptions } from './social-providers'
 
@@ -156,6 +157,22 @@ export const createAuth = ({
     onLinkAnonymous,
 }: AuthOptions) => {
     const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
+    const users = db.collection<{ email: string; isAnonymous?: boolean }>(USER_COLLECTION)
+
+    // An account, anonymous ones aside, whose address reaches the same mailbox: ann+2@gmail.com, a.n.n@gmail.com.
+    const hasMailboxAccount = async (email: string): Promise<boolean> => {
+        // Not an address yet: Better Auth's own validation answers it.
+        if (!email.includes('@')) {
+            return false
+        }
+
+        const account = await users.findOne(
+            { email: { $regex: buildMailboxPattern(email) }, isAnonymous: { $ne: true } },
+            { projection: { _id: 1 } },
+        )
+
+        return account !== null
+    }
     // Secure only over HTTPS, as JobsController writes it: locally the API runs on plain http://localhost.
     const isSecureCookie = new URL(baseURL).protocol === 'https:'
     const rateLimits = createRateLimitStorage(db, secret)
@@ -363,13 +380,27 @@ export const createAuth = ({
 
                         return
                     }
-                    case '/sign-up/email':
-                        if (isDisposableEmail(String(ctx.body?.email ?? ''))) {
+                    case '/sign-up/email': {
+                        const email = String(ctx.body?.email ?? '')
+
+                        if (isDisposableEmail(email)) {
                             throw new APIError('BAD_REQUEST', {
                                 code: RequestErrorCode.DisposableEmail,
                                 message: 'Sign up with a permanent email address',
                             })
                         }
+
+                        // One account per mailbox, so aliases can't stack the weekly allowance. The same answer as an
+                        // address already in use, so the web offers Sign in either way.
+                        const isMailboxTaken = await hasMailboxAccount(email)
+
+                        if (isMailboxTaken) {
+                            throw new APIError('UNPROCESSABLE_ENTITY', {
+                                code: 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
+                                message: 'An account already uses this mailbox',
+                            })
+                        }
+                    }
                 }
             }),
             after: createAuthMiddleware(async () => sendQueuedMail(mailer)),

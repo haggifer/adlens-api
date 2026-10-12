@@ -267,6 +267,12 @@ answering is a plain reply; its text isn't stored.
   deletes the session.
 - **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
   `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
+- **One account per mailbox** ([`email-alias.ts`](src/auth/email-alias.ts)): a sign-up whose address reaches the same
+  mailbox as an existing account (`ann+2@gmail.com`, `a.n.n@gmail.com` or `ann@googlemail.com` next to `ann@gmail.com`;
+  a `+tag` on any domain) answers like an address already in use (422 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`), so
+  aliases can't stack the weekly allowance. The check matches the stored addresses with a pattern built from the new
+  one, so nothing extra is stored and existing accounts count. Anonymous users are ignored; Google and GitHub sign-in
+  are unaffected.
 - **Unconfirmed accounts sign in.** Sign-up signs the user in straight away and mails a confirmation link, and an
   unconfirmed account can sign in again. Until it confirms its email (`emailVerified` on the user document) it's
   limited like an anonymous user (see [Abuse limits](#abuse-limits)) and can't link a provider, but unlike an

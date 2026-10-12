@@ -217,6 +217,32 @@ test('a duplicate sign-up answers that the address is in use', async () => {
     assert.ok(!cookieOf(res).includes('session_token'))
 })
 
+test('a sign-up with an alias of an existing address answers that the address is in use', async () => {
+    const [local, domain] = EMAIL.split('@')
+    const res = await post('/api/auth/sign-up/email', {
+        name: 'Alias',
+        email: `${local}+second@${domain}`,
+        password: 'other-password',
+    })
+
+    assert.equal(res.status, 422)
+    assert.equal((await res.json()).code, 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')
+    assert.ok(!cookieOf(res).includes('session_token'))
+})
+
+test('Gmail addresses differing only in dots, +tags or googlemail.com share one account', async () => {
+    await signUp('ann.lee@gmail.com')
+
+    const res = await post('/api/auth/sign-up/email', {
+        name: 'Alias',
+        email: 'annlee+x@googlemail.com',
+        password: 'other-password',
+    })
+
+    assert.equal(res.status, 422)
+    assert.equal((await res.json()).code, 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')
+})
+
 test('confirmation emails to one address stop at 5 an hour, however often they are resent', async () => {
     const email = 'flooded@example.com'
     const signedUp = await signUp(email, 'flood-password')
