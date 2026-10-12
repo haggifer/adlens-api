@@ -286,9 +286,10 @@ answering is a plain reply; its text isn't stored.
   email is verified, so an unconfirmed sign-up can't be taken over. Google always shows its account picker.
   The providers' access, refresh and ID tokens are never stored: AdLens only needs to know who signed in.
 - **Password reset** by emailed link (1-hour token); a reset revokes every existing session.
-- **Emailed links open the web app** (`/confirm-email`, `/reset-password`), never the API: users only see the site's
-  domain, and the confirmation page calls `verify-email` from the browser once it loads, so mail scanners that fetch
-  links without running JavaScript can't use the token up. **Only the account's own session confirms it**: a
+- **Emailed links open the web app** (`/confirm-email`, and `/?reset-password-token=` for a reset, which opens the
+  reset form in the web's auth modal), never the API: users only see the site's domain, and the confirmation page calls
+  `verify-email` from the browser once it loads, so mail scanners that fetch links without running JavaScript can't
+  use the token up. **Only the account's own session confirms it**: a
   `hooks.before` on `/verify-email` reads the token's address the way Better Auth does (`verifyJWT` with the auth
   secret) and answers 401 `SIGN_IN_REQUIRED` without a session or with an anonymous one (the web asks the visitor to
   sign in and opens the link again), and 403 `EMAIL_MISMATCH` in another account's session; neither sets a cookie. A

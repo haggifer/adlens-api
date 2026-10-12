@@ -108,11 +108,12 @@ const queueMail = async (mailer: Mailer, message: MailMessage): Promise<void> =>
     queue.push(message)
 }
 
-// Emailed links open the web app, not Better Auth's own endpoints, so users only ever see the site's domain. The
-// confirmation page confirms from the browser once it loads, and only in the account's own session (the /verify-email
-// hook below), so a mail scanner that fetches the link confirms nothing.
-const toWebLink = (webOrigin: string, path: string, token: string) =>
-    `${webOrigin}${path}?token=${encodeURIComponent(token)}`
+// Emailed links open the web app, not Better Auth's own endpoints, so users only ever see the site's domain; a reset
+// link opens the home page, which shows the reset form in its auth modal. The confirmation page confirms from the
+// browser once it loads, and only in the account's own session (the /verify-email hook below), so a mail scanner that
+// fetches the link confirms nothing.
+const toWebLink = (webOrigin: string, path: string, tokenParam: string, token: string) =>
+    `${webOrigin}${path}?${tokenParam}=${encodeURIComponent(token)}`
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase()
 
@@ -261,7 +262,7 @@ export const createAuth = ({
             sendResetPassword: async ({ user, token }) =>
                 queueCappedMail(
                     'reset',
-                    passwordResetEmail(user.email, toWebLink(webOrigin, '/reset-password', token)),
+                    passwordResetEmail(user.email, toWebLink(webOrigin, '/', 'reset-password-token', token)),
                 ),
         },
         socialProviders,
@@ -274,7 +275,7 @@ export const createAuth = ({
             sendVerificationEmail: async ({ user, token }) =>
                 queueCappedMail(
                     'confirmation',
-                    verificationEmail(user.email, toWebLink(webOrigin, '/confirm-email', token)),
+                    verificationEmail(user.email, toWebLink(webOrigin, '/confirm-email', 'token', token)),
                 ),
         },
         user: {

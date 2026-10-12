@@ -339,13 +339,13 @@ test('a password reset works through the emailed link and revokes existing sessi
     const link = linkIn(outbox[0])
     const reset = await post('/api/auth/reset-password', {
         newPassword: 'second-password',
-        token: link.searchParams.get('token'),
+        token: link.searchParams.get('reset-password-token'),
     })
     const withOldSession = await fetch(`${API}/v1/me/quota`, { headers: headers(session) })
     const signIn = await post('/api/auth/sign-in/email', { email: EMAIL, password: 'second-password' })
 
     freshSession = cookieOf(signIn)
-    assert.equal(link.origin + link.pathname, `${WEB}/reset-password`)
+    assert.equal(link.origin + link.pathname, `${WEB}/`)
     assert.equal(reset.status, 200)
     assert.equal(withOldSession.status, 401)
     assert.equal(signIn.status, 200)
