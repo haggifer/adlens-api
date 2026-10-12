@@ -18,10 +18,10 @@ const layout = (heading: string, body: string, actionLabel: string, url: string)
 export const verificationEmail = (to: string, url: string): MailMessage => ({
     to,
     subject: 'Confirm your AdLens email',
-    text: `Confirm your email to start using AdLens:\n\n${url}\n\nIf you didn't sign up, you can ignore this email.`,
+    text: `Confirm your email to start using AdLens. The link expires in 24 hours.\n\n${url}\n\nIf you didn't sign up, you can ignore this email.`,
     html: layout(
         'Confirm your email',
-        "Confirm your address to start using AdLens. If you didn't sign up, you can ignore this email.",
+        "Confirm your address to start using AdLens. The link expires in 24 hours. If you didn't sign up, you can ignore this email.",
         'Confirm email',
         url,
     ),

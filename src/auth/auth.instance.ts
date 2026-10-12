@@ -41,6 +41,9 @@ export const AUTH = 'BETTER_AUTH'
 
 const RESET_TOKEN_TTL_S = 60 * 60
 
+// A day, so a confirmation email opened later still works; the email says so (verificationEmail).
+const VERIFICATION_TOKEN_TTL_S = 24 * 60 * 60
+
 // Bounds how many anonymous users one client can create by calling the API directly; the web only signs in
 // anonymously right before a first analysis.
 const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
@@ -264,6 +267,7 @@ export const createAuth = ({
         socialProviders,
         emailVerification: {
             sendOnSignUp: true,
+            expiresIn: VERIFICATION_TOKEN_TTL_S,
             // A confirmation link never creates a session: anyone the link reaches could otherwise be signed in to
             // the account. The /verify-email hook below only lets the account's own session confirm it.
             autoSignInAfterVerification: false,

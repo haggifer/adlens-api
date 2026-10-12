@@ -4,6 +4,7 @@
 // Storage, Turnstile and the worker dispatcher are faked. The tests share one app and run in order.
 // Run after a build: npm run test:auth
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { createRequire } from 'node:module'
 import { after, before, test } from 'node:test'
 
@@ -287,6 +288,15 @@ test("an invalid confirmation link keeps Better Auth's own error", async () => {
 
     assert.equal(res.status, 401)
     assert.equal(body.code, 'INVALID_TOKEN')
+})
+
+test('the confirmation link lasts 24 hours, as the email says', () => {
+    const token = linkIn(outbox[0]).searchParams.get('token')
+    const { iat, exp } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+
+    assert.equal(exp - iat, 24 * 60 * 60)
+    assert.ok(outbox[0].text.includes('expires in 24 hours'))
+    assert.ok(outbox[0].html.includes('expires in 24 hours'))
 })
 
 test('the emailed link opens the web app, which confirms the signed-in account without a new session', async () => {

@@ -273,7 +273,8 @@ answering is a plain reply; its text isn't stored.
   aliases can't stack the weekly allowance. The check matches the stored addresses with a pattern built from the new
   one, so nothing extra is stored and existing accounts count. Anonymous users are ignored; Google and GitHub sign-in
   are unaffected.
-- **Unconfirmed accounts sign in.** Sign-up signs the user in straight away and mails a confirmation link, and an
+- **Unconfirmed accounts sign in.** Sign-up signs the user in straight away and mails a confirmation link (valid 24
+  hours, as the email says; a password-reset link, 1 hour), and an
   unconfirmed account can sign in again. Until it confirms its email (`emailVerified` on the user document) it's
   limited like an anonymous user (see [Abuse limits](#abuse-limits)) and can't link a provider, but unlike an
   anonymous user it's never deleted for inactivity. A sign-up with an address
