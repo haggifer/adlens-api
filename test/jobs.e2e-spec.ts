@@ -771,7 +771,7 @@ describe('Jobs API (e2e)', () => {
 
             const mail = sendMail.mock.calls[0][0]
 
-            expect(mail.subject).toMatch(/^\[AdLens\] .+ · #[0-9A-F]{6}$/)
+            expect(mail.subject).toMatch(/^\[AdLens\] .+ · ref [0-9A-F]{6}$/)
             expect(mail.fromName).toBe(`${MESSAGE.email.split('@')[0]} via AdLens`)
             expect(mail.text).toContain(`Account: member · ${OWNER}`)
             expect(mail.text).toContain(`Account email: ${OWNER}@example.com`)

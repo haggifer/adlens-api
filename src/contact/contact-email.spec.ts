@@ -30,7 +30,7 @@ describe('contactEmail', () => {
     it('puts the first line of the message and the reference in the subject, and replies to the sender', () => {
         const mail = contactEmail(buildInput())
 
-        expect(mail.subject).toBe('[AdLens] The upload didn’t finish on my phone. · #3F9A2C')
+        expect(mail.subject).toBe('[AdLens] The upload didn’t finish on my phone. · ref 3F9A2C')
         expect(mail.replyTo).toBe('ann@example.com')
         expect(mail.fromName).toBe('ann via AdLens')
     })
@@ -38,7 +38,7 @@ describe('contactEmail', () => {
     it('cuts a long first line in the subject', () => {
         const mail = contactEmail(buildInput({ message: { email: 'ann@example.com', message: 'word '.repeat(40) } }))
 
-        expect(mail.subject).toMatch(/^\[AdLens\] .{59}… · #3F9A2C$/)
+        expect(mail.subject).toMatch(/^\[AdLens\] .{59}… · ref 3F9A2C$/)
     })
 
     it('shows the message first, then the facts a support reader needs', () => {

@@ -122,7 +122,8 @@ export const contactEmail = (input: ContactEmailInput): MailMessage => {
         to,
         fromName: toSenderName(message.email),
         replyTo: message.email,
-        subject: `[AdLens] ${toPreview(message.message)} · #${ref}`,
+        // "ref", not "#": a # and six hex digits read as a CSS colour.
+        subject: `[AdLens] ${toPreview(message.message)} · ref ${ref}`,
         text: toText(message.message, facts),
         html: toHtml(message.message, facts),
         ...(attachments.length ? { attachments } : {}),
