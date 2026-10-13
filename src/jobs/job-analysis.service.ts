@@ -61,12 +61,13 @@ export class JobAnalysisService {
 
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
-        const presetName = await this.countPresetUse(userId, queued)
         const execution = await this.startWorker(jobId)
 
         if (execution) {
             await this.lifecycle.recordExecution(jobId, execution)
         }
+
+        const presetName = await this.countPresetUse(userId, queued)
 
         return toPublicJob({ ...queued, presetName })
     }
@@ -100,8 +101,8 @@ export class JobAnalysisService {
         }
     }
 
-    // A run counts for its preset only when its settings still match it (spec D4); counting never fails the run.
-    // Answers the name stored on the job, or null.
+    // A run counts for its preset only once its worker started (a failed start refunds the run) and only when its
+    // settings still match the preset; counting never fails the run. Answers the name stored on the job, or null.
     private async countPresetUse(userId: string, job: StoredJob): Promise<string | null> {
         if (!job.presetId) {
             return null

@@ -1651,5 +1651,20 @@ describe('Jobs API (e2e)', () => {
             expect(job).toMatchObject({ status: JobStatus.Queued, presetName: null })
             expect(dispatch).toHaveBeenCalledWith(job.id)
         })
+
+        it('counts nothing for a run whose worker could not be started', async () => {
+            const preset = await createPreset('Meta EU and US')
+            const created = await send('post', '/v1/jobs')
+                .send({ file: FILE, settings: PRESET_SETTINGS, presetId: preset.id })
+                .expect(201)
+
+            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
+
+            await send('post', `/v1/jobs/${created.body.job.id}/analyze`).expect(503)
+            const read = await send('get', `/v1/jobs/${created.body.job.id}`).expect(200)
+
+            expect(read.body.job).toMatchObject({ status: JobStatus.Error, presetName: null })
+            expect(await getUsageCount(preset.id)).toBe(0)
+        })
     })
 })
