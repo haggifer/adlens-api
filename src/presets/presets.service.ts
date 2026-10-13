@@ -157,8 +157,9 @@ const getRemovePipeline = (presetId: string, now: Date) => {
     ]
 }
 
-// A user's presets, in one document per user. Every write is a single conditional update on it, so concurrent
-// requests can't pass the limit or give two presets one name.
+// A user's presets, in one document per user. The limit and the unique name are each enforced by one conditional
+// update on it, so concurrent requests can't pass the limit or give two presets one name. An overwrite that changes
+// the default and the sign-in move take several writes.
 @Injectable()
 export class PresetsService {
     constructor(@InjectConnection() private readonly connection: Connection) {}

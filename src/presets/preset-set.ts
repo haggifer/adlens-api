@@ -14,7 +14,8 @@ export interface StoredPreset {
     updatedAt: Date
 }
 
-// One document per user, keyed by the user id, so every write is one conditional update on it.
+// One document per user, keyed by the user id, so the limit and the unique name can each be enforced by one
+// conditional update on it.
 export interface PresetSetDoc {
     _id: string
     presets: StoredPreset[]
