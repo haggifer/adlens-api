@@ -226,8 +226,8 @@ describe('PresetsService', () => {
         expect(await getDefaultId()).toBe(renamed.id)
     })
 
-    // Unchecking "Select as default" clears the default only when it is this preset (spec D22); the overwritten
-    // preset's default still moves to it (D20).
+    // Unchecking "Select as default" clears the default only when it is this preset; the overwritten preset's default
+    // still moves to it.
     it('moves the overwritten default to the renamed preset even when the save leaves it unchecked', async () => {
         await create('Meta US', { isDefault: true })
         const renamed = await create('TikTok EU', { settings: TIKTOK_EU })

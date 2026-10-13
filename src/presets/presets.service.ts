@@ -110,7 +110,7 @@ const getUpdateFilter = (userId: string, presetId: string, nameKey: string, isOv
 }
 
 // isDefault true makes the edited preset the default, and false clears the default when it is that preset. Otherwise
-// the default stays, unless the edit drops it (an overwrite on rename): then it moves to the edited preset (spec D20).
+// the default stays, unless the edit drops it (an overwrite on rename): then it moves to the edited preset.
 const getDefaultAfterUpdate = (presetId: string, droppedIds: object, isDefault?: boolean) => {
     const id = { $literal: presetId }
     const kept = { $cond: [{ $in: ['$defaultPresetId', droppedIds] }, id, '$defaultPresetId'] }
@@ -122,8 +122,8 @@ const getDefaultAfterUpdate = (presetId: string, droppedIds: object, isDefault?:
     return isDefault === false ? { $cond: [{ $eq: ['$defaultPresetId', id] }, null, kept] } : kept
 }
 
-// One update for an edit: it drops the other preset with the name (an overwrite on rename, spec D10; without overwrite
-// the filter has ruled one out), updates this one and settles the default. User input goes in through $literal, so a
+// One update for an edit: it drops the other preset with the name (an overwrite on rename; without overwrite the
+// filter has ruled one out), updates this one and settles the default. User input goes in through $literal, so a
 // name or id starting with $ is never read as a field path.
 const getUpdatePipeline = (presetId: string, changes: PresetChanges, isDefault?: boolean) => {
     const isEdited = { $eq: ['$$this.id', { $literal: presetId }] }
@@ -177,7 +177,7 @@ export class PresetsService {
         return set.presets.map((preset) => toPreset(preset, set.defaultPresetId))
     }
 
-    // A taken name is refused unless the save asks to overwrite that preset (spec D9).
+    // A taken name is refused unless the save asks to overwrite that preset.
     async create(userId: string, input: SavePresetPayload): Promise<{ preset: Preset; isCreated: boolean }> {
         const now = new Date()
         const changes = toChanges(input, now)
@@ -244,8 +244,8 @@ export class PresetsService {
         }
     }
 
-    // Counts a started run for the preset (spec D4) and answers its name; null when the preset is gone or its settings
-    // differ from the run's. The update matches the preset as it was read, so an edit in between counts nothing.
+    // Counts a started run for the preset and answers its name; null when the preset is gone or its settings differ
+    // from the run's. The update matches the preset as it was read, so an edit in between counts nothing.
     async recordUse(
         userId: string,
         presetId: string,
@@ -268,10 +268,10 @@ export class PresetsService {
         return counted.modifiedCount === 1 ? stored.name : null
     }
 
-    // Sign-in or sign-up moves an anonymous user's presets to the account (spec D7): a clashing name gets a number, the
-    // limit isn't applied, and a preset an earlier, interrupted attempt already moved is skipped, so a retry is safe.
-    // The push matches only while the account still has none of the ids and names it adds: when a concurrent link or save
-    // got there first, the plan is made again from the account as it is now.
+    // Sign-in or sign-up moves an anonymous user's presets to the account: a clashing name gets a number, the limit
+    // isn't applied, and a preset an earlier, interrupted attempt already moved is skipped, so a retry is safe. The push
+    // matches only while the account still has none of the ids and names it adds: when a concurrent link or save got
+    // there first, the plan is made again from the account as it is now.
     async transfer(fromUserId: string, toUserId: string, now = new Date()): Promise<void> {
         for (let attempt = 0; attempt < TRANSFER_ATTEMPTS; attempt++) {
             const from = await this.sets.findOne({ _id: fromUserId })
