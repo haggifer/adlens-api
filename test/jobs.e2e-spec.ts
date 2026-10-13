@@ -1,7 +1,18 @@
 import type { INestApplication } from '@nestjs/common'
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
-import { JobErrorCode, JobStatus, MAX_DURATION_S, RequestErrorCode, VideoMimeType } from 'adlens-shared'
+import {
+    type Job,
+    JobErrorCode,
+    JobStatus,
+    Market,
+    MAX_DURATION_S,
+    Placement,
+    Platform,
+    type Preset,
+    RequestErrorCode,
+    VideoMimeType,
+} from 'adlens-shared'
 import { type Connection, type Model, Types } from 'mongoose'
 import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
@@ -25,6 +36,7 @@ import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
 import { JobLifecycle } from '../src/jobs/job-lifecycle.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
+import { PresetsService } from '../src/presets/presets.service'
 import { JobEventsService } from '../src/realtime/job-events.service'
 import { type ObjectContent, type ObjectInfo, StorageService } from '../src/storage/storage.service'
 
@@ -1478,6 +1490,166 @@ describe('Jobs API (e2e)', () => {
             await analyzeFrom(MEMBER, '203.0.113.7', created.body.job.id).expect(503)
 
             expect(await usage('203.0.113.7')).toEqual({ total: 0, anonymous: 0 })
+        })
+    })
+
+    describe('preset usage', () => {
+        const PRESET_SETTINGS = {
+            platforms: [Platform.Meta],
+            placements: [Placement.MetaFeed, Placement.MetaReels],
+            markets: [Market.EU, Market.US],
+        }
+        const REORDERED_SETTINGS = {
+            platforms: [Platform.Meta],
+            placements: [Placement.MetaReels, Placement.MetaFeed],
+            markets: [Market.US, Market.EU],
+        }
+
+        let sampleId: string
+        // A fresh member and network per test, so no test spends another's analyses.
+        let member: string
+        let network: string
+        let networkCount = 0
+
+        const send = (method: 'get' | 'post' | 'delete', path: string) => {
+            const server = request(app.getHttpServer())
+
+            return server[method](path).set({ ...as(member), 'x-forwarded-for': network })
+        }
+
+        const createPreset = async (name: string): Promise<Preset> => {
+            const res = await send('post', '/v1/presets').send({ name, settings: PRESET_SETTINGS }).expect(201)
+
+            return res.body.preset
+        }
+
+        const getUsageCount = async (presetId: string) => {
+            const res = await send('get', '/v1/presets').expect(200)
+
+            return res.body.presets.find((preset: Preset) => preset.id === presetId)?.usageCount
+        }
+
+        const startAndRead = async (jobId: string): Promise<Job> => {
+            const started = await send('post', `/v1/jobs/${jobId}/analyze`).expect(202)
+            const read = await send('get', `/v1/jobs/${jobId}`).expect(200)
+
+            expect(started.body.job.presetName).toBe(read.body.job.presetName)
+
+            return read.body.job
+        }
+
+        const runUpload = async (body: Record<string, unknown>): Promise<Job> => {
+            const created = await send('post', '/v1/jobs')
+                .send({ file: FILE, ...body })
+                .expect(201)
+
+            return startAndRead(created.body.job.id)
+        }
+
+        const runSample = async (body: Record<string, unknown>): Promise<Job> => {
+            const created = await send('post', '/v1/jobs/from-sample')
+                .send({ sampleId, ...body })
+                .expect(201)
+
+            return startAndRead(created.body.job.id)
+        }
+
+        beforeAll(async () => {
+            const [sample] = await app.get<Model<SampleDoc>>(getModelToken(SAMPLE_MODEL)).create([
+                {
+                    slug: 'preset-usage',
+                    title: 'Preset usage',
+                    description: 'A sample for the preset usage tests',
+                    file: { ...FILE, bucket: 'test-bucket', path: 'samples/preset-usage.mp4' },
+                    media: {
+                        durationS: 15,
+                        width: 1080,
+                        height: 1920,
+                        hasAudio: true,
+                        sizeBytes: FILE.size,
+                        contentType: FILE.contentType,
+                    },
+                    settings: PRESET_SETTINGS,
+                    order: 2,
+                },
+            ])
+
+            sampleId = sample._id.toString()
+        })
+
+        beforeEach(async () => {
+            const _id = new Types.ObjectId()
+
+            await app
+                .get<Connection>(getConnectionToken())
+                .collection(USER_COLLECTION)
+                .insertOne({ _id, email: `${_id.toString()}@example.com`, emailVerified: true })
+
+            member = _id.toString()
+            network = `203.0.113.${60 + networkCount++}`
+        })
+
+        it("counts a run for its preset when the settings match in any order, and keeps the preset's name", async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            const job = await runUpload({ settings: REORDERED_SETTINGS, presetId: preset.id })
+
+            expect(job.presetName).toBe('Meta EU and US')
+            expect(job).not.toHaveProperty('presetId')
+            expect(await getUsageCount(preset.id)).toBe(1)
+        })
+
+        it('counts nothing when the settings differ from the preset', async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            const job = await runUpload({ settings: { ...PRESET_SETTINGS, markets: [Market.EU] }, presetId: preset.id })
+
+            expect(job.presetName).toBeNull()
+            expect(await getUsageCount(preset.id)).toBe(0)
+        })
+
+        it('counts a sample run like an upload', async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            const counted = await runSample({ settings: REORDERED_SETTINGS, presetId: preset.id })
+            const changed = await runSample({
+                settings: { ...PRESET_SETTINGS, placements: [Placement.MetaFeed] },
+                presetId: preset.id,
+            })
+
+            expect(counted.presetName).toBe('Meta EU and US')
+            expect(changed.presetName).toBeNull()
+            expect(await getUsageCount(preset.id)).toBe(1)
+        })
+
+        it('names no preset on a job created without one', async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            const job = await runUpload({ settings: PRESET_SETTINGS })
+
+            expect(job.presetName).toBeNull()
+            expect(await getUsageCount(preset.id)).toBe(0)
+        })
+
+        it('starts a run whose preset was deleted, counting nothing', async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            await send('delete', `/v1/presets/${preset.id}`).expect(204)
+
+            const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
+
+            expect(job).toMatchObject({ status: JobStatus.Queued, presetName: null })
+        })
+
+        it('starts the run when counting fails', async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            jest.spyOn(app.get(PresetsService), 'recordUse').mockRejectedValueOnce(new Error('database unavailable'))
+
+            const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
+
+            expect(job).toMatchObject({ status: JobStatus.Queued, presetName: null })
+            expect(dispatch).toHaveBeenCalledWith(job.id)
         })
     })
 })

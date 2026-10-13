@@ -53,7 +53,7 @@ export class JobsService {
 
     async create(
         userId: string,
-        { settings, file }: CreateJobPayload,
+        { settings, file, presetId }: CreateJobPayload,
         hasPassedChallenge: boolean,
     ): Promise<CreateJobResponse> {
         const id = new Types.ObjectId()
@@ -64,6 +64,7 @@ export class JobsService {
             status: JobStatus.Pending,
             settings,
             file: { ...file, bucket: this.storage.bucketName, path },
+            presetId: presetId ?? null,
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
@@ -76,7 +77,7 @@ export class JobsService {
     // A pending job on a published sample: its video is already stored and measured, so nothing is uploaded.
     async createFromSample(
         userId: string,
-        { sampleId, settings }: CreateSampleJobPayload,
+        { sampleId, settings, presetId }: CreateSampleJobPayload,
         hasPassedChallenge: boolean,
     ): Promise<Job> {
         const sample = await this.samples.findPublished(sampleId)
@@ -87,12 +88,17 @@ export class JobsService {
             file: sample.file,
             media: sample.media,
             sampleId: sample._id.toString(),
+            presetId: presetId ?? null,
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
         })
 
         return toPublicJob(created.toObject<StoredJob>())
+    }
+
+    async recordPresetName(jobId: string, name: string): Promise<void> {
+        await this.model.updateOne({ _id: jobId }, { $set: { presetName: name } })
     }
 
     async get(userId: string, jobId: string): Promise<Job> {

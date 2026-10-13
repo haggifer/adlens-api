@@ -11,6 +11,8 @@ export const toPublicJob = (job: StoredJob): Job => ({
     analysis: job.analysis,
     errorCode: job.errorCode,
     sampleId: job.sampleId,
+    // Jobs created before presets existed have no field.
+    presetName: job.presetName ?? null,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
 })

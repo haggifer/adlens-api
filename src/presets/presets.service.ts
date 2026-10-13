@@ -10,6 +10,7 @@ import {
 import { type Connection, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { PRESET_COLLECTION, type PresetSetDoc, type StoredPreset } from './preset-set'
+import { isSameSettings } from './same-settings'
 
 interface PresetChanges {
     name: string
@@ -199,6 +200,30 @@ export class PresetsService {
         if (!set.matchedCount) {
             throw presetNotFound()
         }
+    }
+
+    // Counts a started run for the preset (spec D4) and answers its name; null when the preset is gone or its settings
+    // differ from the run's. The update matches the preset as it was read, so an edit in between counts nothing.
+    async recordUse(
+        userId: string,
+        presetId: string,
+        settings: AnalysisSettings,
+        now = new Date(),
+    ): Promise<string | null> {
+        const set = await this.sets.findOne({ _id: userId })
+        const stored = set?.presets.find((preset) => preset.id === presetId)
+
+        if (!stored || !isSameSettings(stored.settings, settings)) {
+            return null
+        }
+
+        const counted = await this.sets.updateOne(
+            { _id: userId },
+            { $inc: { 'presets.$[p].usageCount': 1 }, $set: { 'presets.$[p].lastUsedAt': now } },
+            { arrayFilters: [{ 'p.id': presetId, 'p.updatedAt': stored.updatedAt }] },
+        )
+
+        return counted.modifiedCount === 1 ? stored.name : null
     }
 
     // Every user's document exists before a conditional write, so a refused write is told apart from a missing

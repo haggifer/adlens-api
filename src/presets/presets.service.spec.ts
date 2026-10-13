@@ -316,6 +316,45 @@ describe('PresetsService', () => {
         await expect(presets.remove(new Types.ObjectId().toString(), 'unknown')).rejects.toMatchObject(NOT_FOUND)
     })
 
+    it('counts a use when the settings equal the preset, in any order', async () => {
+        const preset = await create('TikTok EU', { settings: TIKTOK_EU })
+        const other = await create('Meta US')
+        const now = new Date('2026-10-13T12:00:00Z')
+        const reordered = { ...TIKTOK_EU, markets: [Market.UK, Market.EU] }
+
+        expect(await presets.recordUse(userId, preset.id, reordered, now)).toBe('TikTok EU')
+
+        const [counted, untouched] = await presets.list(userId)
+
+        expect(counted).toMatchObject({ id: preset.id, usageCount: 1, lastUsedAt: now.toISOString() })
+        expect(untouched).toMatchObject({ id: other.id, usageCount: 0, lastUsedAt: null })
+    })
+
+    it('counts nothing when the settings differ from the preset', async () => {
+        const preset = await create('TikTok EU', { settings: TIKTOK_EU })
+        const before = await presets.list(userId)
+
+        expect(await presets.recordUse(userId, preset.id, { ...TIKTOK_EU, markets: [Market.EU] })).toBeNull()
+        expect(await presets.list(userId)).toEqual(before)
+    })
+
+    it('counts nothing for a deleted or unknown preset', async () => {
+        const preset = await create('Meta US')
+
+        await presets.remove(userId, preset.id)
+
+        expect(await presets.recordUse(userId, preset.id, META_US)).toBeNull()
+        expect(await presets.recordUse(userId, 'unknown', META_US)).toBeNull()
+        expect(await presets.recordUse(new Types.ObjectId().toString(), 'unknown', META_US)).toBeNull()
+    })
+
+    it("counts nothing for another user's preset", async () => {
+        const preset = await create('Meta US')
+
+        expect(await presets.recordUse(new Types.ObjectId().toString(), preset.id, META_US)).toBeNull()
+        expect((await presets.list(userId))[0]).toMatchObject({ usageCount: 0, lastUsedAt: null })
+    })
+
     it("never touches another user's presets", async () => {
         const preset = await create('Meta US')
         const otherUserId = new Types.ObjectId().toString()

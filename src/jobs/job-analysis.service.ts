@@ -5,6 +5,7 @@ import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
 import type { StoredJob } from '../database/job.doc'
 import type { IpSource } from '../ip-quota/client-ip'
+import { PresetsService } from '../presets/presets.service'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
 import { AnalysisAdmission } from './analysis-admission.service'
@@ -47,6 +48,7 @@ export class JobAnalysisService {
         private readonly dispatcher: AnalysisDispatcher,
         private readonly samples: SamplesService,
         private readonly admission: AnalysisAdmission,
+        private readonly presets: PresetsService,
     ) {}
 
     async start(userId: string, jobId: string, ipSource: IpSource, freeRunUserId: string | null): Promise<Job> {
@@ -59,13 +61,14 @@ export class JobAnalysisService {
 
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
+        const presetName = await this.countPresetUse(userId, queued)
         const execution = await this.startWorker(jobId)
 
         if (execution) {
             await this.lifecycle.recordExecution(jobId, execution)
         }
 
-        return toPublicJob(queued)
+        return toPublicJob({ ...queued, presetName })
     }
 
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
@@ -94,6 +97,30 @@ export class JobAnalysisService {
             // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.
             await this.lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed, describeChargeFailure(err))
             throw err
+        }
+    }
+
+    // A run counts for its preset only when its settings still match it (spec D4); counting never fails the run.
+    // Answers the name stored on the job, or null.
+    private async countPresetUse(userId: string, job: StoredJob): Promise<string | null> {
+        if (!job.presetId) {
+            return null
+        }
+
+        try {
+            const name = await this.presets.recordUse(userId, job.presetId, job.settings)
+
+            if (name) {
+                await this.jobs.recordPresetName(job._id.toString(), name)
+            }
+
+            return name
+        } catch (err) {
+            this.logger.error(
+                `could not count preset ${job.presetId} for job ${job._id.toString()}: ${describeError(err)}`,
+            )
+
+            return null
         }
     }
 

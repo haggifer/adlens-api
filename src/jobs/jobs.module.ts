@@ -4,6 +4,7 @@ import { ChallengeModule } from '../challenge/challenge.module'
 import { DatabaseModule } from '../database/database.module'
 import { ClientNetworkResolver } from '../ip-quota/client-network.resolver'
 import { IpQuotaModule } from '../ip-quota/ip-quota.module'
+import { PresetsModule } from '../presets/presets.module'
 import { QuotaModule } from '../quota/quota.module'
 import { SamplesModule } from '../samples/samples.module'
 import { StorageModule } from '../storage/storage.module'
@@ -27,6 +28,7 @@ import { VideoVerifier } from './verification/video-verifier.service'
         QuotaModule,
         IpQuotaModule,
         ChallengeModule,
+        PresetsModule,
     ],
     controllers: [JobsController, AdmissionController],
     providers: [JobsService, JobAnalysisService, VideoVerifier, MediaProber, AnalysisAdmission, ClientNetworkResolver],

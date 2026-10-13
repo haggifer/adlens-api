@@ -99,6 +99,10 @@ const jobDocSchema = z.object({
     sampleId: z.string().optional(),
     // Set on a demo job: its file points at a video under demos/, which only the maintainer's script manages.
     demo: demoSchema.optional(),
+    // The preset applied when the job was created; the start counts the run for it while the settings still match.
+    presetId: z.string().nullable().default(null),
+    // The name of the preset the run was counted for, as it was named then; null when it counted for none.
+    presetName: z.string().nullable().default(null),
 })
 
 export type JobDoc = z.infer<typeof jobDocSchema>
