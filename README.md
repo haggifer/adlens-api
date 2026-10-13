@@ -94,7 +94,10 @@ conditional update on the expected current status, so two racing callers can nev
     - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
-   the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`.
+   the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
+   and how its answer is read ([`gemini-review.ts`](src/analysis/review/gemini-review.ts)) and the analysis assembly
+   ([`analysis-assembly.ts`](src/analysis/pipeline/analysis-assembly.ts)) need neither Nest nor the database, so the
+   [lab](https://github.com/haggifer/adlens-lab) runs the same code with its overrides on top.
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
    network) exits 1 so Cloud Run retries it, unless the call may have been billed (below); a permanent failure, or any
    failure on the last attempt, ends the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute

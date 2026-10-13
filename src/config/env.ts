@@ -1,5 +1,6 @@
 import { ConfigModule } from '@nestjs/config'
 import { z } from 'zod'
+import { DEFAULT_GEMINI_LOCATION, DEFAULT_GEMINI_MODEL } from './gemini-defaults'
 import { logFormatSchema } from './log-format'
 import { readSecretsFile } from './secrets-file'
 
@@ -48,8 +49,8 @@ const envSchema = z.object({
     TURNSTILE_SECRET_KEY: z.string().optional(),
     // Proxies in front of the API that append to X-Forwarded-For: 1 on Cloud Run (Google's front end).
     TRUSTED_PROXY_HOPS: z.coerce.number().int().positive().default(1),
-    GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
-    GEMINI_LOCATION: z.string().default('global'),
+    GEMINI_MODEL: z.string().default(DEFAULT_GEMINI_MODEL),
+    GEMINI_LOCATION: z.string().default(DEFAULT_GEMINI_LOCATION),
     ANALYZE_LOCAL: flagSchema,
     ANALYZE_JOB_NAME: z.string().default('adlens-analyze'),
     // Must equal the Cloud Run Job's --max-retries, so the worker knows which attempt is its last.

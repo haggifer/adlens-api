@@ -1,7 +1,8 @@
 import type { FinishReason, GenerateContentResponseUsageMetadata, ModalityTokenCount } from '@google/genai'
 import type { ModelCall } from '../../database/job.doc'
 
-interface CallContext {
+// When and where a call was made, and how long it took.
+export interface ModelCallContext {
     model: string
     location: string
     at: Date
@@ -17,7 +18,7 @@ const byModality = (details: ModalityTokenCount[] | undefined): Record<string, n
 export const toModelCall = (
     usage: GenerateContentResponseUsageMetadata | undefined,
     finishReason: FinishReason | undefined,
-    { model, location, at, durationMs }: CallContext,
+    { model, location, at, durationMs }: ModelCallContext,
 ): ModelCall => ({
     at,
     durationMs,
