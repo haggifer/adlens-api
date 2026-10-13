@@ -642,6 +642,11 @@ test('signing up from an anonymous session moves its history to the new, unconfi
         await db
             .collection('user')
             .updateOne({ _id: new ObjectId(anonymous.user.id) }, { $set: { runs: [run('anonymous-run')] } })
+        await db.collection('presets').insertOne({
+            _id: anonymous.user.id,
+            presets: [{ id: 'linked-preset', name: 'Linked', nameKey: 'linked' }],
+            defaultPresetId: 'linked-preset',
+        })
     })
 
     const purgedBefore = purgedPrefixes.length
@@ -657,6 +662,12 @@ test('signing up from an anonymous session moves its history to the new, unconfi
             db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }),
         ]),
     )
+    const [linkerPresets, anonymousPresets] = await withDb((db) =>
+        Promise.all([
+            db.collection('presets').findOne({ _id: linker._id.toString() }),
+            db.collection('presets').findOne({ _id: anonymous.user.id }),
+        ]),
+    )
 
     assert.equal(signedUp.status, 200)
     assert.equal(linker.emailVerified, false)
@@ -666,6 +677,12 @@ test('signing up from an anonymous session moves its history to the new, unconfi
         ['anonymous-run'],
     )
     assert.equal(jobs.length, 1)
+    assert.deepEqual(
+        linkerPresets.presets.map((preset) => preset.id),
+        ['linked-preset'],
+    )
+    assert.equal(linkerPresets.defaultPresetId, 'linked-preset')
+    assert.equal(anonymousPresets, null)
     assert.equal(purgedPrefixes.length, purgedBefore)
     assert.deepEqual(deletedPaths, [])
 })
@@ -674,9 +691,12 @@ test('deleting an account also deletes the videos it adopted from an anonymous s
     const linker = await withDb((db) => db.collection('user').findOne({ email: 'linker@example.com' }))
     const deleted = await post('/api/auth/delete-user', { password: 'first-password' }, linkerSession)
 
+    const presets = await withDb((db) => db.collection('presets').findOne({ _id: linker._id.toString() }))
+
     assert.equal(deleted.status, 200)
     assert.deepEqual(deletedPaths, [adoptedUpload])
     assert.equal(purgedPrefixes.at(-1), `users/${linker._id.toString()}/`)
+    assert.equal(presets, null)
 })
 
 test("linking names the account in the browser's free-run cookie when it named the anonymous user", async () => {

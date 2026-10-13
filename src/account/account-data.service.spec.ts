@@ -1,7 +1,9 @@
-import { JobStatus, VideoMimeType } from 'adlens-shared'
+import { JobStatus, Market, Placement, Platform, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
+import { PRESET_COLLECTION, type PresetSetDoc } from '../presets/preset-set'
+import { PresetsService } from '../presets/presets.service'
 import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
 import { configStub } from '../testing/config-stub'
@@ -14,11 +16,14 @@ const BYSTANDER = new Types.ObjectId().toString()
 
 const fileAt = (path: string) => ({ name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 1000, bucket: 'b', path })
 
+const SETTINGS = { platforms: [Platform.Meta], placements: [Placement.MetaFeed], markets: [Market.US] }
+
 const run = (id: string) => ({ id, startedAt: new Date(), jobId: `job-${id}` })
 
 describe('AccountDataService', () => {
     let mongo: MemoryMongo
     let jobs: Model<JobDoc>
+    let presets: PresetsService
     let accountData: AccountDataService
     const storage = {
         delete: jest.fn(async (_path: string) => undefined),
@@ -26,6 +31,11 @@ describe('AccountDataService', () => {
     }
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
+
+    const presetSets = () => mongo.connection.collection<PresetSetDoc>(PRESET_COLLECTION)
+
+    const savePreset = (userId: string, name: string) =>
+        presets.create(userId, { name, settings: SETTINGS, isDefault: true })
 
     const createJob = async (userId: string, fields: Partial<JobDoc> = {}): Promise<string> => {
         const job = await jobs.create({
@@ -43,10 +53,12 @@ describe('AccountDataService', () => {
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
+        presets = new PresetsService(mongo.connection)
         accountData = new AccountDataService(
             jobs,
             storage as unknown as StorageService,
             new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 })),
+            presets,
         )
     })
 
@@ -65,7 +77,7 @@ describe('AccountDataService', () => {
     })
 
     afterEach(async () => {
-        await Promise.all([jobs.deleteMany({}), users().deleteMany({})])
+        await Promise.all([jobs.deleteMany({}), users().deleteMany({}), presetSets().deleteMany({})])
     })
 
     afterAll(async () => {
@@ -88,6 +100,27 @@ describe('AccountDataService', () => {
         expect((await jobs.findById(bystanderJobId).lean<StoredJob>())?.userId).toBe(BYSTANDER)
         expect(storage.delete).not.toHaveBeenCalled()
         expect(storage.deletePrefix).not.toHaveBeenCalled()
+    })
+
+    it("moves an anonymous user's presets to their account", async () => {
+        const { preset } = await savePreset(ANONYMOUS, 'Meta US')
+
+        await savePreset(BYSTANDER, 'Bystander')
+        await accountData.adopt(ANONYMOUS, MEMBER)
+
+        expect(await presets.list(MEMBER)).toEqual([preset])
+        expect(await presets.list(ANONYMOUS)).toEqual([])
+        expect(await presets.list(BYSTANDER)).toHaveLength(1)
+    })
+
+    it("deletes a user's presets with their jobs, never another user's", async () => {
+        await savePreset(MEMBER, 'Meta US')
+        await savePreset(BYSTANDER, 'Bystander')
+
+        await accountData.purge(MEMBER)
+
+        expect(await presets.list(MEMBER)).toEqual([])
+        expect(await presets.list(BYSTANDER)).toHaveLength(1)
     })
 
     it("deletes adopted uploads outside the account's prefix, never a sample video or another user's data", async () => {

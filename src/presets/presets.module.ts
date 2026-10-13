@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common'
 import { PresetsController } from './presets.controller'
-import { PresetsService } from './presets.service'
+import { PresetsStoreModule } from './presets-store.module'
 
 @Module({
+    imports: [PresetsStoreModule],
     controllers: [PresetsController],
-    providers: [PresetsService],
-    exports: [PresetsService],
+    exports: [PresetsStoreModule],
 })
 export class PresetsModule {}

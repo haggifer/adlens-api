@@ -3,13 +3,14 @@ import { InjectModel } from '@nestjs/mongoose'
 import { Model } from 'mongoose'
 import { userPrefix } from '../common/paths'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
+import { PresetsService } from '../presets/presets.service'
 import { QuotaService } from '../quota/quota.service'
 import { StorageService } from '../storage/storage.service'
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// Everything AdLens stores for a user outside Better Auth's own collections: jobs and every uploaded object. The quota
-// runs live on the user document, which Better Auth deletes itself.
+// Everything AdLens stores for a user outside Better Auth's own collections: jobs, presets and every uploaded object.
+// The quota runs live on the user document, which Better Auth deletes itself.
 @Injectable()
 export class AccountDataService {
     private readonly logger = new Logger(AccountDataService.name)
@@ -18,13 +19,16 @@ export class AccountDataService {
         @InjectModel(JOB_MODEL) private readonly jobs: Model<JobDoc>,
         private readonly storage: StorageService,
         private readonly quota: QuotaService,
+        private readonly presets: PresetsService,
     ) {}
 
-    // An anonymous user signed up or in: their jobs and runs become the account's. The videos stay where they were
-    // uploaded, under the anonymous user's prefix; jobs find them by `file.path`.
+    // An anonymous user signed up or in: their jobs, runs and presets become the account's. The videos stay where they
+    // were uploaded, under the anonymous user's prefix; jobs find them by `file.path`. A failed move may be retried, so
+    // every step is safe to repeat.
     async adopt(anonymousUserId: string, userId: string): Promise<void> {
         await this.quota.transfer(anonymousUserId, userId)
         await this.jobs.updateMany({ userId: anonymousUserId }, { $set: { userId } })
+        await this.presets.transfer(anonymousUserId, userId)
         this.logger.log(`moved the data of anonymous user ${anonymousUserId} to user ${userId}`)
     }
 
@@ -36,6 +40,7 @@ export class AccountDataService {
         await Promise.all(adoptedUploads.map((path) => this.storage.delete(path)))
         await this.storage.deletePrefix(ownPrefix, uploadsAdoptedByOthers)
         await this.jobs.deleteMany({ userId })
+        await this.presets.purge(userId)
         this.logger.log(`purged the data of deleted user ${userId}`)
     }
 

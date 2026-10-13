@@ -255,18 +255,19 @@ answering is a plain reply; its text isn't stored.
   first analysis, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
   `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
   work unchanged. When they sign up or sign in (`/sign-up/email`, `/sign-in/*`), `onLinkAccount` moves their jobs
-  (`userId`) and quota runs to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts)), then
-  the plugin deletes the anonymous user; a failed move answers 500 `ACCOUNT_LINK_FAILED` and leaves the history with
-  the anonymous user. A confirmation link never links: it never creates a session. `/link-social` is refused (403
+  (`userId`), quota runs and presets to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts);
+  a preset whose name the account already uses gets a number, `Name (2)`, and the 20 limit isn't applied to the move),
+  then the plugin deletes the anonymous user; a failed move answers 500 `ACCOUNT_LINK_FAILED` and leaves the history
+  with the anonymous user (the move is safe to repeat). A confirmation link never links: it never creates a session. `/link-social` is refused (403
   `ACCOUNT_LINK_FAILED`) for an anonymous session (it could attach a provider and stay anonymous forever) and for an
   unconfirmed account. `/delete-anonymous-user` answers 404: it deletes through Better Auth's internal adapter and
   would skip the purge.
 - **Abandoned anonymous users are deleted after a week.** Every time an anonymous session is created or refreshed
   (Better Auth refreshes a session at most once a day), a session hook stamps `lastSeenAt` on the user. The daily
   cleanup job ([`AnonymousCleanupService`](src/cleanup/anonymous-cleanup.service.ts)) deletes each anonymous user whose
-  `lastSeenAt` (or, without one, `createdAt`) is more than 7 days old and who has no unexpired session: first its jobs
-  and uploads (`AccountDataService.purge`), then its sessions, accounts and the user document. A user whose purge fails
-  stays and is tried again the next day. The stamp must live on the user because signing out ("Forget this browser")
+  `lastSeenAt` (or, without one, `createdAt`) is more than 7 days old and who has no unexpired session: first its jobs,
+  presets and uploads (`AccountDataService.purge`), then its sessions, accounts and the user document. A user whose
+  purge fails stays and is tried again the next day. The stamp must live on the user because signing out ("Forget this browser")
   deletes the session.
 - **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
   `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
@@ -304,8 +305,8 @@ answering is a plain reply; its text isn't stored.
   [`auth-error-codes.ts`](src/auth/auth-error-codes.ts) holds `EMAIL_NOT_SENT`, `ACCOUNT_LINK_FAILED`,
   `SIGN_IN_REQUIRED` and `EMAIL_MISMATCH`.
 - **Account deletion** (password-confirmed, or within a day of signing in for users without a password) purges the
-  user's jobs and every uploaded object (including videos of jobs adopted from an anonymous session, which stay under
-  that session's prefix) before Better Auth removes the account; the quota runs live on the user document, so Better
+  user's jobs, presets and every uploaded object (including videos of jobs adopted from an anonymous session, which
+  stay under that session's prefix) before Better Auth removes the account; the quota runs live on the user document, so Better
   Auth's own delete clears them.
 - **An email that can't be sent fails the request.** Emails go through Resend from `mail.useadlens.com`. Better Auth
   runs its email callbacks in a way that only logs their errors, so the callbacks queue each message for the request
@@ -439,7 +440,7 @@ pipeline and is billed like any run, outside every quota. Set `"isActive": false
 
 ```
 src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs,
-            analysis, rules, samples, demos, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
+            analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
             realtime, database, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image repository cleanup policy

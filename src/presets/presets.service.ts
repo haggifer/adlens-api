@@ -29,6 +29,20 @@ const presetNotFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestError
 
 const toNameKey = (name: string) => name.toLowerCase()
 
+const toFreeName = (name: string, takenKeys: Set<string>): string => {
+    if (!takenKeys.has(toNameKey(name))) {
+        return name
+    }
+
+    for (let n = 2; ; n++) {
+        const candidate = `${name} (${n})`
+
+        if (!takenKeys.has(toNameKey(candidate))) {
+            return candidate
+        }
+    }
+}
+
 const toChanges = (input: SavePresetPayload, now: Date): PresetChanges => {
     const name = input.name.trim()
 
@@ -224,6 +238,42 @@ export class PresetsService {
         )
 
         return counted.modifiedCount === 1 ? stored.name : null
+    }
+
+    // Sign-in or sign-up moves an anonymous user's presets to the account (spec D7): a clashing name gets a number, the
+    // limit isn't applied, and a preset an earlier, interrupted attempt already moved is skipped, so a retry is safe.
+    async transfer(fromUserId: string, toUserId: string, now = new Date()): Promise<void> {
+        const from = await this.sets.findOne({ _id: fromUserId })
+
+        if (!from) {
+            return
+        }
+
+        await this.ensureSet(toUserId, now)
+
+        const to = await this.sets.findOne({ _id: toUserId })
+        const ownIds = new Set(to?.presets.map((preset) => preset.id))
+        const takenKeys = new Set(to?.presets.map((preset) => preset.nameKey))
+        const moved = from.presets
+            .filter((preset) => !ownIds.has(preset.id))
+            .map((preset) => {
+                const name = toFreeName(preset.name, takenKeys)
+
+                takenKeys.add(toNameKey(name))
+
+                return { ...preset, name, nameKey: toNameKey(name) }
+            })
+
+        await this.sets.updateOne({ _id: toUserId }, { $push: { presets: { $each: moved } }, $set: { updatedAt: now } })
+        await this.sets.updateOne(
+            { _id: toUserId, defaultPresetId: null },
+            { $set: { defaultPresetId: from.defaultPresetId } },
+        )
+        await this.sets.deleteOne({ _id: fromUserId })
+    }
+
+    async purge(userId: string): Promise<void> {
+        await this.sets.deleteOne({ _id: userId })
     }
 
     // Every user's document exists before a conditional write, so a refused write is told apart from a missing

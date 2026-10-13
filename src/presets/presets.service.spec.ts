@@ -41,11 +41,13 @@ describe('PresetsService', () => {
         ...fields,
     })
 
-    const create = async (name: string, fields: Partial<SavePresetPayload> = {}) => {
-        const { preset } = await presets.create(userId, input(name, fields))
+    const createFor = async (owner: string, name: string, fields: Partial<SavePresetPayload> = {}) => {
+        const { preset } = await presets.create(owner, input(name, fields))
 
         return preset
     }
+
+    const create = (name: string, fields: Partial<SavePresetPayload> = {}) => createFor(userId, name, fields)
 
     const fill = async (count: number) => {
         for (let i = 0; i < count; i++) {
@@ -364,5 +366,170 @@ describe('PresetsService', () => {
         await expect(presets.setDefault(otherUserId, preset.id)).rejects.toMatchObject(NOT_FOUND)
         expect(await presets.list(otherUserId)).toEqual([])
         expect(await getNames()).toEqual(['Meta US'])
+    })
+
+    describe('transfer', () => {
+        let anonymousId: string
+
+        beforeEach(() => {
+            anonymousId = new Types.ObjectId().toString()
+        })
+
+        it('gives an account without a document all the presets and the anonymous default', async () => {
+            const meta = await createFor(anonymousId, 'Meta US', { isDefault: true })
+
+            await createFor(anonymousId, 'TikTok EU', { settings: TIKTOK_EU })
+
+            await presets.transfer(anonymousId, userId)
+
+            const moved = await presets.list(userId)
+
+            expect(moved.map((preset) => preset.name)).toEqual(['Meta US', 'TikTok EU'])
+            expect(moved.map((preset) => preset.id)[0]).toBe(meta.id)
+            expect(await getDefaultId()).toBe(meta.id)
+            expect(moved[1].settings).toEqual(TIKTOK_EU)
+        })
+
+        it('keeps the usage of a moved preset', async () => {
+            const meta = await createFor(anonymousId, 'Meta US')
+
+            await presets.recordUse(anonymousId, meta.id, META_US)
+            await presets.transfer(anonymousId, userId)
+
+            expect((await presets.list(userId))[0]).toMatchObject({ id: meta.id, usageCount: 1 })
+        })
+
+        it('numbers clashing names, ignoring case, and skips a number already taken', async () => {
+            await create('Meta US')
+            await create('meta us (2)')
+            await createFor(anonymousId, 'META US')
+            await createFor(anonymousId, 'Meta US (3)')
+            await createFor(anonymousId, 'Fresh')
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getNames()).toEqual(['Meta US', 'meta us (2)', 'META US (3)', 'Meta US (3) (2)', 'Fresh'])
+        })
+
+        it('counts a name just given to one moved preset as taken for the next', async () => {
+            await create('Meta US')
+            await createFor(anonymousId, 'Meta US')
+            await createFor(anonymousId, 'Meta US (2)')
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getNames()).toEqual(['Meta US', 'Meta US (2)', 'Meta US (2) (2)'])
+        })
+
+        it("keeps the account's own default when it has one", async () => {
+            const own = await create('Own', { isDefault: true })
+
+            await createFor(anonymousId, 'Anonymous', { isDefault: true })
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getDefaultId()).toBe(own.id)
+        })
+
+        it("takes the anonymous default when the account's presets have none", async () => {
+            await create('Own')
+
+            const anonymous = await createFor(anonymousId, 'Anonymous', { isDefault: true })
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getDefaultId()).toBe(anonymous.id)
+        })
+
+        it('leaves the account without a default when neither side has one', async () => {
+            await create('Own')
+            await createFor(anonymousId, 'Anonymous')
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getDefaultId()).toBeNull()
+        })
+
+        it("doesn't apply the limit: 19 and 5 become 24", async () => {
+            await fill(19)
+
+            for (let i = 0; i < 5; i++) {
+                await createFor(anonymousId, `Anonymous ${i}`)
+            }
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await presets.list(userId)).toHaveLength(24)
+        })
+
+        it('moves nothing twice when run again', async () => {
+            await create('Meta US')
+            await createFor(anonymousId, 'Meta US', { isDefault: true })
+            await createFor(anonymousId, 'Other')
+
+            await presets.transfer(anonymousId, userId)
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getNames()).toEqual(['Meta US', 'Meta US (2)', 'Other'])
+        })
+
+        it('finishes a transfer that stopped before it deleted the anonymous document', async () => {
+            await create('Meta US')
+            await createFor(anonymousId, 'Meta US', { isDefault: true })
+            await createFor(anonymousId, 'Other')
+
+            const left = await sets().findOne({ _id: anonymousId })
+
+            await presets.transfer(anonymousId, userId)
+
+            const moved = await presets.list(userId)
+
+            await sets().insertOne(left!)
+            await presets.transfer(anonymousId, userId)
+
+            expect(await presets.list(userId)).toEqual(moved)
+            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+        })
+
+        it('deletes the anonymous document', async () => {
+            await createFor(anonymousId, 'Meta US')
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+            expect(await presets.list(anonymousId)).toEqual([])
+        })
+
+        it('does nothing when the anonymous user has no document', async () => {
+            await create('Own', { isDefault: true })
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(await getNames()).toEqual(['Own'])
+            expect(await sets().countDocuments()).toBe(1)
+        })
+
+        it("doesn't create a document for the account when there is nothing to move", async () => {
+            await presets.transfer(anonymousId, userId)
+
+            expect(await sets().countDocuments()).toBe(0)
+        })
+    })
+
+    describe('purge', () => {
+        it("deletes the user's document and leaves other users' presets", async () => {
+            const otherUserId = new Types.ObjectId().toString()
+
+            await create('Meta US')
+            await createFor(otherUserId, 'Other')
+
+            await presets.purge(userId)
+
+            expect(await sets().findOne({ _id: userId })).toBeNull()
+            expect(await presets.list(otherUserId)).toHaveLength(1)
+        })
+
+        it('does nothing for a user without presets', async () => {
+            await expect(presets.purge(userId)).resolves.toBeUndefined()
+        })
     })
 })
