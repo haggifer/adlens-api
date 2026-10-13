@@ -259,6 +259,20 @@ describe('PresetsService', () => {
         expect(await getDefaultId()).toBe(preset.id)
     })
 
+    it('keeps the default on an overwrite on create without isDefault, and clears it with isDefault false', async () => {
+        const preset = await create('Meta US', { isDefault: true })
+
+        const kept = await presets.create(userId, input('Meta US', { settings: TIKTOK_EU, overwrite: true }))
+
+        expect(kept.preset.isDefault).toBe(true)
+        expect(await getDefaultId()).toBe(preset.id)
+
+        const cleared = await presets.create(userId, input('Meta US', { overwrite: true, isDefault: false }))
+
+        expect(cleared.preset.isDefault).toBe(false)
+        expect(await getDefaultId()).toBeNull()
+    })
+
     it('clears the default only when isDefault is false on the default, and leaves it when omitted', async () => {
         const preset = await create('Meta US', { isDefault: true })
         const other = await create('TikTok EU', { settings: TIKTOK_EU })
