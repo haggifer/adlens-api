@@ -5,6 +5,7 @@ import {
     MAX_PRESETS,
     Placement,
     Platform,
+    PRESET_NAME_MAX_LENGTH,
     RequestErrorCode,
     type SavePresetPayload,
 } from 'adlens-shared'
@@ -408,17 +409,67 @@ describe('PresetsService', () => {
 
             await presets.transfer(anonymousId, userId)
 
-            expect(await getNames()).toEqual(['Meta US', 'meta us (2)', 'META US (3)', 'Meta US (3) (2)', 'Fresh'])
+            expect(await getNames()).toEqual(['Meta US', 'meta us (2)', 'META US (4)', 'Meta US (3)', 'Fresh'])
         })
 
-        it('counts a name just given to one moved preset as taken for the next', async () => {
+        it("numbers only the names that clash with the account, and never onto another moved preset's name", async () => {
             await create('Meta US')
             await createFor(anonymousId, 'Meta US')
             await createFor(anonymousId, 'Meta US (2)')
 
             await presets.transfer(anonymousId, userId)
 
-            expect(await getNames()).toEqual(['Meta US', 'Meta US (2)', 'Meta US (2) (2)'])
+            expect(await getNames()).toEqual(['Meta US', 'Meta US (3)', 'Meta US (2)'])
+        })
+
+        it('keeps a renamed name within the name limit', async () => {
+            const longName = 'x'.repeat(PRESET_NAME_MAX_LENGTH)
+
+            await create(longName)
+            await createFor(anonymousId, longName)
+
+            await presets.transfer(anonymousId, userId)
+
+            const names = await getNames()
+
+            expect(names).toEqual([longName, `${'x'.repeat(PRESET_NAME_MAX_LENGTH - 4)} (2)`])
+            expect(names.every((name) => name.length <= PRESET_NAME_MAX_LENGTH)).toBe(true)
+        })
+
+        it('trims the end of a name cut short for its number', async () => {
+            const longName = `${'x'.repeat(PRESET_NAME_MAX_LENGTH - 5)} y`.padEnd(PRESET_NAME_MAX_LENGTH, 'z')
+
+            await create(longName)
+            await createFor(anonymousId, longName)
+
+            await presets.transfer(anonymousId, userId)
+
+            const [, renamed] = await getNames()
+
+            expect(renamed).toBe(`${'x'.repeat(PRESET_NAME_MAX_LENGTH - 5)} (2)`)
+        })
+
+        it('moves every preset once when two links for one anonymous user run at the same time', async () => {
+            await create('Meta US')
+            await create('Own')
+            await createFor(anonymousId, 'Meta US', { isDefault: true })
+            await createFor(anonymousId, 'Other')
+            await createFor(anonymousId, 'Third')
+
+            const settled = await Promise.allSettled([
+                presets.transfer(anonymousId, userId),
+                presets.transfer(anonymousId, userId),
+                presets.transfer(anonymousId, userId),
+            ])
+
+            const moved = await presets.list(userId)
+            const stored = await sets().findOne({ _id: userId })
+
+            expect(settled.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled'])
+            expect(moved).toHaveLength(5)
+            expect(new Set(moved.map((preset) => preset.id)).size).toBe(5)
+            expect(new Set(stored?.presets.map((preset) => preset.nameKey)).size).toBe(5)
+            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
         })
 
         it("keeps the account's own default when it has one", async () => {

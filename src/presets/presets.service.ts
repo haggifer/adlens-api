@@ -3,6 +3,7 @@ import { InjectConnection } from '@nestjs/mongoose'
 import {
     type AnalysisSettings,
     MAX_PRESETS,
+    PRESET_NAME_MAX_LENGTH,
     type Preset,
     RequestErrorCode,
     type SavePresetPayload,
@@ -19,6 +20,8 @@ interface PresetChanges {
     updatedAt: Date
 }
 
+const TRANSFER_ATTEMPTS = 3
+
 const presetLimitReached = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.PresetLimitReached, 'Preset limit reached')
 
@@ -29,18 +32,43 @@ const presetNotFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestError
 
 const toNameKey = (name: string) => name.toLowerCase()
 
+// The base is cut short when the number would take the name past the limit, so a renamed preset can be edited later.
 const toFreeName = (name: string, takenKeys: Set<string>): string => {
     if (!takenKeys.has(toNameKey(name))) {
         return name
     }
 
     for (let n = 2; ; n++) {
-        const candidate = `${name} (${n})`
+        const suffix = ` (${n})`
+        const candidate = `${name.slice(0, PRESET_NAME_MAX_LENGTH - suffix.length).trimEnd()}${suffix}`
 
         if (!takenKeys.has(toNameKey(candidate))) {
             return candidate
         }
     }
+}
+
+// The presets an account still lacks. A name that doesn't clash with the account keeps its own name, reserved before any
+// clashing one is numbered, so a number never lands on a name the anonymous user already had.
+const planMoves = (incoming: StoredPreset[], account: PresetSetDoc | null): StoredPreset[] => {
+    const ownIds = new Set(account?.presets.map((preset) => preset.id))
+    const takenKeys = new Set(account?.presets.map((preset) => preset.nameKey))
+    const missing = incoming.filter((preset) => !ownIds.has(preset.id))
+    const keptIds = new Set(missing.filter((preset) => !takenKeys.has(preset.nameKey)).map((preset) => preset.id))
+
+    missing.filter((preset) => keptIds.has(preset.id)).forEach((preset) => takenKeys.add(preset.nameKey))
+
+    return missing.map((preset) => {
+        if (keptIds.has(preset.id)) {
+            return preset
+        }
+
+        const name = toFreeName(preset.name, takenKeys)
+
+        takenKeys.add(toNameKey(name))
+
+        return { ...preset, name, nameKey: toNameKey(name) }
+    })
 }
 
 const toChanges = (input: SavePresetPayload, now: Date): PresetChanges => {
@@ -242,34 +270,34 @@ export class PresetsService {
 
     // Sign-in or sign-up moves an anonymous user's presets to the account (spec D7): a clashing name gets a number, the
     // limit isn't applied, and a preset an earlier, interrupted attempt already moved is skipped, so a retry is safe.
+    // The push matches only while the account still has none of the ids and names it adds: when a concurrent link or save
+    // got there first, the plan is made again from the account as it is now.
     async transfer(fromUserId: string, toUserId: string, now = new Date()): Promise<void> {
-        const from = await this.sets.findOne({ _id: fromUserId })
+        for (let attempt = 0; attempt < TRANSFER_ATTEMPTS; attempt++) {
+            const from = await this.sets.findOne({ _id: fromUserId })
 
-        if (!from) {
-            return
+            if (!from) {
+                return
+            }
+
+            await this.ensureSet(toUserId, now)
+
+            const to = await this.sets.findOne({ _id: toUserId })
+            const moved = planMoves(from.presets, to)
+            const isPushed = await this.pushMoved(toUserId, moved, now)
+
+            if (isPushed) {
+                await this.sets.updateOne(
+                    { _id: toUserId, defaultPresetId: null },
+                    { $set: { defaultPresetId: from.defaultPresetId } },
+                )
+                await this.sets.deleteOne({ _id: fromUserId })
+
+                return
+            }
         }
 
-        await this.ensureSet(toUserId, now)
-
-        const to = await this.sets.findOne({ _id: toUserId })
-        const ownIds = new Set(to?.presets.map((preset) => preset.id))
-        const takenKeys = new Set(to?.presets.map((preset) => preset.nameKey))
-        const moved = from.presets
-            .filter((preset) => !ownIds.has(preset.id))
-            .map((preset) => {
-                const name = toFreeName(preset.name, takenKeys)
-
-                takenKeys.add(toNameKey(name))
-
-                return { ...preset, name, nameKey: toNameKey(name) }
-            })
-
-        await this.sets.updateOne({ _id: toUserId }, { $push: { presets: { $each: moved } }, $set: { updatedAt: now } })
-        await this.sets.updateOne(
-            { _id: toUserId, defaultPresetId: null },
-            { $set: { defaultPresetId: from.defaultPresetId } },
-        )
-        await this.sets.deleteOne({ _id: fromUserId })
+        throw new Error(`could not move the presets of user ${fromUserId} to user ${toUserId}`)
     }
 
     async purge(userId: string): Promise<void> {
@@ -284,6 +312,23 @@ export class PresetsService {
             { $setOnInsert: { presets: [], defaultPresetId: null, createdAt: now, updatedAt: now } },
             { upsert: true },
         )
+    }
+
+    private async pushMoved(userId: string, moved: StoredPreset[], now: Date): Promise<boolean> {
+        if (!moved.length) {
+            return true
+        }
+
+        const pushed = await this.sets.updateOne(
+            {
+                _id: userId,
+                'presets.id': { $nin: moved.map((preset) => preset.id) },
+                'presets.nameKey': { $nin: moved.map((preset) => preset.nameKey) },
+            },
+            { $push: { presets: { $each: moved } }, $set: { updatedAt: now } },
+        )
+
+        return pushed.matchedCount === 1
     }
 
     private async push(userId: string, stored: StoredPreset, isDefault?: boolean): Promise<Preset> {
