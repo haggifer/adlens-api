@@ -7,6 +7,7 @@ import { DemosModule } from './demos/demos.module'
 import { HealthController } from './health.controller'
 import { JobsModule } from './jobs/jobs.module'
 import { MeModule } from './me/me.module'
+import { PresetsModule } from './presets/presets.module'
 import { RealtimeModule } from './realtime/realtime.module'
 import { SamplesModule } from './samples/samples.module'
 
@@ -17,6 +18,7 @@ import { SamplesModule } from './samples/samples.module'
         AuthModule,
         JobsModule,
         MeModule,
+        PresetsModule,
         RealtimeModule,
         SamplesModule,
         DemosModule,
