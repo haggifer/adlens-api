@@ -51,6 +51,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - A confirmation link confirms only in the session of the account it was sent to (the `/verify-email` before hook:
   `SIGN_IN_REQUIRED` without one or with an anonymous one, `EMAIL_MISMATCH` for another account) and never creates a
   session (`autoSignInAfterVerification: false`): a link reaches whoever it is forwarded to.
+- A mailbox has at most one confirmed account: only a confirmed account blocks an alias at sign-up, and `/verify-email`
+  refuses to confirm a second account on a mailbox (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`).
 - The Contact form's caps are atomic counters in `rate_limits` (`ContactLimits` over `createRateLimitStorage`, hashed
   keys), counted only after the Turnstile check or the draft passed and the draft's images were accepted; never
   count-then-insert. A Contact draft stands in for one Turnstile check: it is used by one conditional update (`usedAt`

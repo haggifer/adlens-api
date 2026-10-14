@@ -1,6 +1,6 @@
 // Gmail delivers ann@gmail.com, a.n.n@gmail.com and ann@googlemail.com to one mailbox; most providers (Gmail, Outlook,
-// iCloud, Fastmail) also deliver ann+anything@ there. Sign-up allows one account per mailbox, so aliases can't stack
-// the weekly allowance.
+// iCloud, Fastmail) also deliver ann+anything@ there. A mailbox gets one confirmed account, so aliases can't stack the
+// weekly allowance.
 const GMAIL_DOMAINS = ['gmail.com', 'googlemail.com']
 
 const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g

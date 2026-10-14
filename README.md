@@ -271,12 +271,15 @@ answering is a plain reply; its text isn't stored.
   deletes the session.
 - **Disposable email domains are refused at sign-up** (`DISPOSABLE_EMAIL`), from the maintained
   `disposable-email-domains-js` list. Google and GitHub sign-in are unaffected.
-- **One account per mailbox** ([`email-alias.ts`](src/auth/email-alias.ts)): a sign-up whose address reaches the same
-  mailbox as an existing account (`ann+2@gmail.com`, `a.n.n@gmail.com` or `ann@googlemail.com` next to `ann@gmail.com`;
-  a `+tag` on any domain) answers like an address already in use (422 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`), so
-  aliases can't stack the weekly allowance. The check matches the stored addresses with a pattern built from the new
-  one, so nothing extra is stored and existing accounts count. Anonymous users are ignored; Google and GitHub sign-in
-  are unaffected.
+- **One confirmed account per mailbox** ([`email-alias.ts`](src/auth/email-alias.ts)): a sign-up whose address reaches
+  the same mailbox as a confirmed account (`ann+2@gmail.com`, `a.n.n@gmail.com` or `ann@googlemail.com` next to
+  `ann@gmail.com`; a `+tag` on any domain) answers like an address already in use (422
+  `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`), and so does confirming an account whose mailbox already has another
+  confirmed one (the `/verify-email` before hook), so aliases can't stack the weekly allowance. An unconfirmed account
+  claims nothing, so an alias someone signed up and never confirmed can't lock the mailbox's owner out of signing up;
+  the first account to confirm keeps the mailbox. The check matches the stored addresses with a pattern built from the
+  new one, so nothing extra is stored and existing accounts count. Anonymous users are ignored; Google and GitHub
+  sign-in are unaffected.
 - **Unconfirmed accounts sign in.** Sign-up signs the user in straight away and mails a confirmation link (valid 24
   hours, as the email says; a password-reset link, 1 hour), and an
   unconfirmed account can sign in again. Until it confirms its email (`emailVerified` on the user document) it's
@@ -296,7 +299,8 @@ answering is a plain reply; its text isn't stored.
   use the token up. **Only the account's own session confirms it**: a
   `hooks.before` on `/verify-email` reads the token's address the way Better Auth does (`verifyJWT` with the auth
   secret) and answers 401 `SIGN_IN_REQUIRED` without a session or with an anonymous one (the web asks the visitor to
-  sign in and opens the link again), and 403 `EMAIL_MISMATCH` in another account's session; neither sets a cookie. A
+  sign in and opens the link again), 403 `EMAIL_MISMATCH` in another account's session, and 422
+  `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` when another account already confirmed the mailbox; none sets a cookie. A
   token Better Auth would refuse keeps its own error (`INVALID_TOKEN`, `TOKEN_EXPIRED`). Confirming creates no session
   (`autoSignInAfterVerification: false`), so a forwarded link can't sign anyone in; sessions aren't cached in the
   cookie, so the next `get-session` reads `emailVerified: true`.

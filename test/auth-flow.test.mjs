@@ -218,11 +218,14 @@ test('a duplicate sign-up answers that the address is in use', async () => {
     assert.ok(!cookieOf(res).includes('session_token'))
 })
 
-test('a sign-up with an alias of an existing address answers that the address is in use', async () => {
-    const [local, domain] = EMAIL.split('@')
+test("a sign-up with an alias of a confirmed account's address answers that the address is in use", async () => {
+    const owner = await signUp('alias-owner@example.com')
+
+    await confirmEmail('alias-owner@example.com', owner.cookie)
+
     const res = await post('/api/auth/sign-up/email', {
         name: 'Alias',
-        email: `${local}+second@${domain}`,
+        email: 'alias-owner+second@example.com',
         password: 'other-password',
     })
 
@@ -231,8 +234,10 @@ test('a sign-up with an alias of an existing address answers that the address is
     assert.ok(!cookieOf(res).includes('session_token'))
 })
 
-test('Gmail addresses differing only in dots, +tags or googlemail.com share one account', async () => {
-    await signUp('ann.lee@gmail.com')
+test('Gmail addresses differing only in dots, +tags or googlemail.com share one confirmed account', async () => {
+    const owner = await signUp('ann.lee@gmail.com')
+
+    await confirmEmail('ann.lee@gmail.com', owner.cookie)
 
     const res = await post('/api/auth/sign-up/email', {
         name: 'Alias',
@@ -242,6 +247,26 @@ test('Gmail addresses differing only in dots, +tags or googlemail.com share one 
 
     assert.equal(res.status, 422)
     assert.equal((await res.json()).code, 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')
+})
+
+test("an alias signed up and never confirmed doesn't stop the mailbox's owner from signing up", async () => {
+    const squat = await signUp('squatted+x@example.com')
+    const owner = await signUp('squatted@example.com')
+
+    assert.equal(squat.status, 200)
+    assert.equal(owner.status, 200)
+})
+
+test('a mailbox keeps the first account confirmed on it: confirming an alias after that is refused', async () => {
+    const owner = await signUp('one-mailbox@example.com')
+    const alias = await signUp('one-mailbox+alias@example.com')
+    const ownerConfirmed = await confirmEmail('one-mailbox@example.com', owner.cookie)
+    const aliasConfirmed = await confirmEmail('one-mailbox+alias@example.com', alias.cookie)
+
+    assert.equal(ownerConfirmed.status, 200)
+    assert.equal(aliasConfirmed.status, 422)
+    assert.equal((await aliasConfirmed.json()).code, 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')
+    assert.equal((await storedUser('one-mailbox+alias@example.com')).emailVerified, false)
 })
 
 test('confirmation emails to one address stop at 5 an hour, however often they are resent', async () => {

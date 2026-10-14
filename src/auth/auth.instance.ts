@@ -161,17 +161,23 @@ export const createAuth = ({
     onLinkAnonymous,
 }: AuthOptions) => {
     const anonymousUsers = db.collection<{ isAnonymous?: boolean; lastSeenAt?: Date }>(USER_COLLECTION)
-    const users = db.collection<{ email: string; isAnonymous?: boolean }>(USER_COLLECTION)
+    const users = db.collection<{ email: string; emailVerified?: boolean }>(USER_COLLECTION)
 
-    // An account, anonymous ones aside, whose address reaches the same mailbox: ann+2@gmail.com, a.n.n@gmail.com.
-    const hasMailboxAccount = async (email: string): Promise<boolean> => {
+    // A confirmed account (never an anonymous one) whose address reaches the same mailbox: ann+2@gmail.com,
+    // a.n.n@gmail.com. Only a confirmed account claims a mailbox, so an alias someone signed up and never confirmed
+    // can't lock the owner out of signing up.
+    const hasConfirmedMailboxAccount = async (email: string, exceptUserId?: string): Promise<boolean> => {
         // Not an address yet: Better Auth's own validation answers it.
         if (!email.includes('@')) {
             return false
         }
 
         const account = await users.findOne(
-            { email: { $regex: buildMailboxPattern(email) }, isAnonymous: { $ne: true } },
+            {
+                email: { $regex: buildMailboxPattern(email) },
+                emailVerified: true,
+                ...(exceptUserId && ObjectId.isValid(exceptUserId) && { _id: { $ne: new ObjectId(exceptUserId) } }),
+            },
             { projection: { _id: 1 } },
         )
 
@@ -388,6 +394,17 @@ export const createAuth = ({
                             })
                         }
 
+                        // One confirmed account per mailbox: sign-up lets an alias of an unconfirmed mailbox through,
+                        // so the first to confirm keeps it. The sign-up refusal's answer, so the web offers Sign in.
+                        const isMailboxTaken = await hasConfirmedMailboxAccount(tokenEmail, session.user.id)
+
+                        if (isMailboxTaken) {
+                            throw new APIError('UNPROCESSABLE_ENTITY', {
+                                code: 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
+                                message: 'An account already uses this mailbox',
+                            })
+                        }
+
                         return
                     }
                     case '/sign-up/email': {
@@ -400,9 +417,9 @@ export const createAuth = ({
                             })
                         }
 
-                        // One account per mailbox, so aliases can't stack the weekly allowance. The same answer as an
-                        // address already in use, so the web offers Sign in either way.
-                        const isMailboxTaken = await hasMailboxAccount(email)
+                        // One confirmed account per mailbox, so aliases can't stack the weekly allowance. The same
+                        // answer as an address already in use, so the web offers Sign in either way.
+                        const isMailboxTaken = await hasConfirmedMailboxAccount(email)
 
                         if (isMailboxTaken) {
                             throw new APIError('UNPROCESSABLE_ENTITY', {
