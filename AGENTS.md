@@ -63,6 +63,11 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   accounting fields stay server-side.
 - The request, response and error shapes come from `adlens-shared`. Change the contract there first, publish it, then
   bump the exact pin here. Never commit a `file:` dependency.
+- **Contract changes deploy in order.** The shared request schemas are strict, so an API that doesn't know a field
+  refuses it (`VALIDATION_FAILED`). A new request field ships with the API first (deployed and healthy on `/health`),
+  then the web; a rollback goes in reverse, the web first, then the API. A response field the web reads stays optional
+  on the web until the API that sends it is live. The same order holds for rulesets (see Gotchas): the API that knows a
+  new value first, then what uses it.
 - All configuration goes through the Zod schema in `src/config/env.ts`. Tests set `NODE_ENV=test`, which stops env
   files from loading, so tests can never reach a real database or bucket.
 - Production secrets go in the `API_SECRETS` Secret Manager bundle, via `infra/setup.sh` (put the key in the git-ignored
