@@ -62,6 +62,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   and their videos still sit under the anonymous user's prefix.
 - A job's upload is at `file.path`, which after linking can be under another user's prefix. Delete by that path; never
   derive it from `userId`.
+- adlens-lab imports this source only through `src/lab.ts`. Keep what it exports working for the lab; a symbol the lab
+  needs is added there, never imported by path from elsewhere in `src/`.
 - Clients only ever receive the public job shape from `jobs/job.mapper.ts`; owner, storage path, execution and
   accounting fields stay server-side.
 - The request, response and error shapes come from `adlens-shared`. Change the contract there first, publish it, then

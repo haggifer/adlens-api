@@ -99,7 +99,9 @@ conditional update on the expected current status, so two racing callers can nev
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
    and how its answer is read ([`gemini-review.ts`](src/analysis/review/gemini-review.ts)) and the analysis assembly
    ([`analysis-assembly.ts`](src/analysis/pipeline/analysis-assembly.ts)) need neither Nest nor the database, so the
-   [lab](https://github.com/haggifer/adlens-lab) runs the same code with its overrides on top.
+   [lab](https://github.com/haggifer/adlens-lab) runs the same code with its overrides on top. The lab imports this
+   source only through [`src/lab.ts`](src/lab.ts), a barrel listed as a knip entry and left out of the build, so
+   everything it uses is visible here and counts as used.
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
    network) exits 1 so Cloud Run retries it, unless the call may have been billed (below); a permanent failure, or any
    failure on the last attempt, ends the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute
@@ -463,7 +465,8 @@ pipeline and is billed like any run, outside every quota. Set `"isActive": false
 ## Layout
 
 ```
-src/        main.ts (API), worker.ts (analysis worker) and cleanup.ts (daily cleanup), one Nest module per feature: jobs,
+src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup) and lab.ts (adlens-lab's only import
+            surface), one Nest module per feature: jobs,
             analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
             realtime, database, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
