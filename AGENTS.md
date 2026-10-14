@@ -42,7 +42,8 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
 - The client's address comes only from `ClientNetworkResolver` (`X-Forwarded-For` read `TRUSTED_PROXY_HOPS` from the
   right). Never store or log an address; networks are stored as an HMAC.
 - Better Auth resolves the address itself for its rate limits and sessions; keep `advanced.ipAddress.trustedProxies`,
-  which makes it take the same rightmost `X-Forwarded-For` entry (a change to `TRUSTED_PROXY_HOPS` must change both).
+  which makes it take the same rightmost `X-Forwarded-For` entry (`src/auth/auth-proxies.ts`; the API refuses to start
+  with another `TRUSTED_PROXY_HOPS` until that list names the extra proxies).
   Keep its counters in `createRateLimitStorage` (HMAC keys, TTL-deleted), never `rateLimit.storage: 'database'` (raw
   `<ip>|<path>` keys, never deleted), and keep the `session.create.before` hook that sets `ipAddress` to null.
 - Better Auth's collections get their indexes only from `AUTH_INDEXES` in `src/auth/auth-indexes.ts` (its adapter

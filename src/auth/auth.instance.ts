@@ -15,6 +15,7 @@ import { moveFreeRunCookie } from '../jobs/free-run-cookie'
 import { passwordResetEmail, verificationEmail } from '../mail/auth-emails'
 import type { Mailer, MailMessage } from '../mail/mailer'
 import { ACCOUNT_LINK_FAILED, EMAIL_MISMATCH, EMAIL_NOT_SENT, SIGN_IN_REQUIRED } from './auth-error-codes'
+import { AUTH_TRUSTED_PROXIES } from './auth-proxies'
 import { isDisposableEmail } from './disposable-email'
 import { buildMailboxPattern } from './email-alias'
 import { createRateLimitStorage } from './rate-limit-storage'
@@ -251,11 +252,8 @@ export const createAuth = ({
             // Better Auth skips its origin and callback-URL checks when NODE_ENV is test; keep them on so the tests
             // run with the same protection as production.
             disableOriginCheck: false,
-            // Without trusted proxies Better Auth trusts X-Forwarded-For only with a single entry, and puts every other
-            // request in one shared rate-limit bucket. With any list it walks the header from the right and takes the
-            // first entry not in it; loopback is never a client behind Cloud Run, so that is the rightmost entry: the
-            // address ClientNetworkResolver takes with the default TRUSTED_PROXY_HOPS of 1.
-            ipAddress: { trustedProxies: ['127.0.0.1/32'] },
+            // The rightmost X-Forwarded-For entry, as ClientNetworkResolver reads it (auth-proxies.ts says why).
+            ipAddress: { trustedProxies: AUTH_TRUSTED_PROXIES },
             ...(cookieDomain && { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }),
         },
         rateLimit: {
