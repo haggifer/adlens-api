@@ -24,6 +24,9 @@ const PROBE_TIMEOUT_MS = 30 * 1000
 // MP4 would make it fetch the URLs inside (from our network) and measure another file than the one Gemini reads. Only
 // the containers of the accepted video types are read.
 const FORMAT_WHITELIST = 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm'
+// The input is always a signed HTTPS URL; ffprobe may open nothing else (a local file, another protocol a format
+// points at), whatever the file says.
+const PROTOCOL_WHITELIST = 'https,tls,tcp'
 
 // ffprobe's wording when it reached the input but couldn't read it as media, or read a format off the list.
 const UNDECODABLE_PATTERN =
@@ -81,6 +84,8 @@ export class MediaProber {
                 [
                     '-v',
                     'error',
+                    '-protocol_whitelist',
+                    PROTOCOL_WHITELIST,
                     '-format_whitelist',
                     FORMAT_WHITELIST,
                     '-print_format',

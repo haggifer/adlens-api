@@ -649,7 +649,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
   the signed upload URL binds the exact declared size and can only create the object, never overwrite it. Only a definite problem with the file deletes it; storage or
   network trouble ends the job as `VIDEO_CHECK_FAILED` and leaves the file to the daily cleanup. ffprobe reads only
   the accepted containers (`-format_whitelist`; a playlist or manifest uploaded as MP4 would otherwise make it fetch
-  the URLs inside, and is rejected as unreadable instead), runs with `PATH` as its only environment (never the API's
+  the URLs inside, and is rejected as unreadable instead) and opens only HTTPS (`-protocol_whitelist https,tls,tcp`),
+  runs with `PATH` as its only environment (never the API's
   secrets), and its errors are logged without the signed URL's query, which is a working read credential.
 - **A failed start ends the job; it never goes back to `pending`.** Until 2026-10-02 a missing upload, a storage or
   prober failure, a sample gone, a refused charge or a worker that couldn't be started put the job back to `pending` so

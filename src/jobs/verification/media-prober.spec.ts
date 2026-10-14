@@ -100,7 +100,7 @@ describe('MediaProber', () => {
         jest.mocked(spawn).mockReset()
     })
 
-    it('reads only the container formats AdLens accepts, without the API’s environment and its secrets', async () => {
+    it('reads only HTTPS and the container formats AdLens accepts, without the API’s environment and its secrets', async () => {
         ffprobeExiting(1, 'Invalid data found when processing input')
 
         await expect(prober.probe(SIGNED_URL)).rejects.toThrow()
@@ -108,6 +108,7 @@ describe('MediaProber', () => {
         const [, args, options] = jest.mocked(spawn).mock.calls[0]
 
         expect(args).toEqual(expect.arrayContaining(['-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm']))
+        expect(args.join(' ')).toContain('-protocol_whitelist https,tls,tcp')
         expect(args.at(-1)).toBe(SIGNED_URL)
         expect(options).toMatchObject({ env: { PATH: process.env.PATH } })
     })
