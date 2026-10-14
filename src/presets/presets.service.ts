@@ -30,7 +30,28 @@ const presetNameTaken = () =>
 
 const presetNotFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestErrorCode.NotFound, 'Preset not found')
 
-const toNameKey = (name: string) => name.toLowerCase()
+const INNER_WHITESPACE = /\s+/g
+
+// Two names are one when their keys match. The rule, which the web's preset-name.ts repeats exactly: Unicode NFKC,
+// trimmed, every run of whitespace made one space, lowercased. So "Summer  Sale", "summer sale" and a full-width
+// "Ｓummer Sale" are one name.
+const toNameKey = (name: string) => name.normalize('NFKC').trim().replace(INNER_WHITESPACE, ' ').toLowerCase()
+
+// Cut at a whole code point, so an emoji is never split in half, while staying within a limit counted in UTF-16 units
+// as the contract counts a name's length.
+const truncateName = (name: string, maxLength: number): string => {
+    let cut = ''
+
+    for (const char of name) {
+        if (cut.length + char.length > maxLength) {
+            break
+        }
+
+        cut += char
+    }
+
+    return cut
+}
 
 // The base is cut short when the number would take the name past the limit, so a renamed preset can be edited later.
 const toFreeName = (name: string, takenKeys: Set<string>): string => {
@@ -40,7 +61,7 @@ const toFreeName = (name: string, takenKeys: Set<string>): string => {
 
     for (let n = 2; ; n++) {
         const suffix = ` (${n})`
-        const candidate = `${name.slice(0, PRESET_NAME_MAX_LENGTH - suffix.length).trimEnd()}${suffix}`
+        const candidate = `${truncateName(name, PRESET_NAME_MAX_LENGTH - suffix.length).trimEnd()}${suffix}`
 
         if (!takenKeys.has(toNameKey(candidate))) {
             return candidate

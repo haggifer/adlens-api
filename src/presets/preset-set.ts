@@ -5,7 +5,8 @@ export const PRESET_COLLECTION = 'presets'
 export interface StoredPreset {
     id: string
     name: string
-    // The name lowercased: names are unique per user ignoring case.
+    // The name as compared (presets.service.ts toNameKey): names are unique per user ignoring case, inner whitespace
+    // and Unicode compatibility forms.
     nameKey: string
     settings: AnalysisSettings
     usageCount: number

@@ -110,6 +110,14 @@ describe('PresetsService', () => {
         expect(await getNames()).toEqual(['Meta US'])
     })
 
+    it('refuses a name that differs only in inner whitespace or Unicode compatibility form', async () => {
+        await create('Meta US')
+
+        await expect(presets.create(userId, input('meta   us'))).rejects.toMatchObject(NAME_TAKEN)
+        await expect(presets.create(userId, input('Ｍeta US'))).rejects.toMatchObject(NAME_TAKEN)
+        expect(await getNames()).toEqual(['Meta US'])
+    })
+
     it('refuses a preset past the limit, but still overwrites one by name at the limit', async () => {
         await fill(MAX_PRESETS)
 
@@ -461,6 +469,20 @@ describe('PresetsService', () => {
             const [, renamed] = await getNames()
 
             expect(renamed).toBe(`${'x'.repeat(PRESET_NAME_MAX_LENGTH - 5)} (2)`)
+        })
+
+        it('never cuts an emoji in half when cutting a name short for its number', async () => {
+            const base = 'x'.repeat(PRESET_NAME_MAX_LENGTH - 5)
+            const longName = `${base}\u{1F600}\u{1F600}`
+
+            await create(longName)
+            await createFor(anonymousId, longName)
+
+            await presets.transfer(anonymousId, userId)
+
+            const [, renamed] = await getNames()
+
+            expect(renamed).toBe(`${base} (2)`)
         })
 
         it('moves every preset once when two links for one anonymous user run at the same time', async () => {
