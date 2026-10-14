@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { MediaProber, parseProbeOutput, UndecodableMediaError } from './media-prober'
+import { LOCAL_FILE_PROTOCOLS, MediaProber, parseProbeOutput, UndecodableMediaError } from './media-prober'
 
 jest.mock('node:child_process', () => ({ spawn: jest.fn() }))
 
@@ -111,6 +111,16 @@ describe('MediaProber', () => {
         expect(args.join(' ')).toContain('-protocol_whitelist https,tls,tcp')
         expect(args.at(-1)).toBe(SIGNED_URL)
         expect(options).toMatchObject({ env: { PATH: process.env.PATH } })
+    })
+
+    it('opens a local file only when the caller asks for it', async () => {
+        ffprobeExiting(1, 'Invalid data found when processing input')
+
+        await expect(prober.probe('C:/videos/demo.mp4', LOCAL_FILE_PROTOCOLS)).rejects.toThrow()
+
+        const [, args] = jest.mocked(spawn).mock.calls[0]
+
+        expect(args.join(' ')).toContain('-protocol_whitelist file')
     })
 
     it('keeps the signed query of the URL it read out of the error, which gets logged', async () => {

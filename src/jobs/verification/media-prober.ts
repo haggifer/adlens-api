@@ -24,9 +24,12 @@ const PROBE_TIMEOUT_MS = 30 * 1000
 // MP4 would make it fetch the URLs inside (from our network) and measure another file than the one Gemini reads. Only
 // the containers of the accepted video types are read.
 const FORMAT_WHITELIST = 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm'
-// The input is always a signed HTTPS URL; ffprobe may open nothing else (a local file, another protocol a format
-// points at), whatever the file says.
-const PROTOCOL_WHITELIST = 'https,tls,tcp'
+// A user's upload is always read through a signed HTTPS URL; ffprobe may open nothing else (a local file, another
+// protocol a format points at), whatever the file says.
+const REMOTE_PROTOCOLS = 'https,tls,tcp'
+
+// For the maintainer's publishing scripts, which measure a video on disk before uploading it.
+export const LOCAL_FILE_PROTOCOLS = 'file'
 
 // ffprobe's wording when it reached the input but couldn't read it as media, or read a format off the list.
 const UNDECODABLE_PATTERN =
@@ -77,7 +80,7 @@ export const parseProbeOutput = (stdout: string): ProbeResult => {
 // (the header / moov atom), so the video is never copied into the instance.
 @Injectable()
 export class MediaProber {
-    probe(input: string): Promise<ProbeResult> {
+    probe(input: string, protocols = REMOTE_PROTOCOLS): Promise<ProbeResult> {
         return new Promise((resolve, reject) => {
             const proc = spawn(
                 ffprobeStatic.path,
@@ -85,7 +88,7 @@ export class MediaProber {
                     '-v',
                     'error',
                     '-protocol_whitelist',
-                    PROTOCOL_WHITELIST,
+                    protocols,
                     '-format_whitelist',
                     FORMAT_WHITELIST,
                     '-print_format',

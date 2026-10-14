@@ -20,7 +20,12 @@ export { DEFAULT_GEMINI_LOCATION, DEFAULT_GEMINI_MODEL } from './config/gemini-d
 export { DEMO_OWNER, JOB_MODEL, type JobDoc, JobSchema } from './database/job.doc'
 export { RULESET_MODEL, RulesetSchema } from './database/ruleset.doc'
 export { SAMPLE_MODEL, SampleSchema } from './database/sample.doc'
-export { MediaProber, type ProbeResult, UndecodableMediaError } from './jobs/verification/media-prober'
+export {
+    LOCAL_FILE_PROTOCOLS,
+    MediaProber,
+    type ProbeResult,
+    UndecodableMediaError,
+} from './jobs/verification/media-prober'
 export { resolveSettings, type SelectedRules, selectRules } from './rules'
 export { type Rule, RULE_PLATFORMS, type RuleSet, ruleSetSchema } from './rules/schema'
 export { StorageService } from './storage/storage.service'
