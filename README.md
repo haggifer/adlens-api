@@ -252,7 +252,7 @@ answering is a plain reply; its text isn't stored.
   never refresh a session, since the refreshed cookie would be dropped while the database row is extended; the web's
   `get-session` refreshes it.
 - **Anonymous sessions** (Better Auth's `anonymous` plugin): the web signs a visitor in anonymously right before their
-  first analysis, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
+  first analysis or their first preset save, whichever comes first, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
   `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
   work unchanged. When they sign up or sign in (`/sign-up/email`, `/sign-in/*`), `onLinkAccount` moves their jobs
   (`userId`), quota runs and presets to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts);
@@ -661,9 +661,9 @@ Why the system is built this way, and what was rejected. Decisions that span the
 
 **Auth and hosting**
 
-- **Anonymous users are real Better Auth users**, created only when a visitor starts an analysis, so every existing
-  path (jobs, quota, history, Socket.IO) works unchanged and crawlers create none. Once nobody can reach one (its
-  session expired or was signed out), the daily cleanup deletes it a week after it was last seen.
+- **Anonymous users are real Better Auth users**, created only when a visitor starts an analysis or saves a preset, so
+  every existing path (jobs, quota, history, presets, Socket.IO) works unchanged and crawlers create none. Once nobody
+  can reach one (its session expired or was signed out), the daily cleanup deletes it a week after it was last seen.
 - **One analysis without an account, then sign up; one without a confirmed email, then confirm.** It's the
   2026-08-13 design (first analysis anonymous, an account from the second), applied on 2026-10-01; anonymous users
   had had the members' 3 a week since 2026-09-28. Clearing cookies gets a new anonymous user, so the per-network
