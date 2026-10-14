@@ -2,10 +2,10 @@ import 'reflect-metadata'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { NestExpressApplication } from '@nestjs/platform-express'
-import { toNodeHandler } from 'better-auth/node'
 import helmet from 'helmet'
 import { AppModule } from './app.module'
-import { AUTH, type AuthInstance, withOutbox } from './auth/auth.instance'
+import { mountAuthRoute } from './auth/auth-route'
+import { AUTH, type AuthInstance } from './auth/auth.instance'
 import { ApiExceptionFilter } from './common/api-exception.filter'
 import { createLogger } from './common/cloud-logger'
 import type { Env } from './config/env'
@@ -22,16 +22,13 @@ const bootstrap = async () => {
     const config = app.get<ConfigService<Env, true>>(ConfigService)
     const auth = app.get<AuthInstance>(AUTH)
     const webOrigins = allowedWebOrigins(config.get('WEB_ORIGIN', { infer: true }))
-    const authHandler = toNodeHandler(auth)
 
     app.use(helmet())
     app.enableCors({ origin: webOrigins, credentials: true })
     app.enableShutdownHooks()
     app.useGlobalFilters(new ApiExceptionFilter())
     app.useWebSocketAdapter(new RealtimeIoAdapter(app, webOrigins))
-    app.getHttpAdapter()
-        .getInstance()
-        .all('/api/auth/*splat', (req, res) => withOutbox(() => authHandler(req, res)))
+    mountAuthRoute(app.getHttpAdapter().getInstance(), auth)
     app.useBodyParser('json', { limit: '1mb' })
 
     await app.listen(config.get('PORT', { infer: true }))

@@ -351,6 +351,9 @@ Every `/v1/*` route except `GET /v1/samples`, `GET /v1/demos` and `POST /v1/cont
 session cookie (never from the body) and every query is scoped by it. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`; a body that isn't valid JSON (400),
 is over 1 MB (413) or comes in an unsupported charset or encoding (415) answers `VALIDATION_FAILED` with that status.
+Better Auth's routes (`/api/auth/*`, mounted by [`mountAuthRoute`](src/auth/auth-route.ts) before the JSON parser) read
+their body themselves with no limit, so a guard reads it first: over 64 KB answers 413 `VALIDATION_FAILED`, before
+reading when `content-length` says so, and a chunked body that grows past it has its connection cut.
 
 | Method & path               | Purpose                                                                                                                                                                                                           | Returns                                              |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |

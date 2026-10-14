@@ -113,10 +113,10 @@ before(async () => {
     })
 
     const { Test } = require('@nestjs/testing')
-    const { toNodeHandler } = require('better-auth/node')
     const { AppModule } = require('../dist/app.module')
     const { AccountDataService } = require('../dist/account/account-data.service')
-    const { AUTH, withOutbox } = require('../dist/auth/auth.instance')
+    const { AUTH } = require('../dist/auth/auth.instance')
+    const { mountAuthRoute } = require('../dist/auth/auth-route')
     const { Mailer } = require('../dist/mail/mailer')
     const { JobEventsService } = require('../dist/realtime/job-events.service')
     const { StorageService } = require('../dist/storage/storage.service')
@@ -168,10 +168,7 @@ before(async () => {
         return adopt(anonymousUserId, userId)
     }
 
-    const authHandler = toNodeHandler(auth)
-    app.getHttpAdapter()
-        .getInstance()
-        .all('/api/auth/*splat', (req, res) => withOutbox(() => authHandler(req, res)))
+    mountAuthRoute(app.getHttpAdapter().getInstance(), auth)
     app.useBodyParser('json')
     await app.listen(PORT)
 })
@@ -1169,6 +1166,60 @@ test('rate limits key a multi-entry X-Forwarded-For on its rightmost entry, the 
     })
 
     assert.deepEqual(statuses, [429, 200])
+})
+
+const OVERSIZED_BODY = JSON.stringify({ email: 'big@example.com', password: 'big-password', name: 'x'.repeat(70_000) })
+
+test('an auth request whose declared body is over 64 KB is refused before it is read', async () => {
+    const res = await post('/api/auth/sign-up/email', JSON.parse(OVERSIZED_BODY))
+    const body = await res.json()
+
+    assert.equal(res.status, 413)
+    assert.equal(body.errorCode, 'VALIDATION_FAILED')
+    assert.equal(await storedUser('big@example.com'), null)
+})
+
+test('an auth request whose chunked body grows past 64 KB is cut off', async () => {
+    const chunk = new TextEncoder().encode(OVERSIZED_BODY.slice(0, 16_000))
+    let sent = 0
+    const stream = new ReadableStream({
+        pull: (controller) => {
+            if (sent++ < 8) {
+                controller.enqueue(chunk)
+            } else {
+                controller.close()
+            }
+        },
+    })
+    const res = await fetch(`${API}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: headers(),
+        body: stream,
+        duplex: 'half',
+    }).catch((err) => err)
+
+    assert.ok(res instanceof Error || res.status === 413, `answered ${res.status}`)
+    assert.equal(await storedUser('big@example.com'), null)
+})
+
+test('a chunked auth body under the limit reaches Better Auth', async () => {
+    const body = JSON.stringify({ name: 'Chunked', email: 'chunked@example.com', password: 'chunked-password' })
+    const stream = new ReadableStream({
+        start: (controller) => {
+            controller.enqueue(new TextEncoder().encode(body.slice(0, 20)))
+            controller.enqueue(new TextEncoder().encode(body.slice(20)))
+            controller.close()
+        },
+    })
+    const res = await fetch(`${API}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: headers(),
+        body: stream,
+        duplex: 'half',
+    })
+
+    assert.equal(res.status, 200)
+    assert.equal((await storedUser('chunked@example.com'))?.name, 'Chunked')
 })
 
 test("every flow above ran with Better Auth's collections indexed, unique emails and session tokens included", async () => {
