@@ -67,6 +67,11 @@ export class JobsGateway implements OnGatewayConnection {
     async publishJobUpdate(userId: string, job: Job): Promise<void> {
         const room = roomOf(userId)
 
+        // Every API instance sees every job update, and most hold no socket of its owner.
+        if (!this.hasLocalSockets(room)) {
+            return
+        }
+
         this.server.to(room).emit('job:updated', job)
 
         if (IN_PROGRESS_STATUSES.includes(job.status)) {
@@ -78,6 +83,11 @@ export class JobsGateway implements OnGatewayConnection {
         if (!isRunning) {
             this.server.in(room).disconnectSockets(true)
         }
+    }
+
+    // This instance's sockets only: there is no adapter between instances, so a socket elsewhere is that instance's.
+    private hasLocalSockets(room: string): boolean {
+        return (this.server.sockets.adapter.rooms.get(room)?.size ?? 0) > 0
     }
 
     private async hasJobInProgress(userId: string): Promise<boolean> {

@@ -12,6 +12,20 @@ const RESTART_DELAY_MS = 5 * 1000
 // ChangeStreamHistoryLost (the oplog rolled past it). Reopening with it would fail every few seconds forever.
 const UNRESUMABLE_CODES = new Set([260, 280, 286])
 
+// The job fields that change what a client shows. Every other update (a refund, the call mark, an attempt, usage) is
+// left out of the stream, so no instance looks it up or publishes it.
+const PUBLISHED_FIELDS = ['status', 'analysis', 'errorCode', 'presetName']
+
+export const PUBLISHED_CHANGES = {
+    $or: [
+        { operationType: 'replace' },
+        {
+            operationType: 'update',
+            $or: PUBLISHED_FIELDS.map((field) => ({ [`updateDescription.updatedFields.${field}`]: { $exists: true } })),
+        },
+    ],
+}
+
 const isUnresumable = (err: Error): boolean => UNRESUMABLE_CODES.has((err as { code?: unknown }).code as number)
 
 // One Change Stream per API instance on the jobs collection: every update is pushed to the owner's socket room. When
@@ -63,7 +77,7 @@ export class JobEventsService implements OnModuleInit, OnModuleDestroy {
     }
 
     private openStream(db: mongo.Db): mongo.ChangeStream {
-        return db.collection('jobs').watch([{ $match: { operationType: { $in: ['update', 'replace'] } } }], {
+        return db.collection('jobs').watch([{ $match: PUBLISHED_CHANGES }], {
             fullDocument: 'updateLookup',
             ...(this.resumeToken ? { resumeAfter: this.resumeToken } : {}),
         })

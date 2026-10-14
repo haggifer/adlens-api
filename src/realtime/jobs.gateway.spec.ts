@@ -26,7 +26,9 @@ describe('JobsGateway', () => {
     const auth = { getUserId: jest.fn(async (): Promise<string | null> => USER) }
     const emit = jest.fn()
     const disconnectSockets = jest.fn()
+    const rooms = new Map<string, Set<string>>()
     const server = {
+        sockets: { adapter: { rooms } },
         to: jest.fn(() => ({ emit })),
         in: jest.fn(() => ({ fetchSockets: async () => socketsInRoom, disconnectSockets })),
     }
@@ -68,6 +70,7 @@ describe('JobsGateway', () => {
 
     beforeEach(async () => {
         socketsInRoom = []
+        rooms.clear()
         jest.clearAllMocks()
         auth.getUserId.mockResolvedValue(USER)
         await jobs.deleteMany({})
@@ -159,6 +162,24 @@ describe('JobsGateway', () => {
 
     describe('publishJobUpdate', () => {
         const update = (status: JobStatus) => ({ id: 'job-1', status }) as Job
+
+        beforeEach(() => {
+            rooms.set(ROOM, new Set(['socket-1']))
+        })
+
+        it("does nothing on an instance that holds none of the user's sockets", async () => {
+            const exists = jest.spyOn(jobs, 'exists')
+
+            rooms.clear()
+            await createJob(JobStatus.Analyzed)
+
+            await gateway.publishJobUpdate(USER, update(JobStatus.Analyzed))
+
+            expect(emit).not.toHaveBeenCalled()
+            expect(exists).not.toHaveBeenCalled()
+            expect(disconnectSockets).not.toHaveBeenCalled()
+            exists.mockRestore()
+        })
 
         it('delivers an update and keeps the sockets while the job is still running', async () => {
             await createJob(JobStatus.Analyzing)

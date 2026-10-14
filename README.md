@@ -52,7 +52,9 @@ their own repos.
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
   go through the same logger. Locally the default is Nest's readable text.
-- **Realtime**: a MongoDB Change Stream on `jobs` pushes every update to the owner's Socket.IO room. The stream is
+- **Realtime**: a MongoDB Change Stream on `jobs` pushes every update a client shows (one that sets `status`,
+  `analysis`, `errorCode` or `presetName`; refunds, the call mark and usage aren't streamed) to the owner's Socket.IO
+  room, and an instance holding none of the owner's sockets does nothing with it. The stream is
   reopened from its last resume token after errors, or from now when MongoDB can never resume from that token (its
   history rolled out of the oplog); a socket that missed an update refetches the job when it reconnects. Cloud Run bills an instance for as long as a socket to it is open,
   so [`JobsGateway`](src/realtime/jobs.gateway.ts) accepts a socket (WebSocket only, at most 3 per user per instance)

@@ -1,6 +1,7 @@
 import type { Connection } from 'mongoose'
 import { EventEmitter } from 'node:events'
-import { JobEventsService } from './job-events.service'
+import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
+import { JobEventsService, PUBLISHED_CHANGES } from './job-events.service'
 import type { JobsGateway } from './jobs.gateway'
 
 // The real gateway module loads Better Auth, which is ESM-only and can't run under Jest; the test passes its own fake.
@@ -57,6 +58,10 @@ describe('JobEventsService', () => {
         jest.useRealTimers()
     })
 
+    it('watches only the updates a client shows', () => {
+        expect(watch.mock.calls[0][0]).toEqual([{ $match: PUBLISHED_CHANGES }])
+    })
+
     it('reopens from the last seen update after an error, so none is lost', async () => {
         streams[0].emit('error', mongoError('connection reset', 6))
         await reopen()
@@ -101,5 +106,43 @@ describe('JobEventsService', () => {
         ;(conn as unknown as EventEmitter).emit('open')
 
         expect(watchLater).not.toHaveBeenCalled()
+    })
+})
+
+// The stream's $match is a query, so it is run here as one against change events shaped as MongoDB sends them.
+describe('PUBLISHED_CHANGES', () => {
+    let mongo: MemoryMongo
+
+    const updateOf = (updatedFields: Record<string, unknown>) => ({
+        operationType: 'update',
+        updateDescription: { updatedFields, removedFields: [] },
+    })
+
+    beforeAll(async () => {
+        mongo = await startMemoryMongo()
+    })
+
+    afterAll(async () => {
+        await mongo.stop()
+    })
+
+    it('passes the updates a client shows and drops the bookkeeping ones', async () => {
+        const events = mongo.connection.collection('change_events')
+
+        await events.insertMany([
+            { name: 'status', ...updateOf({ status: 'analyzing', attempts: 1, updatedAt: new Date() }) },
+            { name: 'analysis', ...updateOf({ status: 'analyzed', analysis: {} }) },
+            { name: 'errorCode', ...updateOf({ errorCode: 'ANALYSIS_FAILED' }) },
+            { name: 'presetName', ...updateOf({ presetName: 'Meta US' }) },
+            { name: 'replace', operationType: 'replace' },
+            { name: 'refund', ...updateOf({ chargedRunId: null, chargedIpRunId: null, updatedAt: new Date() }) },
+            { name: 'call mark', ...updateOf({ modelCallStartedAt: new Date() }) },
+            { name: 'usage', ...updateOf({ 'usage.totalTokens': 10 }) },
+            { name: 'insert', operationType: 'insert' },
+        ])
+
+        const passed = await events.find(PUBLISHED_CHANGES).toArray()
+
+        expect(passed.map((event) => event.name)).toEqual(['status', 'analysis', 'errorCode', 'presetName', 'replace'])
     })
 })
