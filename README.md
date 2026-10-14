@@ -414,10 +414,13 @@ rules are then routed by `modality`:
 
 Every analysis records `model`, `promptVersion` and `rulesetVersion`. For pricing, the job keeps every billed Gemini
 call in `usage.calls` (time, model, location, traffic type, finish reason, and prompt, cached, tool-use, answer and
-thinking tokens with their split by modality), failed attempts included, plus totals across them. Each call also
-records `durationMs`, how long the model request took (a monotonic clock, our parsing excluded; `at` is when the answer
-arrived), so cost changes can be checked against processing time; calls recorded before it was measured lack it. A call
-that got no answer (an error status, a timeout) isn't recorded, but its logged failure says how long it ran.
+thinking tokens with their split by modality), failed attempts included (an answer that couldn't be used, assembled or
+stored too), plus totals across them; a call is added once by its `at`, since a write that failed on the network may
+still have been applied. Recording a failed attempt's call is best-effort: the job still fails and is refunded. Each
+call also records `durationMs`, how long the model request took (a monotonic clock, our parsing excluded; `at` is when
+the answer arrived), so cost changes can be checked against processing time; calls recorded before it was measured
+lack it. A call that got no answer (an error status, a timeout) isn't recorded, but its logged failure says how long it
+ran.
 
 ## Sample ads
 

@@ -14,6 +14,7 @@ import { type MemoryMongo, startMemoryMongo } from '../../testing/memory-mongo'
 import { buildModelCall, usageOf } from '../../testing/model-call'
 import { TEST_RULESET } from '../../testing/test-ruleset'
 import { type VideoReview, VideoReviewer } from '../review/video-reviewer'
+import * as assembly from './analysis-assembly'
 import { AnalysisPipeline } from './analysis-pipeline.service'
 import { ModelAnswerError, ModelCallRefusedError } from './model-answer-error'
 import { RetryableError } from './retryable-error'
@@ -307,9 +308,67 @@ describe('AnalysisPipeline', () => {
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
-        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+        expect(await findJob(jobId)).toMatchObject({
+            status: JobStatus.Error,
+            errorCode: JobErrorCode.AnalysisFailed,
+            usage: usageOf(CALL),
+        })
         expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
+    })
+
+    it('records the billed call of an answer that could not be assembled', async () => {
+        const jobId = await queueJob()
+
+        jest.spyOn(assembly, 'buildAnalysis').mockImplementationOnce(() => {
+            throw new Error('unknown rule shape')
+        })
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: usageOf(CALL) })
+    })
+
+    it('records the call once when storing the answer was applied but its acknowledgement was lost', async () => {
+        const jobId = await queueJob()
+        const complete = lifecycle.complete.bind(lifecycle)
+
+        jest.spyOn(lifecycle, 'complete').mockImplementationOnce(async (...args) => {
+            await complete(...args)
+            throw mongoBlip()
+        })
+
+        await pipeline.run(jobId, { isLast: false })
+
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Analyzed, usage: usageOf(CALL) })
+    })
+
+    it('still fails and refunds the job when recording the billed call fails', async () => {
+        const jobId = await queueJob(NETWORK)
+
+        jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(new Error('write failed'))
+        jest.spyOn(lifecycle, 'addUsage').mockRejectedValueOnce(mongoBlip())
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
+        expect((await findJob(jobId))?.status).toBe(JobStatus.Error)
+        expect(await used()).toBe(0)
+        expect(await usedByNetwork()).toBe(0)
+    })
+
+    it('skips a job the sweep ended before its model call, without calling Gemini', async () => {
+        const jobId = await queueJob()
+        const expiring = {
+            current: async () => {
+                await lifecycle.fail(jobId, JobErrorCode.AnalysisTimedOut, 'expired')
+
+                return ruleSet
+            },
+        }
+
+        pipeline = new AnalysisPipeline(lifecycle, reviewer, expiring as unknown as RulesetService)
+
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
+        expect(reviewer.review).not.toHaveBeenCalled()
+        expect((await findJob(jobId))?.errorCode).toBe(JobErrorCode.AnalysisTimedOut)
     })
 
     it('calls Gemini again after Vertex answered with an HTTP error status, which is never billed', async () => {

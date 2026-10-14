@@ -19,6 +19,13 @@ export class ModelCallRepeatedError extends Error {
     }
 }
 
+// The job ended (the sweep expired it) before this attempt called the model: nothing is left to do.
+export class JobEndedError extends Error {
+    constructor() {
+        super('The job ended before the model was called')
+    }
+}
+
 // Vertex answered the call with an HTTP error status (e.g. 429, 500, 503) instead of generating, which Gemini doesn't
 // bill. Unlike a timeout or a dropped connection, after which Vertex may still have generated a billed answer, the
 // call may be made again.

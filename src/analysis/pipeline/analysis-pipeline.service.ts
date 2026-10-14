@@ -8,7 +8,7 @@ import { resolveSettings, selectRules } from '../../rules'
 import { RulesetService } from '../../rules/ruleset.service'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from '../review/video-reviewer'
 import { buildAnalysis, toReviewRequest } from './analysis-assembly'
-import { isRefusedCall, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
+import { isRefusedCall, JobEndedError, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
 import { isRetryable } from './retryable-error'
 
 type RunOutcome = 'analyzed' | 'failed' | 'skipped'
@@ -17,10 +17,11 @@ interface RunAttempt {
     isLast: boolean
 }
 
-// Whether the job holds the Gemini call mark: from the moment an attempt sets it (or finds it set by an earlier one)
-// until a refusal clears it.
-interface CallMark {
-    isKept: boolean
+// The attempt's Gemini call: whether the job holds its mark (from the moment an attempt sets it, or finds it set by an
+// earlier one, until a refusal clears it), and the call once Gemini answered, billed whatever becomes of the answer.
+interface CallState {
+    isMarkKept: boolean
+    billed: ModelCall | null
 }
 
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
@@ -46,10 +47,10 @@ export class AnalysisPipeline {
             return 'skipped'
         }
 
-        const mark: CallMark = { isKept: false }
+        const state: CallState = { isMarkKept: false, billed: null }
 
         try {
-            const { analysis, call } = await this.analyze(job, mark)
+            const { analysis, call } = await this.analyze(job, state)
             const isCompleted = await this.lifecycle.complete(jobId, analysis, call)
 
             if (isCompleted) {
@@ -63,11 +64,19 @@ export class AnalysisPipeline {
         } catch (err) {
             const detail = describeError(err)
 
-            if (err instanceof ModelAnswerError) {
-                await this.lifecycle.addUsage(jobId, err.call)
+            if (err instanceof JobEndedError) {
+                this.logger.warn(`job ${jobId} ended before its model call; nothing to do`)
+                return 'skipped'
             }
 
-            if (isRetryable(err) && !attempt.isLast && !mark.isKept) {
+            // A billed call whose answer couldn't be used, assembled or stored still belongs in the cost ledger.
+            const billed = err instanceof ModelAnswerError ? err.call : state.billed
+
+            if (billed) {
+                await this.tryAddUsage(jobId, billed)
+            }
+
+            if (isRetryable(err) && !attempt.isLast && !state.isMarkKept) {
                 this.logger.warn(`job ${jobId} failed transiently, leaving it for a retry: ${detail}`)
                 throw err
             }
@@ -79,7 +88,7 @@ export class AnalysisPipeline {
         }
     }
 
-    private async analyze(job: StoredJob, mark: CallMark): Promise<{ analysis: Analysis; call: ModelCall }> {
+    private async analyze(job: StoredJob, state: CallState): Promise<{ analysis: Analysis; call: ModelCall }> {
         if (!job.media) {
             throw new Error('Job has no verified media')
         }
@@ -87,11 +96,15 @@ export class AnalysisPipeline {
         const jobId = job._id.toString()
         const ruleSet = await this.ruleset.current()
         const selected = selectRules(ruleSet, job.settings)
-        const isMarked = await this.lifecycle.markModelCall(jobId)
+        const marking = await this.lifecycle.markModelCall(jobId)
 
-        mark.isKept = true
+        if (marking === 'ended') {
+            throw new JobEndedError()
+        }
 
-        if (!isMarked) {
+        state.isMarkKept = true
+
+        if (marking === 'repeated') {
             throw new ModelCallRepeatedError()
         }
 
@@ -103,8 +116,10 @@ export class AnalysisPipeline {
                 job.settings,
                 selected,
             ),
-            mark,
+            state,
         )
+
+        state.billed = review.call
 
         return {
             analysis: buildAnalysis(ruleSet, selected, review, job.media, resolveSettings(job.settings)),
@@ -112,7 +127,7 @@ export class AnalysisPipeline {
         }
     }
 
-    private async review(jobId: string, request: VideoReviewRequest, mark: CallMark): Promise<VideoReview> {
+    private async review(jobId: string, request: VideoReviewRequest, state: CallState): Promise<VideoReview> {
         try {
             return await this.reviewer.review(request)
         } catch (err) {
@@ -120,10 +135,19 @@ export class AnalysisPipeline {
             // generated, and billed, an answer, so the mark stays and no attempt calls again.
             if (isRefusedCall(err)) {
                 await this.lifecycle.clearModelCall(jobId)
-                mark.isKept = false
+                state.isMarkKept = false
             }
 
             throw err
+        }
+    }
+
+    // Best-effort: failing to record the cost must not stop the job from failing and being refunded.
+    private async tryAddUsage(jobId: string, call: ModelCall): Promise<void> {
+        try {
+            await this.lifecycle.addUsage(jobId, call)
+        } catch (err) {
+            this.logger.error(`could not record the billed call of job ${jobId}: ${describeError(err)}`)
         }
     }
 }

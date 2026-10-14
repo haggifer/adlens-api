@@ -10,6 +10,9 @@ import type { IpCharge } from '../ip-quota/ip-rules'
 import { QuotaService } from '../quota/quota.service'
 import { UNSTARTED_JOB_MS } from './job-status'
 
+// Whether this attempt set the call mark, found it set by an earlier attempt, or found the job no longer analyzed.
+type CallMarking = 'marked' | 'repeated' | 'ended'
+
 type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
 
 interface ExpirySweepResult {
@@ -181,15 +184,21 @@ export class JobLifecycle {
             .lean<StoredJob>()
     }
 
-    // Marks the attempt's Gemini call as started, so no later attempt makes one again. false when an earlier attempt
-    // already started one (it may have been billed), or the job is no longer being analyzed.
-    async markModelCall(jobId: string, now = new Date()): Promise<boolean> {
+    // Marks the attempt's Gemini call as started, so no later attempt makes one again. 'repeated' when an earlier
+    // attempt already started one (it may have been billed), 'ended' when the job is no longer being analyzed.
+    async markModelCall(jobId: string, now = new Date()): Promise<CallMarking> {
         const marked = await this.model.updateOne(
             { _id: jobId, status: JobStatus.Analyzing, modelCallStartedAt: { $exists: false } },
             { $set: { modelCallStartedAt: now } },
         )
 
-        return marked.modifiedCount > 0
+        if (marked.modifiedCount > 0) {
+            return 'marked'
+        }
+
+        const isAnalyzing = await this.model.exists({ _id: jobId, status: JobStatus.Analyzing })
+
+        return isAnalyzing ? 'repeated' : 'ended'
     }
 
     // Vertex refused the call with an HTTP error status, which Gemini doesn't bill: a retry may call again. The start
@@ -210,9 +219,10 @@ export class JobLifecycle {
         return done !== null
     }
 
-    // The call of an attempt whose answer couldn't be used: billed all the same.
+    // The call of an attempt whose answer couldn't be used: billed all the same. Safe to repeat: a write that failed
+    // on the network may still have been applied (complete's included), so a call already recorded is not added again.
     async addUsage(jobId: string, call: ModelCall): Promise<void> {
-        await this.model.updateOne({ _id: jobId }, recordCall(call))
+        await this.model.updateOne({ _id: jobId, 'usage.calls.at': { $ne: call.at } }, recordCall(call))
     }
 
     // queued / analyzing → error, with the charges refunded in full: a run that ends without a result is never
