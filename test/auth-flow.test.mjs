@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createRequire } from 'node:module'
+import { ReadableStream } from 'node:stream/web'
 import { after, before, test } from 'node:test'
 
 const require = createRequire(import.meta.url)
@@ -1180,7 +1181,7 @@ test('an auth request whose declared body is over 64 KB is refused before it is 
 })
 
 test('an auth request whose chunked body grows past 64 KB is cut off', async () => {
-    const chunk = new TextEncoder().encode(OVERSIZED_BODY.slice(0, 16_000))
+    const chunk = Buffer.from(OVERSIZED_BODY.slice(0, 16_000))
     let sent = 0
     const stream = new ReadableStream({
         pull: (controller) => {
@@ -1206,8 +1207,8 @@ test('a chunked auth body under the limit reaches Better Auth', async () => {
     const body = JSON.stringify({ name: 'Chunked', email: 'chunked@example.com', password: 'chunked-password' })
     const stream = new ReadableStream({
         start: (controller) => {
-            controller.enqueue(new TextEncoder().encode(body.slice(0, 20)))
-            controller.enqueue(new TextEncoder().encode(body.slice(20)))
+            controller.enqueue(Buffer.from(body.slice(0, 20)))
+            controller.enqueue(Buffer.from(body.slice(20)))
             controller.close()
         },
     })
