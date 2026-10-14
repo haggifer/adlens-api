@@ -23,8 +23,8 @@ interface RefundSweepResult {
 }
 
 const VERIFY_STALE_MS = 10 * 60 * 1000
-// Counted from the queueing, not from the last write: a worker that hasn't started its Gemini call 5 minutes after the
-// job was queued (dispatch, boot and the ruleset take under a minute) never will.
+// Counted from the queueing (or a refused call), not from the last write: a worker that hasn't started its Gemini call 5
+// minutes after the job was queued (dispatch, boot and the ruleset take under a minute) never will.
 const STARTING_STALE_MS = 5 * 60 * 1000
 // Counted from the start of the Gemini call: longer than the reviewer's 10-minute request timeout, so a live worker
 // always settles the job itself and a billed answer is never thrown away by the sweep.
@@ -40,6 +40,27 @@ const SWEPT = [JobStatus.Pending, JobStatus.Error]
 const HELD_CHARGES_PROJECTION = { userId: 1, chargedRunId: 1, chargedIpRunId: 1 }
 
 const newRunId = () => new Types.ObjectId().toString()
+
+// What makes a job abandoned, per status. Both the sweep's find and each job's final write use it.
+const staleConditions = (now: Date): FilterQuery<JobDoc>[] => {
+    const startingCutoff = new Date(now.getTime() - STARTING_STALE_MS)
+
+    return [
+        // Aged from its creation: no step of the upload touches the job.
+        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
+        { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
+        // A refused call clears the mark and restarts this clock (clearModelCall).
+        { status: { $in: IN_FLIGHT }, modelCallStartedAt: { $exists: false }, queuedAt: { $lt: startingCutoff } },
+        // Queued before queuedAt was recorded: timed from its last write instead.
+        {
+            status: { $in: IN_FLIGHT },
+            modelCallStartedAt: { $exists: false },
+            queuedAt: { $exists: false },
+            updatedAt: { $lt: startingCutoff },
+        },
+        { status: { $in: IN_FLIGHT }, modelCallStartedAt: { $lt: new Date(now.getTime() - MODEL_CALL_STALE_MS) } },
+    ]
+}
 
 const jobChanged = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobNotPending, 'Job changed during verification')
@@ -171,9 +192,10 @@ export class JobLifecycle {
         return marked.modifiedCount > 0
     }
 
-    // Vertex refused the call with an HTTP error status, which Gemini doesn't bill: a retry may call again.
-    async clearModelCall(jobId: string): Promise<void> {
-        await this.model.updateOne({ _id: jobId }, { $unset: { modelCallStartedAt: 1 } })
+    // Vertex refused the call with an HTTP error status, which Gemini doesn't bill: a retry may call again. The start
+    // clock restarts too, or a refusal late in the window would leave Cloud Run's retry on an already expired clock.
+    async clearModelCall(jobId: string, now = new Date()): Promise<void> {
+        await this.model.updateOne({ _id: jobId }, { $unset: { modelCallStartedAt: 1 }, $set: { queuedAt: now } })
     }
 
     // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale). The call is
@@ -221,7 +243,7 @@ export class JobLifecycle {
             const jobId = job._id.toString()
 
             try {
-                await this.expire(jobId, job.status)
+                await this.expire(jobId, job.status, now)
                 result.expired++
             } catch (err) {
                 result.failed++
@@ -265,46 +287,20 @@ export class JobLifecycle {
     }
 
     private findStaleJobs(userId: string | undefined, now: Date): Promise<Pick<StoredJob, '_id' | 'status'>[]> {
-        const startingCutoff = new Date(now.getTime() - STARTING_STALE_MS)
-
         return this.model
-            .find(
-                {
-                    ...(userId ? { userId } : {}),
-                    $or: [
-                        // Aged from its creation: no step of the upload touches the job.
-                        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
-                        { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
-                        // A refused call clears the mark, so its job is timed from the queueing again.
-                        {
-                            status: { $in: IN_FLIGHT },
-                            modelCallStartedAt: { $exists: false },
-                            queuedAt: { $lt: startingCutoff },
-                        },
-                        // Queued before queuedAt was recorded: timed from its last write instead.
-                        {
-                            status: { $in: IN_FLIGHT },
-                            modelCallStartedAt: { $exists: false },
-                            queuedAt: { $exists: false },
-                            updatedAt: { $lt: startingCutoff },
-                        },
-                        {
-                            status: { $in: IN_FLIGHT },
-                            modelCallStartedAt: { $lt: new Date(now.getTime() - MODEL_CALL_STALE_MS) },
-                        },
-                    ],
-                },
-                { _id: 1, status: 1 },
-            )
+            .find({ ...(userId ? { userId } : {}), $or: staleConditions(now) }, { _id: 1, status: 1 })
             .lean<Pick<StoredJob, '_id' | 'status'>[]>()
     }
 
-    private async expire(jobId: string, status: JobStatus): Promise<void> {
+    // Each end is guarded on the job still being stale, not only on its status: a worker that set its call mark after
+    // the sweep found the job keeps its billed call.
+    private async expire(jobId: string, status: JobStatus, now: Date): Promise<void> {
+        const stillStale = { _id: jobId, $or: staleConditions(now) }
+
         switch (status) {
-            // Guarded on pending like every transition, so a job started since the sweep found it runs on.
             case JobStatus.Pending:
                 await this.settle(
-                    { _id: jobId, status: JobStatus.Pending },
+                    { ...stillStale, status: JobStatus.Pending },
                     { status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed, errorDetail: 'Never started' },
                 )
 
@@ -312,12 +308,30 @@ export class JobLifecycle {
             // The API instance died mid-start (verifying, or charging after it); the start's own charges, if it took
             // any, are refunded with it.
             case JobStatus.Verifying:
-                await this.failStart(jobId, JobErrorCode.VideoCheckFailed, 'The verification never finished')
+                await this.settle(
+                    { ...stillStale, status: JobStatus.Verifying },
+                    {
+                        status: JobStatus.Error,
+                        errorCode: JobErrorCode.VideoCheckFailed,
+                        errorDetail: 'The verification never finished',
+                    },
+                )
 
                 return
-            default:
-                this.logger.warn(`job ${jobId} expired while ${status}`)
-                await this.fail(jobId, JobErrorCode.AnalysisTimedOut, 'No worker finished the analysis in time')
+            default: {
+                const isExpired = await this.settle(
+                    { ...stillStale, status: { $in: IN_FLIGHT } },
+                    {
+                        status: JobStatus.Error,
+                        errorCode: JobErrorCode.AnalysisTimedOut,
+                        errorDetail: 'No worker finished the analysis in time',
+                    },
+                )
+
+                if (isExpired) {
+                    this.logger.warn(`job ${jobId} expired while ${status}`)
+                }
+            }
         }
     }
 

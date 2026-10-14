@@ -112,10 +112,12 @@ conditional update on the expected current status, so two racing callers can nev
    `queued`/`analyzing` ends as `ANALYSIS_TIMED_OUT`, refunded, in two phases: 5 minutes after it was queued
    (`queuedAt`, so the worker's own writes don't extend it) while its Gemini call hasn't started, and 12 minutes after
    the call started (`modelCallStartedAt`) once it has. That outlasts the call's 10-minute timeout, so a live worker
-   always settles the job first; a refused call clears the mark and puts the job back on the first clock. If the job
-   ended anyway before the answer was stored, the answer is dropped but its call is still recorded in `usage.calls`. A job still `pending` 6 hours
-   after its creation (its upload never came, or no run was started) ends as `UPLOAD_FAILED`; each of these is a
-   conditional update on the status it was found in, so a job started meanwhile runs on.
+   always settles the job first; a refused call clears the mark and restarts the first clock (`queuedAt` set to the
+   refusal), so Cloud Run's retry gets a full 5 minutes. If the job ended anyway before the answer was stored, the
+   answer is dropped but its call is still recorded in `usage.calls`. A job still `pending` 6 hours after its creation
+   (its upload never came, or no run was started) ends as `UPLOAD_FAILED`; each of these is a conditional update on the
+   status it was found in and on the job still being stale, so a job started meanwhile, or whose Gemini call started
+   meanwhile, runs on.
 
 **Quota** ([`QuotaService`](src/quota/quota.service.ts)): N analyses (`QUOTA_LIMIT`) per rolling 7-day window for a
 confirmed account. Before an email is confirmed a user gets one analysis in total (`PROVISIONAL_QUOTA_LIMIT`), for

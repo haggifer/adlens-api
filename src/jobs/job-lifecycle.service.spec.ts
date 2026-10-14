@@ -9,7 +9,7 @@ import {
     RequestErrorCode,
     VideoMimeType,
 } from 'adlens-shared'
-import { type Model, Types } from 'mongoose'
+import { type FilterQuery, type Model, Types } from 'mongoose'
 import { UserAccess } from '../common/user-access'
 import { IP_QUOTA_COLLECTION, IP_QUOTA_MODEL, type IpQuotaDoc, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
@@ -521,17 +521,47 @@ describe('JobLifecycle', () => {
             expect(await usedRuns()).toBe(1)
         })
 
-        it('times a job whose call Vertex refused from its queueing again', async () => {
+        it('restarts the start clock when Vertex refused the call, so the retry gets a full window', async () => {
             const jobId = await queueJob()
 
             jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
             await wasQueuedAt(jobId, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
             await callStartedAt(jobId, NOW)
-            await lifecycle.clearModelCall(jobId)
+            await lifecycle.clearModelCall(jobId, NOW)
 
-            await lifecycle.expireStale(USER, NOW)
+            await lifecycle.expireStale(USER, new Date(NOW.getTime() + STARTING_STALE_MS))
+
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Analyzing)
+
+            await lifecycle.expireStale(USER, new Date(NOW.getTime() + STARTING_STALE_MS + 1))
 
             expect((await findJob(jobId))?.errorCode).toBe(JobErrorCode.AnalysisTimedOut)
+        })
+
+        it('leaves a job alone whose worker started its call after the sweep found it', async () => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+            const findJobs = jobs.find.bind(jobs)
+            let found: unknown[] = []
+
+            await lifecycle.startAttempt(jobId)
+            await wasQueuedAt(jobId, new Date(NOW.getTime() - STARTING_STALE_MS - 1))
+            jest.spyOn(jobs, 'find').mockImplementationOnce(((filter: FilterQuery<JobDoc>, projection: object) => ({
+                lean: async () => {
+                    found = await findJobs(filter, projection).lean()
+                    await lifecycle.markModelCall(jobId, NOW)
+
+                    return found
+                },
+            })) as never)
+
+            await lifecycle.expireStaleJobs(undefined, NOW)
+
+            expect(found).toHaveLength(1)
+            expect(await findJob(jobId)).toMatchObject({
+                status: JobStatus.Analyzing,
+                chargedRunId: expect.any(String),
+            })
+            expect(await usedRuns()).toBe(1)
         })
 
         it('records when a job was queued, which starts its analysis time', async () => {
