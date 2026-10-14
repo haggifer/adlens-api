@@ -548,6 +548,41 @@ describe('PresetsService', () => {
             expect(await presets.list(userId)).toHaveLength(24)
         })
 
+        it('stops at twice the limit, moving the most recently used or edited presets in their own order', async () => {
+            const earlierAnonymousId = new Types.ObjectId().toString()
+            const later = new Date(Date.now() + 60_000)
+            const recentNames = ['Late 1', 'Late 3', 'Late 4', 'Late 6', 'Late 7']
+
+            await fill(MAX_PRESETS)
+
+            for (let i = 0; i < MAX_PRESETS - 5; i++) {
+                await createFor(earlierAnonymousId, `Early ${i}`)
+            }
+
+            await presets.transfer(earlierAnonymousId, userId)
+
+            const late = []
+
+            for (let i = 0; i < 8; i++) {
+                late.push(await createFor(anonymousId, `Late ${i}`, { isDefault: i === 0 }))
+            }
+
+            for (const [i, preset] of late.entries()) {
+                if (recentNames.includes(preset.name)) {
+                    await presets.recordUse(anonymousId, preset.id, META_US, new Date(later.getTime() + i))
+                }
+            }
+
+            await presets.transfer(anonymousId, userId)
+
+            const names = await getNames()
+
+            expect(names).toHaveLength(MAX_PRESETS * 2)
+            expect(names.slice(-5)).toEqual(recentNames)
+            expect(await getDefaultId()).toBeNull()
+            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+        })
+
         it('moves nothing twice when run again', async () => {
             await create('Meta US')
             await createFor(anonymousId, 'Meta US', { isDefault: true })

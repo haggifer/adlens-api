@@ -22,6 +22,10 @@ interface PresetChanges {
 
 const TRANSFER_ATTEMPTS = 3
 
+// A sign-in move may take an account past the limit, so no preset saved before signing in is lost to it, but only this
+// far, so repeated anonymous sessions can't grow one account's document without end.
+const MAX_PRESETS_AFTER_MOVE = 2 * MAX_PRESETS
+
 const presetLimitReached = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.PresetLimitReached, 'Preset limit reached')
 
@@ -69,12 +73,34 @@ const toFreeName = (name: string, takenKeys: Set<string>): string => {
     }
 }
 
-// The presets an account still lacks. A name that doesn't clash with the account keeps its own name, reserved before any
-// clashing one is numbered, so a number never lands on a name the anonymous user already had.
+const getTouchedAt = (preset: StoredPreset) => Math.max(preset.lastUsedAt?.getTime() ?? 0, preset.updatedAt.getTime())
+
+// Most recently used or edited first; on a tie the older preset first, so the choice never depends on the read order.
+const byMostRecentlyTouched = (a: StoredPreset, b: StoredPreset) =>
+    getTouchedAt(b) - getTouchedAt(a) || a.id.localeCompare(b.id)
+
+// The presets that fit under MAX_PRESETS_AFTER_MOVE, the most recently touched ones, in their own order.
+const pickFitting = (missing: StoredPreset[], account: PresetSetDoc | null): StoredPreset[] => {
+    const room = Math.max(MAX_PRESETS_AFTER_MOVE - (account?.presets.length ?? 0), 0)
+    const fittingIds = new Set(
+        [...missing]
+            .sort(byMostRecentlyTouched)
+            .slice(0, room)
+            .map((preset) => preset.id),
+    )
+
+    return missing.filter((preset) => fittingIds.has(preset.id))
+}
+
+// The presets an account still lacks, as many as fit. A name that doesn't clash with the account keeps its own name,
+// reserved before any clashing one is numbered, so a number never lands on a name the anonymous user already had.
 const planMoves = (incoming: StoredPreset[], account: PresetSetDoc | null): StoredPreset[] => {
     const ownIds = new Set(account?.presets.map((preset) => preset.id))
     const takenKeys = new Set(account?.presets.map((preset) => preset.nameKey))
-    const missing = incoming.filter((preset) => !ownIds.has(preset.id))
+    const missing = pickFitting(
+        incoming.filter((preset) => !ownIds.has(preset.id)),
+        account,
+    )
     const keptIds = new Set(missing.filter((preset) => !takenKeys.has(preset.nameKey)).map((preset) => preset.id))
 
     missing.filter((preset) => keptIds.has(preset.id)).forEach((preset) => takenKeys.add(preset.nameKey))
@@ -290,10 +316,12 @@ export class PresetsService {
         return counted.modifiedCount === 1 ? stored.name : null
     }
 
-    // Sign-in or sign-up moves an anonymous user's presets to the account: a clashing name gets a number, the limit
-    // isn't applied, and a preset an earlier, interrupted attempt already moved is skipped, so a retry is safe. The push
-    // matches only while the account still has none of the ids and names it adds: when a concurrent link or save got
-    // there first, the plan is made again from the account as it is now.
+    // Sign-in or sign-up moves an anonymous user's presets to the account: a clashing name gets a number, the account
+    // may end up past MAX_PRESETS but never past MAX_PRESETS_AFTER_MOVE (the most recently used or edited presets move,
+    // the rest are deleted with the anonymous user), and a preset an earlier, interrupted attempt already moved is
+    // skipped, so a retry is safe. The push matches only while the account still has none of the ids and names it adds
+    // and room for them: when a concurrent link or save got there first, the plan is made again from the account as it
+    // is now.
     async transfer(fromUserId: string, toUserId: string, now = new Date()): Promise<void> {
         for (let attempt = 0; attempt < TRANSFER_ATTEMPTS; attempt++) {
             const from = await this.sets.findOne({ _id: fromUserId })
@@ -309,10 +337,7 @@ export class PresetsService {
             const isPushed = await this.pushMoved(toUserId, moved, now)
 
             if (isPushed) {
-                await this.sets.updateOne(
-                    { _id: toUserId, defaultPresetId: null },
-                    { $set: { defaultPresetId: from.defaultPresetId } },
-                )
+                await this.adoptDefault(toUserId, from.defaultPresetId)
                 await this.sets.deleteOne({ _id: fromUserId })
 
                 return
@@ -336,6 +361,18 @@ export class PresetsService {
         )
     }
 
+    // The anonymous default becomes the account's when the account has none, and only if that preset moved.
+    private async adoptDefault(userId: string, presetId: string | null): Promise<void> {
+        if (!presetId) {
+            return
+        }
+
+        await this.sets.updateOne(
+            { _id: userId, defaultPresetId: null, 'presets.id': presetId },
+            { $set: { defaultPresetId: presetId } },
+        )
+    }
+
     private async pushMoved(userId: string, moved: StoredPreset[], now: Date): Promise<boolean> {
         if (!moved.length) {
             return true
@@ -346,6 +383,7 @@ export class PresetsService {
                 _id: userId,
                 'presets.id': { $nin: moved.map((preset) => preset.id) },
                 'presets.nameKey': { $nin: moved.map((preset) => preset.nameKey) },
+                $expr: { $lte: [{ $size: '$presets' }, MAX_PRESETS_AFTER_MOVE - moved.length] },
             },
             { $push: { presets: { $each: moved } }, $set: { updatedAt: now } },
         )

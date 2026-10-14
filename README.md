@@ -258,7 +258,8 @@ answering is a plain reply; its text isn't stored.
   `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
   work unchanged. When they sign up or sign in (`/sign-up/email`, `/sign-in/*`), `onLinkAccount` moves their jobs
   (`userId`), quota runs and presets to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts);
-  a preset whose name the account already uses gets a number, `Name (2)`, and the 20 limit isn't applied to the move),
+  a preset whose name the account already uses gets a number, `Name (2)`; the move may take the account past the 20
+  limit, but never past 40: then the most recently used or edited presets move and the rest are deleted),
   then the plugin deletes the anonymous user; a failed move answers 500 `ACCOUNT_LINK_FAILED` and leaves the history
   with the anonymous user (the move is safe to repeat). A confirmation link never links: it never creates a session. `/link-social` is refused (403
   `ACCOUNT_LINK_FAILED`) for an anonymous session (it could attach a provider and stay anonymous forever) and for an
