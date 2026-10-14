@@ -11,9 +11,10 @@ import type { Response } from 'express'
 import { SessionGuard } from '../auth/session.guard'
 import { CurrentUser } from '../common/current-user.decorator'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
+import { PresetLimitGuard } from './preset-limit.guard'
 import { PresetsService } from './presets.service'
 
-@UseGuards(SessionGuard)
+@UseGuards(SessionGuard, PresetLimitGuard)
 @Controller('v1/presets')
 export class PresetsController {
     constructor(private readonly presets: PresetsService) {}

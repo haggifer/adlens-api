@@ -203,6 +203,20 @@ describe('Presets API (e2e)', () => {
         expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
     })
 
+    it('refuses a user’s writes past 60 a minute with RATE_LIMITED, leaving other users alone', async () => {
+        const clearDefault = (userId = owner) =>
+            request(app.getHttpServer()).put('/v1/presets/default').set(as(userId)).send({ presetId: null })
+
+        for (let index = 0; index < 60; index++) {
+            await clearDefault().expect(204)
+        }
+
+        const refused = await clearDefault().expect(429)
+
+        expect(refused.body.errorCode).toBe(RequestErrorCode.RateLimited)
+        await clearDefault(new Types.ObjectId().toString()).expect(204)
+    })
+
     it('deletes a preset, then answers NOT_FOUND for it', async () => {
         const created = await create('Reels EU')
 
