@@ -64,7 +64,7 @@ export class JobAnalysisService {
         const execution = await this.startWorker(jobId)
 
         if (execution) {
-            await this.lifecycle.recordExecution(jobId, execution)
+            await this.tryRecordExecution(jobId, execution)
         }
 
         const presetName = await this.countPresetUse(userId, queued)
@@ -122,6 +122,16 @@ export class JobAnalysisService {
             )
 
             return null
+        }
+    }
+
+    // The worker is running and the user is charged, so the run is answered as started whatever happens here: the
+    // execution name only helps find the worker's logs.
+    private async tryRecordExecution(jobId: string, execution: string): Promise<void> {
+        try {
+            await this.lifecycle.recordExecution(jobId, execution)
+        } catch (err) {
+            this.logger.error(`could not record execution ${execution} of job ${jobId}: ${describeError(err)}`)
         }
     }
 

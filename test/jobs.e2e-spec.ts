@@ -1652,6 +1652,19 @@ describe('Jobs API (e2e)', () => {
             expect(dispatch).toHaveBeenCalledWith(job.id)
         })
 
+        it('answers a started run as started, its preset counted, when its execution name cannot be stored', async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            jest.spyOn(app.get(JobLifecycle), 'recordExecution').mockRejectedValueOnce(
+                new Error('database unavailable'),
+            )
+
+            const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
+
+            expect(job).toMatchObject({ status: JobStatus.Queued, presetName: 'Meta EU and US' })
+            expect(await getUsageCount(preset.id)).toBe(1)
+        })
+
         it('counts nothing for a run whose worker could not be started', async () => {
             const preset = await createPreset('Meta EU and US')
             const created = await send('post', '/v1/jobs')
