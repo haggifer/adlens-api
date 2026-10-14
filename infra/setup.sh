@@ -92,7 +92,14 @@ echo "== public media bucket (demo and sample videos) =="
 # resources"), and a public grant on the uploads bucket would expose every user's video.
 gcloud storage buckets describe "gs://$PUBLIC_MEDIA_BUCKET" >/dev/null 2>&1 || \
     gcloud storage buckets create "gs://$PUBLIC_MEDIA_BUCKET" --location="$REGION" --uniform-bucket-level-access
-gcloud storage buckets add-iam-policy-binding "gs://$PUBLIC_MEDIA_BUCKET" --member=allUsers --role="roles/storage.objectViewer"
+# Read by address only: objectViewer would also let anyone list the bucket, unpublished demos and samples included.
+gcloud storage buckets add-iam-policy-binding "gs://$PUBLIC_MEDIA_BUCKET" --member=allUsers --role="roles/storage.legacyObjectReader"
+# Removes the listable grant this bucket had before 2026-10-14, only when present (removing an absent one fails).
+LISTABLE_GRANT=$(gcloud storage buckets get-iam-policy "gs://$PUBLIC_MEDIA_BUCKET" --flatten="bindings[].members" \
+    --filter="bindings.role=roles/storage.objectViewer AND bindings.members=allUsers" --format="value(bindings.role)")
+if [ -n "$LISTABLE_GRANT" ]; then
+    gcloud storage buckets remove-iam-policy-binding "gs://$PUBLIC_MEDIA_BUCKET" --member=allUsers --role="roles/storage.objectViewer"
+fi
 gcloud storage buckets update "gs://$PUBLIC_MEDIA_BUCKET" --cors-file="$(dirname "$0")/cors.json"
 
 echo "== runtime service account =="

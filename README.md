@@ -690,8 +690,10 @@ Why the system is built this way, and what was rejected. Decisions that span the
   answer their plain address in `PUBLIC_MEDIA_BUCKET` instead of a 15-minute signed URL: no IAM `signBlob` call per
   video per request, no player failing after 15 minutes on the page, and a stable URL browsers can cache. It's a
   separate bucket because GCS refuses a public grant limited to a prefix ("Conditions are not allowed on public
-  resources", tested 2026-10-09) and the uploads bucket holds every user's video. A sample job's replay URL follows its
-  file's bucket the same way; everything else is still signed against its own bucket.
+  resources", tested 2026-10-09) and the uploads bucket holds every user's video. Anyone may read an object by its
+  address (`allUsers` has `roles/storage.legacyObjectReader`), but not list the bucket, so a demo or sample that isn't
+  published stays unfound. A sample job's replay URL follows its file's bucket the same way; everything else is still
+  signed against its own bucket.
 - **Linking moves ownership, not objects.** `jobs.userId` is rewritten and the runs are merged, but the GCS objects stay
   where they were uploaded: copying each video inside the sign-in request would be slow and could half-fail, and the
   verifier, replay URLs and worker already read `file.path`. So deleting a job deletes its `file.path`, and the purge
