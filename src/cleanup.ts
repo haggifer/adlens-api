@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { Logger } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
+import mongoose from 'mongoose'
 import { AbandonedUploadCleanupService } from './cleanup/abandoned-upload-cleanup.service'
 import { AnonymousCleanupService } from './cleanup/anonymous-cleanup.service'
 import { CleanupModule } from './cleanup/cleanup.module'
@@ -16,6 +17,9 @@ const EXIT_FAILED = 1
 // Entry point of the daily cleanup Cloud Run Job (adlens-cleanup, started by Cloud Scheduler). Exit 1 marks the
 // execution as failed in the console; whatever it couldn't delete is simply tried again the next day.
 const run = async (): Promise<number> => {
+    // The API builds the indexes on its start, as in the worker.
+    mongoose.set('autoIndex', false)
+
     const app = await NestFactory.createApplicationContext(CleanupModule, {
         logger: createLogger(readLogFormat(process.env)),
     })

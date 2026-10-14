@@ -345,6 +345,9 @@ answering is a plain reply; its text isn't stored.
   `session.expiresAt` and `verification.expiresAt`, because Better Auth deletes an expired session only when its
   cookie comes back. They use Better Auth's own index names (`<table>_<fields>_<idx|uidx>`, `_ttl` for the TTLs). The
   worker doesn't create them: it never reads these collections through Better Auth.
+- **Only the API builds the app's own indexes.** Mongoose creates a schema's indexes when its model starts; the worker
+  and the cleanup set `autoIndex` off (`worker.ts`, `cleanup.ts`), so a worker cold start sends no `createIndex` calls
+  and a new index on a large collection is built by the API, on the deploy that adds it.
 
 ## API
 
