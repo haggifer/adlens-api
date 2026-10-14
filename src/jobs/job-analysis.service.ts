@@ -101,8 +101,9 @@ export class JobAnalysisService {
         }
     }
 
-    // A run counts for its preset only once its worker started (a failed start refunds the run) and only when its
-    // settings still match the preset; counting never fails the run. Answers the name stored on the job, or null.
+    // A run counts for its preset once its worker started (a failed start refunds the run), whatever the analysis then
+    // ends as, and only when its settings still match the preset; counting never fails the run. Answers the name stored
+    // on the job, or null.
     private async countPresetUse(userId: string, job: StoredJob): Promise<string | null> {
         if (!job.presetId) {
             return null

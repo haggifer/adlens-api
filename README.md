@@ -367,7 +367,7 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `GET /health`               | Liveness (public)                                                                                                                                                                                                 | `{ status, service, time }`                          |
 | `POST /v1/jobs`             | Admission check (optional challengeToken), then a pending job and its signed upload target                                                                                                                        | `{ job, upload }`                                    |
 | `POST /v1/jobs/from-sample` | Admission check, then a pending job on a published sample ad (no upload)                                                                                                                                          | `{ job }`                                            |
-| `POST /v1/jobs/:id/analyze` | Verify → charge network and user → count the run for its `presetId` when the settings still match it (never fails the start) → dispatch                                                                           | **202** `{ job }`                                    |
+| `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch → once the worker started, count the run for its `presetId` when the settings still match it (counted whatever the run's outcome; never fails the start)              | **202** `{ job }`                                    |
 | `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)                                                                                                                                                      | `{ jobs, nextCursor }`                               |
 | `GET /v1/jobs/:id`          | One owned job                                                                                                                                                                                                     | `{ job }`                                            |
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                            | `{ url, expiresAt }`                                 |
@@ -437,7 +437,8 @@ ran.
 
 Sample ads let anyone try AdLens without an ad of their own. Each is a document in the `samples` collection (title,
 description, storage path, media facts, suggested settings, display order, published flag), and its video is stored
-under `samples/` in the uploads bucket. `GET /v1/samples` lists them with short-lived preview URLs; the web app fills
+under `samples/` in the public media bucket (`PUBLIC_MEDIA_BUCKET`). `GET /v1/samples` lists them with their videos'
+public addresses; the web app fills
 in the suggested settings, which the user can change, and `POST /v1/jobs/from-sample` creates a job that points at the
 sample's video. Analyzing it skips upload verification (the video was measured when it was published); the only check
 is that a published sample still points at that object. It is charged like any other analysis. Samples are
@@ -451,10 +452,11 @@ Set `"isPublished": false` and publish again to hide a sample.
 The demo page shows a few finished analyses to anyone, so a visitor sees a report before spending their free run. A
 demo is an ordinary job with a `demo` field (slug, tab label, summary title and subtitle, display order, active flag),
 owned by `demo` (`DEMO_OWNER`), which matches no user: a demo is in nobody's History, no account can delete it, and the
-daily cleanup never deletes its video, stored under `demos/` in the uploads bucket. `GET /v1/demos` lists the active,
-analyzed demo jobs in order, each with its public job and a short-lived video URL. Only the latest analysis per demo
-is listed: a re-run demo stays on the page with its earlier job until the new one is analyzed, and the earlier job
-stays stored. Demos are managed by the maintainer: the video is measured
+daily cleanup never deletes its video, stored under `demos/` in the public media bucket. `GET /v1/demos` lists the
+active, analyzed demo jobs in order, each with its public job and its video's public address, and only the latest
+analyzed job per demo (a demo whose first run failed shows once a later run under its slug is analyzed). A demo with an
+analysis is never analyzed again under its slug: to refresh one, the maintainer publishes it under a new slug and sets
+the old one inactive. Demos are managed by the maintainer: the video is measured
 and uploaded, the job created as `queued` and handed to the analysis worker like any other, so it runs the production
 pipeline and is billed like any run, outside every quota. Set `"isActive": false` and publish again to hide a demo.
 
