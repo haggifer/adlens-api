@@ -485,6 +485,20 @@ describe('PresetsService', () => {
             expect(renamed).toBe(`${base} (2)`)
         })
 
+        it('never cuts a flag, two code points, in half either', async () => {
+            const base = 'x'.repeat(PRESET_NAME_MAX_LENGTH - 6)
+            const longName = `${base}\u{1F1FA}\u{1F1E6}`
+
+            await create(longName)
+            await createFor(anonymousId, longName)
+
+            await presets.transfer(anonymousId, userId)
+
+            const [, renamed] = await getNames()
+
+            expect(renamed).toBe(`${base} (2)`)
+        })
+
         it('moves every preset once when two links for one anonymous user run at the same time', async () => {
             await create('Meta US')
             await create('Own')

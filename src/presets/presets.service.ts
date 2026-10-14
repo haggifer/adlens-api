@@ -41,17 +41,19 @@ const INNER_WHITESPACE = /\s+/g
 // "Ｓummer Sale" are one name.
 const toNameKey = (name: string) => name.normalize('NFKC').trim().replace(INNER_WHITESPACE, ' ').toLowerCase()
 
-// Cut at a whole code point, so an emoji is never split in half, while staying within a limit counted in UTF-16 units
-// as the contract counts a name's length.
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+// Cut between whole characters as a reader sees them (a flag or a family emoji is several code points), while staying
+// within a limit counted in UTF-16 units as the contract counts a name's length.
 const truncateName = (name: string, maxLength: number): string => {
     let cut = ''
 
-    for (const char of name) {
-        if (cut.length + char.length > maxLength) {
+    for (const { segment } of GRAPHEMES.segment(name)) {
+        if (cut.length + segment.length > maxLength) {
             break
         }
 
-        cut += char
+        cut += segment
     }
 
     return cut
