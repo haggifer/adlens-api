@@ -1131,6 +1131,21 @@ test('anonymous sign-in is limited to 10 an hour per client', async () => {
     assert.ok(retryAfter > HOUR_S - 60 && retryAfter <= HOUR_S, `retry after ${retryAfter}s`)
 })
 
+test('rate limits key a multi-entry X-Forwarded-For on its rightmost entry, the one our front end wrote', async () => {
+    const statuses = await withRateLimits(async () => {
+        for (let i = 0; i < ANONYMOUS_SIGN_INS_PER_HOUR; i++) {
+            await signInAnonymouslyFrom(`198.51.100.${i}, 203.0.113.62`)
+        }
+
+        const sameClient = await signInAnonymouslyFrom('198.51.100.99, 203.0.113.62')
+        const otherClient = await signInAnonymouslyFrom('198.51.100.1, 203.0.113.63')
+
+        return [sameClient.status, otherClient.status]
+    })
+
+    assert.deepEqual(statuses, [429, 200])
+})
+
 test("every flow above ran with Better Auth's collections indexed, unique emails and session tokens included", async () => {
     const { AUTH_INDEXES } = require('../dist/auth/auth-indexes')
     const names = await withDb(async (db) => {

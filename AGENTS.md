@@ -41,9 +41,10 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   on a job.
 - The client's address comes only from `ClientNetworkResolver` (`X-Forwarded-For` read `TRUSTED_PROXY_HOPS` from the
   right). Never store or log an address; networks are stored as an HMAC.
-- Better Auth resolves the address itself for its rate limits and sessions. Keep its counters in
-  `createRateLimitStorage` (HMAC keys, TTL-deleted), never `rateLimit.storage: 'database'` (raw `<ip>|<path>` keys,
-  never deleted), and keep the `session.create.before` hook that sets `ipAddress` to null.
+- Better Auth resolves the address itself for its rate limits and sessions; keep `advanced.ipAddress.trustedProxies`,
+  which makes it take the same rightmost `X-Forwarded-For` entry (a change to `TRUSTED_PROXY_HOPS` must change both).
+  Keep its counters in `createRateLimitStorage` (HMAC keys, TTL-deleted), never `rateLimit.storage: 'database'` (raw
+  `<ip>|<path>` keys, never deleted), and keep the `session.create.before` hook that sets `ipAddress` to null.
 - Better Auth's collections get their indexes only from `AUTH_INDEXES` in `src/auth/auth-indexes.ts` (its adapter
   creates none), created on API start and logged, never fatal, on failure. Keep Better Auth's index names, and never
   log a MongoDB error message there: a duplicate-key message quotes the value, an email address.

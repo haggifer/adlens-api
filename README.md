@@ -323,9 +323,11 @@ answering is a plain reply; its text isn't stored.
 - **Better Auth's rate limits** (its defaults, plus 10 anonymous sign-ins an hour per client) are counted in MongoDB,
   so they hold across instances, by [`createRateLimitStorage`](src/auth/rate-limit-storage.ts): one `rate_limits`
   document per client and path, keyed by `HMAC-SHA256(key, "<ip>|<path>")` with its own HKDF key from
-  `BETTER_AUTH_SECRET`, and deleted by a TTL index when its window ends. Better Auth resolves that address itself
-  (only from a single-entry `X-Forwarded-For`; requests it can't read share one bucket), not through
-  `ClientNetworkResolver`. It only rate-limits when `NODE_ENV` is `production`.
+  `BETTER_AUTH_SECRET`, and deleted by a TTL index when its window ends. Better Auth resolves that address itself,
+  not through `ClientNetworkResolver`, but to the same entry: `advanced.ipAddress.trustedProxies` (loopback only) makes
+  it take the rightmost `X-Forwarded-For` entry, as one trusted hop does, where without it a header with more than one
+  entry would put the request in one bucket shared by all such clients. It only rate-limits when `NODE_ENV` is
+  `production`.
 - **Sessions don't store the address.** Better Auth records it on every session; a
   `databaseHooks.session.create.before` hook sets `ipAddress` to null and keeps the user agent.
 - **Better Auth's collections are indexed at startup.** Its Mongo adapter only creates indexes a plugin schema
