@@ -69,8 +69,9 @@ GITHUB_CLIENT_ID=Ov23ct4gfbO6JyiOGopx
 SECRETS_BUNDLE=API_SECRETS
 SECRETS_PATH=/secrets/api.json
 BUNDLE_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL GOOGLE_CLIENT_SECRET GITHUB_CLIENT_SECRET TURNSTILE_SECRET_KEY"
-# RESEND_API_KEY is required because MailModule asserts it at startup; the API won't boot without it.
-REQUIRED_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY"
+# RESEND_API_KEY and CONTACT_EMAIL are required because MailModule and ContactService assert them at startup; the API
+# won't boot without them.
+REQUIRED_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL"
 ENV_FILE="$(dirname "$0")/../.env.production"
 
 gcloud config set project "$PROJECT"

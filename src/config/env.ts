@@ -31,7 +31,8 @@ const envSchema = z.object({
     // Required by the API, which asserts it in MailModule; the worker sends no email.
     RESEND_API_KEY: z.string().optional(),
     MAIL_FROM: z.string().default('AdLens <no-reply@mail.useadlens.com>'),
-    // Where Contact form messages go. Unset, the form answers 503.
+    // Where Contact form messages go. The API won't start without it (ContactService); optional here because the
+    // worker and the cleanup share this schema and send no Contact mail.
     CONTACT_EMAIL: z.email().optional(),
     // Sign-in with Google / GitHub; a provider is enabled when both of its values are set.
     GOOGLE_CLIENT_ID: z.string().optional(),
