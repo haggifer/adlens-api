@@ -45,11 +45,12 @@ export const buildAnalysis = (
     promptVersion: review.promptVersion,
     rulesetVersion: ruleSet.meta.version,
     transcript: review.transcript,
-    findings: buildFindings(ruleSet, selected.content, review.findings),
+    findings: buildFindings(ruleSet, selected.content, review.findings, settings.platforms),
     metadataChecks: evaluateMetadataRules(ruleSet, selected.metadata, media, settings.placements, settings.platforms),
     advisories: buildAdvisories(
         ruleSet,
         selected.advisory.filter((rule) => review.advisoryIds.includes(rule.id)),
+        settings.platforms,
     ),
     completedAt: new Date().toISOString(),
 })

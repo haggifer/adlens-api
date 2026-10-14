@@ -397,10 +397,12 @@ records the `rulesetVersion` it ran with.
 Selection ([`src/rules/index.ts`](src/rules/index.ts)) targets the job's settings: its **platforms** (YouTube also pulls
 in Google Ads policy), its **markets** (global rules always apply; UK/EU/US rules only in their market) and, for
 format-specific rules such as the 6-second bumper cap, its **placements**. A setting left empty stands for every value
-(`resolveSettings`: every platform, every market, every placement of the chosen platforms), so leaving a setting empty
+(`resolveSettings`: every platform, every market, every placement of the chosen platforms), and so does a platform
+chosen without any of its placements (all of that platform's, as the web reads such settings), so leaving a setting empty
 and choosing all of it select the same rules and send the same prompt, which lists the resolved values; the schema
 requires a rule's placements to belong to its platforms, so every video rule is selected by some settings. Selected
-rules are then routed by `modality`:
+rules are then routed by `modality`, and every finding, advisory and check names only those of its rule's platforms the
+chosen ones reach:
 
 - `metadata` → checked in code against the measured media facts (duration, dimensions as displayed after the video's
   rotation, real object size); an aspect ratio can be one required ratio (`aspect_ratio_in`), a list

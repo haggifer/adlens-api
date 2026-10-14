@@ -220,17 +220,25 @@ const evaluateMetadataRule = (rule: Rule, media: JobMedia): MetadataVerdict => {
     }
 }
 
-// Nothing chosen means nothing ruled out: an empty list stands for every value (placements: every one of the chosen
-// platforms'), so leaving a setting empty and choosing all of it select the same rules and read the same in the
-// prompt. Two runs of one ad differed only by that (2026-10-08: 6 findings and 18 specs vs 2 and 1).
+const placementsOf = (platform: Platform): Placement[] =>
+    Object.values(Placement).filter((placement) => PLACEMENT_PLATFORM[placement] === platform)
+
+const hasPlacementOf = (placements: Placement[], platform: Platform): boolean =>
+    placements.some((placement) => PLACEMENT_PLATFORM[placement] === platform)
+
+// Nothing chosen means nothing ruled out: an empty list stands for every value, and a platform chosen without any of
+// its placements stands for all of them (as the web's withPlatformPlacements reads it), so leaving a setting empty and
+// choosing all of it select the same rules and read the same in the prompt. Two runs of one ad differed only by that
+// (2026-10-08: 6 findings and 18 specs vs 2 and 1).
 export const resolveSettings = ({ platforms, placements, markets }: AnalysisSettings): AnalysisSettings => {
     const resolvedPlatforms = platforms.length ? platforms : Object.values(Platform)
 
     return {
         platforms: resolvedPlatforms,
-        placements: placements.length
-            ? placements
-            : Object.values(Placement).filter((placement) => resolvedPlatforms.includes(PLACEMENT_PLATFORM[placement])),
+        placements: [
+            ...placements,
+            ...resolvedPlatforms.filter((platform) => !hasPlacementOf(placements, platform)).flatMap(placementsOf),
+        ],
         markets: markets.length ? markets : Object.values(Market),
     }
 }
@@ -291,10 +299,11 @@ export const evaluateMetadataRules = (
         ...citationOf(ruleSet, rule),
     }))
 
-export const buildAdvisories = (ruleSet: RuleSet, rules: Rule[]): Advisory[] =>
+// Like metadata checks, an advisory or a finding names only the platforms the selected ones reach.
+export const buildAdvisories = (ruleSet: RuleSet, rules: Rule[], selectedPlatforms?: Platform[]): Advisory[] =>
     rules.map((rule) => ({
         id: rule.id,
-        platform: rule.platform,
+        platform: narrowPlatforms(rule, selectedPlatforms),
         topic: rule.topic,
         severity: rule.severity,
         check: rule.check,
@@ -303,7 +312,12 @@ export const buildAdvisories = (ruleSet: RuleSet, rules: Rule[]): Advisory[] =>
 
 // Maps the model's verdicts back to full findings by rule id. Ids that weren't sent are dropped (hallucination guard),
 // and a rule answered twice keeps its first verdict, so the report counts it once.
-export const buildFindings = (ruleSet: RuleSet, contentRules: Rule[], modelFindings: ModelFinding[]): Finding[] => {
+export const buildFindings = (
+    ruleSet: RuleSet,
+    contentRules: Rule[],
+    modelFindings: ModelFinding[],
+    selectedPlatforms?: Platform[],
+): Finding[] => {
     const byId = new Map(contentRules.map((rule) => [rule.id, rule]))
     const answered = new Set<string>()
 
@@ -319,7 +333,7 @@ export const buildFindings = (ruleSet: RuleSet, contentRules: Rule[], modelFindi
         return [
             {
                 id: rule.id,
-                platform: rule.platform,
+                platform: narrowPlatforms(rule, selectedPlatforms),
                 topic: rule.topic,
                 scope: rule.scope,
                 severity: rule.severity,

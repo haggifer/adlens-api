@@ -1,6 +1,13 @@
 import { type AnalysisSettings, type JobMedia, Market, Placement, Platform, RulePlatform } from 'adlens-shared'
 import { TEST_RULESET } from '../testing/test-ruleset'
-import { buildFindings, evaluateMetadataRules, projectForModel, resolveSettings, selectRules } from './index'
+import {
+    buildAdvisories,
+    buildFindings,
+    evaluateMetadataRules,
+    projectForModel,
+    resolveSettings,
+    selectRules,
+} from './index'
 import type { Rule } from './schema'
 
 const ruleSet = TEST_RULESET
@@ -95,6 +102,14 @@ describe('resolveSettings', () => {
             Placement.TikTokInFeed,
             Placement.AmazonSponsoredBrandsVideo,
         ])
+    })
+
+    it('stands all of a chosen platform’s placements when none of them was chosen, keeping the others’ choice', () => {
+        const resolved = resolveSettings(
+            settingsFor({ platforms: [Platform.Meta, Platform.TikTok], placements: [Placement.MetaReels] }),
+        )
+
+        expect(resolved.placements).toEqual([Placement.MetaReels, Placement.TikTokInFeed])
     })
 
     it('keeps what was chosen', () => {
@@ -415,6 +430,20 @@ describe('buildFindings', () => {
 
         expect(findings).toHaveLength(1)
         expect(findings[0]).toMatchObject({ id: contentRule.id, verdict: 'fail', evidence: 'first' })
+    })
+
+    it('names only the platforms the selected ones reach, like metadata checks', () => {
+        const crossPlatform = { ...contentRule, platform: [RulePlatform.Meta, RulePlatform.YouTube] }
+        const [finding] = buildFindings(
+            ruleSet,
+            [crossPlatform],
+            [{ id: crossPlatform.id, verdict: 'fail', evidence: 'e' }],
+            [Platform.Meta],
+        )
+        const [advisory] = buildAdvisories(ruleSet, [crossPlatform], [Platform.Meta])
+
+        expect(finding.platform).toEqual([RulePlatform.Meta])
+        expect(advisory.platform).toEqual([RulePlatform.Meta])
     })
 
     it('drops ids the model invented', () => {
