@@ -7,6 +7,7 @@
     "testEnvironment": "node",
     "moduleFileExtensions": ["ts", "js", "json"],
     "testTimeout": 60000,
+    "setupFiles": ["<rootDir>/test/test-env.ts"],
     "moduleNameMapper": {
         "^better-auth(/.*)?$": "<rootDir>/test/stubs/better-auth.ts"
     },

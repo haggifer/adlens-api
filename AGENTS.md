@@ -71,8 +71,9 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   then the web; a rollback goes in reverse, the web first, then the API. A response field the web reads stays optional
   on the web until the API that sends it is live. The same order holds for rulesets (see Gotchas): the API that knows a
   new value first, then what uses it.
-- All configuration goes through the Zod schema in `src/config/env.ts`. Tests set `NODE_ENV=test`, which stops env
-  files from loading, so tests can never reach a real database or bucket.
+- All configuration goes through the Zod schema in `src/config/env.ts`. Tests set `NODE_ENV=test` (Jest's setup file
+  `test/test-env.ts`, whatever the shell says), which stops env files from loading, so tests can never reach a real
+  database or bucket.
 - Production secrets go in the `API_SECRETS` Secret Manager bundle, via `infra/setup.sh` (put the key in the git-ignored
   `.env.production`, never `.env.local`, and run the script) — never as their own individual secret, and never as a plain env var in a deploy command.
 - The committed `.env` ships in the production image: only public values meant for every environment go there (it is
