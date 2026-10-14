@@ -81,8 +81,16 @@ export class AnalysisPipeline {
                 throw err
             }
 
+            const isFailed = await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail)
+
+            // Already ended, stored after all (its acknowledgement was lost) or expired by the sweep: not an error to
+            // report.
+            if (!isFailed) {
+                this.logger.warn(`job ${jobId} had already ended when its attempt failed: ${detail}`)
+                return 'skipped'
+            }
+
             this.logger.error(`job ${jobId} failed: ${detail}`)
-            await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail)
 
             return 'failed'
         }

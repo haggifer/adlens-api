@@ -337,8 +337,7 @@ describe('AnalysisPipeline', () => {
             throw mongoBlip()
         })
 
-        await pipeline.run(jobId, { isLast: false })
-
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Analyzed, usage: usageOf(CALL) })
     })
 
