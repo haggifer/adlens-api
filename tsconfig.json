@@ -27,6 +27,11 @@
         "resolveJsonModule": true,
         "types": ["node", "jest"]
     },
+    "watchOptions": {
+        "watchFile": "dynamicPriorityPolling",
+        "excludeDirectories": ["**/node_modules"],
+        "excludeFiles": ["**/node_modules/**"]
+    },
     "include": ["src/**/*.ts", "test/**/*.ts"],
     "exclude": ["node_modules", "dist"]
 }

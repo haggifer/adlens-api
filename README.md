@@ -502,6 +502,10 @@ npm run start:dev                        # keeps dist/ built, which the local wo
 With `ANALYZE_LOCAL=1` each analysis runs `node dist/worker` as a child process, the same entry point Cloud Run runs.
 Vertex reads the real `gs://` object, so a real bucket and ADC are needed for the analysis step.
 
+A restart of the watch mode kills that child process, and on Windows a mere read of a dependency (the worker loading
+its own) reaches TypeScript's file watcher as a change. So `tsconfig.json` `watchOptions` polls files, which compares
+modification times, and doesn't watch `node_modules`: restart `npm run start:dev` yourself after `npm install`.
+
 Locally, use Cloudflare's test secret 1x0000000000000000000000000000000AA (always passes) with the web's test site
 key; 2x0000000000000000000000000000000AA always fails.
 
