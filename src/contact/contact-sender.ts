@@ -105,7 +105,8 @@ export class ContactSenderReader {
     private async readLastJob(userId: string): Promise<ContactJob | null> {
         const job = await this.jobs
             .findOne({ userId }, { status: 1, errorCode: 1, createdAt: 1 })
-            .sort({ createdAt: -1 })
+            // The newest by _id, which grows with creation time, so the { userId, _id } index serves the sort.
+            .sort({ _id: -1 })
             .lean<Pick<StoredJob, '_id' | 'status' | 'errorCode' | 'createdAt'>>()
 
         return job
