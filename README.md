@@ -522,22 +522,9 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 ```bash
 gcloud auth application-default login   # once; the account needs Vertex AI User
 npm install
-# .env.local: MONGODB_URI, STORAGE_BUCKET, BETTER_AUTH_SECRET, RESEND_API_KEY, CONTACT_EMAIL, ANALYZE_LOCAL=1, STORAGE_KEY_FILE, TURNSTILE_SECRET_KEY
+# .env.local: MONGODB_URI, BETTER_AUTH_SECRET, RESEND_API_KEY, CONTACT_EMAIL, ANALYZE_LOCAL=1, STORAGE_KEY_FILE, TURNSTILE_SECRET_KEY
 npm run start:dev                        # keeps dist/ built, which the local worker process runs
 ```
-
-Local runs use their own database and uploads bucket, never production's:
-
-- **Database:** `MONGODB_URI` names a development database (`adlens_dev`) on the same cluster, with a database user
-  whose role reaches only it. Each process logs `Connected to database <name>` on start, so a wrong address shows at
-  once. The API builds every index on its first start. The worker refuses to analyze without a ruleset, and the
-  sample picker and the demo page stay empty without their data: the lab's `npm run db:seed-dev` copies the latest
-  ruleset, the published samples and the active demos from production (their videos are in the public bucket, so
-  nothing is copied there).
-- **Uploads:** `STORAGE_BUCKET` in `.env.local` names a development bucket with the uploads bucket's CORS and a
-  lifecycle rule that deletes objects after 7 days. The committed `.env` names production's, whose cleanup only knows
-  production's jobs, so a local upload left there would never be deleted.
-- An analysis still calls Gemini on Vertex for real, and is billed like any other.
 
 With `ANALYZE_LOCAL=1` each analysis runs `node dist/worker` as a child process, the same entry point Cloud Run runs.
 Vertex reads the real `gs://` object, so a real bucket and ADC are needed for the analysis step.
