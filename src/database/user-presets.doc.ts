@@ -1,6 +1,7 @@
 import type { AnalysisSettings } from 'adlens-shared'
 
-export const PRESET_COLLECTION = 'presets'
+// A user's saved presets, all in one document (presets.service.ts reads and writes it).
+export const USER_PRESETS_COLLECTION = 'user_presets'
 
 export interface StoredPreset {
     id: string
@@ -15,9 +16,9 @@ export interface StoredPreset {
     updatedAt: Date
 }
 
-// One document per user, keyed by the user id, so the limit and the unique name can each be enforced by one
-// conditional update on it.
-export interface PresetSetDoc {
+// One document per user, so the limit and the unique name can each be enforced by one conditional update on it.
+export interface UserPresetsDoc {
+    // The owner's user id (a string; Better Auth's `user._id` is the same value as an ObjectId).
     _id: string
     presets: StoredPreset[]
     defaultPresetId: string | null

@@ -12,7 +12,7 @@ import {
 import { Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
-import { PRESET_COLLECTION, type PresetSetDoc } from './preset-set'
+import { USER_PRESETS_COLLECTION, type UserPresetsDoc } from '../database/user-presets.doc'
 import { PresetsService } from './presets.service'
 
 const META_US: AnalysisSettings = { platforms: [Platform.Meta], placements: [Placement.MetaFeed], markets: [Market.US] }
@@ -34,7 +34,7 @@ describe('PresetsService', () => {
     let presets: PresetsService
     let userId: string
 
-    const sets = () => mongo.connection.collection<PresetSetDoc>(PRESET_COLLECTION)
+    const userPresetDocs = () => mongo.connection.collection<UserPresetsDoc>(USER_PRESETS_COLLECTION)
 
     const input = (name: string, fields: Partial<SavePresetPayload> = {}): SavePresetPayload => ({
         name,
@@ -70,7 +70,7 @@ describe('PresetsService', () => {
     })
 
     afterEach(async () => {
-        await sets().deleteMany({})
+        await userPresetDocs().deleteMany({})
     })
 
     afterAll(async () => {
@@ -150,7 +150,7 @@ describe('PresetsService', () => {
     it('overwrites a preset by name on create, keeping its id and usage count', async () => {
         const original = await create('Meta US')
 
-        await sets().updateOne({ _id: userId }, { $set: { 'presets.0.usageCount': 3 } })
+        await userPresetDocs().updateOne({ _id: userId }, { $set: { 'presets.0.usageCount': 3 } })
 
         const result = await presets.create(userId, input('META us', { settings: TIKTOK_EU, overwrite: true }))
 
@@ -216,7 +216,10 @@ describe('PresetsService', () => {
         await create('Meta US')
         const renamed = await create('TikTok EU', { settings: TIKTOK_EU })
 
-        await sets().updateOne({ _id: userId }, { $set: { 'presets.0.usageCount': 5, 'presets.1.usageCount': 2 } })
+        await userPresetDocs().updateOne(
+            { _id: userId },
+            { $set: { 'presets.0.usageCount': 5, 'presets.1.usageCount': 2 } },
+        )
 
         const updated = await presets.update(userId, renamed.id, input('meta us', { overwrite: true }))
 
@@ -331,7 +334,7 @@ describe('PresetsService', () => {
         expect(await getDefaultId()).toBe(preset.id)
 
         await presets.remove(userId, preset.id)
-        expect((await sets().findOne({ _id: userId }))?.defaultPresetId).toBeNull()
+        expect((await userPresetDocs().findOne({ _id: userId }))?.defaultPresetId).toBeNull()
     })
 
     it('refuses to remove an unknown preset', async () => {
@@ -513,13 +516,13 @@ describe('PresetsService', () => {
             ])
 
             const moved = await presets.list(userId)
-            const stored = await sets().findOne({ _id: userId })
+            const stored = await userPresetDocs().findOne({ _id: userId })
 
             expect(settled.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled'])
             expect(moved).toHaveLength(5)
             expect(new Set(moved.map((preset) => preset.id)).size).toBe(5)
             expect(new Set(stored?.presets.map((preset) => preset.nameKey)).size).toBe(5)
-            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+            expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
         })
 
         it("keeps the account's own default when it has one", async () => {
@@ -594,7 +597,7 @@ describe('PresetsService', () => {
             expect(names).toHaveLength(MAX_PRESETS * 2)
             expect(names.slice(-5)).toEqual(recentNames)
             expect(await getDefaultId()).toBeNull()
-            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+            expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
         })
 
         it('moves nothing twice when run again', async () => {
@@ -613,17 +616,17 @@ describe('PresetsService', () => {
             await createFor(anonymousId, 'Meta US', { isDefault: true })
             await createFor(anonymousId, 'Other')
 
-            const left = await sets().findOne({ _id: anonymousId })
+            const left = await userPresetDocs().findOne({ _id: anonymousId })
 
             await presets.transfer(anonymousId, userId)
 
             const moved = await presets.list(userId)
 
-            await sets().insertOne(left!)
+            await userPresetDocs().insertOne(left!)
             await presets.transfer(anonymousId, userId)
 
             expect(await presets.list(userId)).toEqual(moved)
-            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+            expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
         })
 
         it('deletes the anonymous document', async () => {
@@ -631,7 +634,7 @@ describe('PresetsService', () => {
 
             await presets.transfer(anonymousId, userId)
 
-            expect(await sets().findOne({ _id: anonymousId })).toBeNull()
+            expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
             expect(await presets.list(anonymousId)).toEqual([])
         })
 
@@ -641,13 +644,13 @@ describe('PresetsService', () => {
             await presets.transfer(anonymousId, userId)
 
             expect(await getNames()).toEqual(['Own'])
-            expect(await sets().countDocuments()).toBe(1)
+            expect(await userPresetDocs().countDocuments()).toBe(1)
         })
 
         it("doesn't create a document for the account when there is nothing to move", async () => {
             await presets.transfer(anonymousId, userId)
 
-            expect(await sets().countDocuments()).toBe(0)
+            expect(await userPresetDocs().countDocuments()).toBe(0)
         })
     })
 
@@ -660,7 +663,7 @@ describe('PresetsService', () => {
 
             await presets.purge(userId)
 
-            expect(await sets().findOne({ _id: userId })).toBeNull()
+            expect(await userPresetDocs().findOne({ _id: userId })).toBeNull()
             expect(await presets.list(otherUserId)).toHaveLength(1)
         })
 

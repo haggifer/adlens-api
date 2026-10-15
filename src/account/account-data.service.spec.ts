@@ -2,7 +2,7 @@ import { JobStatus, Market, Placement, Platform, VideoMimeType } from 'adlens-sh
 import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
-import { PRESET_COLLECTION, type PresetSetDoc } from '../presets/preset-set'
+import { USER_PRESETS_COLLECTION, type UserPresetsDoc } from '../database/user-presets.doc'
 import { PresetsService } from '../presets/presets.service'
 import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
@@ -32,7 +32,7 @@ describe('AccountDataService', () => {
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
 
-    const presetSets = () => mongo.connection.collection<PresetSetDoc>(PRESET_COLLECTION)
+    const userPresetDocs = () => mongo.connection.collection<UserPresetsDoc>(USER_PRESETS_COLLECTION)
 
     const savePreset = (userId: string, name: string) =>
         presets.create(userId, { name, settings: SETTINGS, isDefault: true })
@@ -77,7 +77,7 @@ describe('AccountDataService', () => {
     })
 
     afterEach(async () => {
-        await Promise.all([jobs.deleteMany({}), users().deleteMany({}), presetSets().deleteMany({})])
+        await Promise.all([jobs.deleteMany({}), users().deleteMany({}), userPresetDocs().deleteMany({})])
     })
 
     afterAll(async () => {

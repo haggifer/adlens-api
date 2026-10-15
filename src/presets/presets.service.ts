@@ -10,7 +10,7 @@ import {
 } from 'adlens-shared'
 import { type Connection, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
-import { PRESET_COLLECTION, type PresetSetDoc, type StoredPreset } from './preset-set'
+import { type StoredPreset, USER_PRESETS_COLLECTION, type UserPresetsDoc } from '../database/user-presets.doc'
 import { isSameSettings } from './same-settings'
 
 interface PresetChanges {
@@ -82,7 +82,7 @@ const byMostRecentlyTouched = (a: StoredPreset, b: StoredPreset) =>
     getTouchedAt(b) - getTouchedAt(a) || a.id.localeCompare(b.id)
 
 // The presets that fit under MAX_PRESETS_AFTER_MOVE, the most recently touched ones, in their own order.
-const pickFitting = (missing: StoredPreset[], account: PresetSetDoc | null): StoredPreset[] => {
+const pickFitting = (missing: StoredPreset[], account: UserPresetsDoc | null): StoredPreset[] => {
     const room = Math.max(MAX_PRESETS_AFTER_MOVE - (account?.presets.length ?? 0), 0)
     const fittingIds = new Set(
         [...missing]
@@ -96,7 +96,7 @@ const pickFitting = (missing: StoredPreset[], account: PresetSetDoc | null): Sto
 
 // The presets an account still lacks, as many as fit. A name that doesn't clash with the account keeps its own name,
 // reserved before any clashing one is numbered, so a number never lands on a name the anonymous user already had.
-const planMoves = (incoming: StoredPreset[], account: PresetSetDoc | null): StoredPreset[] => {
+const planMoves = (incoming: StoredPreset[], account: UserPresetsDoc | null): StoredPreset[] => {
     const ownIds = new Set(account?.presets.map((preset) => preset.id))
     const takenKeys = new Set(account?.presets.map((preset) => preset.nameKey))
     const missing = pickFitting(
@@ -145,10 +145,10 @@ const toPreset = (stored: StoredPreset, defaultPresetId: string | null): Preset 
     updatedAt: stored.updatedAt.toISOString(),
 })
 
-const findPreset = (set: PresetSetDoc | null, presetId: string): Preset | null => {
-    const stored = set?.presets.find((preset) => preset.id === presetId)
+const findPreset = (userPresets: UserPresetsDoc | null, presetId: string): Preset | null => {
+    const stored = userPresets?.presets.find((preset) => preset.id === presetId)
 
-    return set && stored ? toPreset(stored, set.defaultPresetId) : null
+    return userPresets && stored ? toPreset(stored, userPresets.defaultPresetId) : null
 }
 
 // Without overwrite, an edit matches only while no other preset has the name.
@@ -213,18 +213,18 @@ const getRemovePipeline = (presetId: string, now: Date) => {
 export class PresetsService {
     constructor(@InjectConnection() private readonly connection: Connection) {}
 
-    private get sets() {
-        return this.connection.collection<PresetSetDoc>(PRESET_COLLECTION)
+    private get collection() {
+        return this.connection.collection<UserPresetsDoc>(USER_PRESETS_COLLECTION)
     }
 
     async list(userId: string): Promise<Preset[]> {
-        const set = await this.sets.findOne({ _id: userId })
+        const userPresets = await this.collection.findOne({ _id: userId })
 
-        if (!set) {
+        if (!userPresets) {
             return []
         }
 
-        return set.presets.map((preset) => toPreset(preset, set.defaultPresetId))
+        return userPresets.presets.map((preset) => toPreset(preset, userPresets.defaultPresetId))
     }
 
     // A taken name is refused unless the save asks to overwrite that preset.
@@ -252,8 +252,8 @@ export class PresetsService {
         const filter = getUpdateFilter(userId, presetId, changes.nameKey, input.overwrite)
         const pipeline = getUpdatePipeline(presetId, changes, input.isDefault)
 
-        const set = await this.sets.findOneAndUpdate(filter, pipeline, { returnDocument: 'after' })
-        const preset = findPreset(set, presetId)
+        const userPresets = await this.collection.findOneAndUpdate(filter, pipeline, { returnDocument: 'after' })
+        const preset = findPreset(userPresets, presetId)
 
         if (!preset) {
             const refusal = await this.getUpdateRefusal(userId, presetId)
@@ -265,7 +265,7 @@ export class PresetsService {
     }
 
     async remove(userId: string, presetId: string): Promise<void> {
-        const removed = await this.sets.updateOne(
+        const removed = await this.collection.updateOne(
             { _id: userId, 'presets.id': presetId },
             getRemovePipeline(presetId, new Date()),
         )
@@ -279,17 +279,17 @@ export class PresetsService {
         const now = new Date()
 
         if (presetId === null) {
-            await this.sets.updateOne({ _id: userId }, { $set: { defaultPresetId: null, updatedAt: now } })
+            await this.collection.updateOne({ _id: userId }, { $set: { defaultPresetId: null, updatedAt: now } })
 
             return
         }
 
-        const set = await this.sets.updateOne(
+        const updated = await this.collection.updateOne(
             { _id: userId, 'presets.id': presetId },
             { $set: { defaultPresetId: presetId, updatedAt: now } },
         )
 
-        if (!set.matchedCount) {
+        if (!updated.matchedCount) {
             throw presetNotFound()
         }
     }
@@ -302,14 +302,14 @@ export class PresetsService {
         settings: AnalysisSettings,
         now = new Date(),
     ): Promise<string | null> {
-        const set = await this.sets.findOne({ _id: userId })
-        const stored = set?.presets.find((preset) => preset.id === presetId)
+        const userPresets = await this.collection.findOne({ _id: userId })
+        const stored = userPresets?.presets.find((preset) => preset.id === presetId)
 
         if (!stored || !isSameSettings(stored.settings, settings)) {
             return null
         }
 
-        const counted = await this.sets.updateOne(
+        const counted = await this.collection.updateOne(
             { _id: userId },
             { $inc: { 'presets.$[p].usageCount': 1 }, $set: { 'presets.$[p].lastUsedAt': now } },
             { arrayFilters: [{ 'p.id': presetId, 'p.updatedAt': stored.updatedAt }] },
@@ -326,7 +326,7 @@ export class PresetsService {
     // is now.
     async transfer(fromUserId: string, toUserId: string, now = new Date()): Promise<void> {
         for (let attempt = 0; attempt < TRANSFER_ATTEMPTS; attempt++) {
-            const from = await this.sets.findOne({ _id: fromUserId })
+            const from = await this.collection.findOne({ _id: fromUserId })
 
             if (!from) {
                 return
@@ -334,13 +334,13 @@ export class PresetsService {
 
             await this.ensureSet(toUserId, now)
 
-            const to = await this.sets.findOne({ _id: toUserId })
+            const to = await this.collection.findOne({ _id: toUserId })
             const moved = planMoves(from.presets, to)
             const isPushed = await this.pushMoved(toUserId, moved, now)
 
             if (isPushed) {
                 await this.adoptDefault(toUserId, from.defaultPresetId)
-                await this.sets.deleteOne({ _id: fromUserId })
+                await this.collection.deleteOne({ _id: fromUserId })
 
                 return
             }
@@ -350,13 +350,13 @@ export class PresetsService {
     }
 
     async purge(userId: string): Promise<void> {
-        await this.sets.deleteOne({ _id: userId })
+        await this.collection.deleteOne({ _id: userId })
     }
 
     // Every user's document exists before a conditional write, so a refused write is told apart from a missing
     // document. Concurrent upserts on _id don't collide: the server retries one that hits the duplicate key.
     private async ensureSet(userId: string, now: Date) {
-        await this.sets.updateOne(
+        await this.collection.updateOne(
             { _id: userId },
             { $setOnInsert: { presets: [], defaultPresetId: null, createdAt: now, updatedAt: now } },
             { upsert: true },
@@ -369,7 +369,7 @@ export class PresetsService {
             return
         }
 
-        await this.sets.updateOne(
+        await this.collection.updateOne(
             { _id: userId, defaultPresetId: null, 'presets.id': presetId },
             { $set: { defaultPresetId: presetId } },
         )
@@ -380,7 +380,7 @@ export class PresetsService {
             return true
         }
 
-        const pushed = await this.sets.updateOne(
+        const pushed = await this.collection.updateOne(
             {
                 _id: userId,
                 'presets.id': { $nin: moved.map((preset) => preset.id) },
@@ -394,7 +394,7 @@ export class PresetsService {
     }
 
     private async push(userId: string, stored: StoredPreset, isDefault?: boolean): Promise<Preset> {
-        const pushed = await this.sets.updateOne(
+        const pushed = await this.collection.updateOne(
             {
                 _id: userId,
                 'presets.nameKey': { $ne: stored.nameKey },
@@ -418,7 +418,7 @@ export class PresetsService {
     // The preset of the name takes the new name casing and settings, and keeps its id and usage count. Null when no
     // preset has the name.
     private async overwriteByName(userId: string, changes: PresetChanges, isDefault?: boolean) {
-        const set = await this.sets.findOneAndUpdate(
+        const userPresets = await this.collection.findOneAndUpdate(
             { _id: userId, 'presets.nameKey': changes.nameKey },
             {
                 $set: {
@@ -430,7 +430,7 @@ export class PresetsService {
             },
             { returnDocument: 'after' },
         )
-        const stored = set?.presets.find((preset) => preset.nameKey === changes.nameKey)
+        const stored = userPresets?.presets.find((preset) => preset.nameKey === changes.nameKey)
 
         if (!stored) {
             return null
@@ -445,14 +445,14 @@ export class PresetsService {
         }
 
         if (isDefault === false) {
-            await this.sets.updateOne(
+            await this.collection.updateOne(
                 { _id: userId, defaultPresetId: presetId },
                 { $set: { defaultPresetId: null, updatedAt: new Date() } },
             )
         }
 
-        const set = await this.sets.findOne({ _id: userId })
-        const preset = findPreset(set, presetId)
+        const userPresets = await this.collection.findOne({ _id: userId })
+        const preset = findPreset(userPresets, presetId)
 
         if (!preset) {
             throw presetNotFound()
@@ -462,15 +462,18 @@ export class PresetsService {
     }
 
     private async getCreateRefusal(userId: string, nameKey: string) {
-        const set = await this.sets.findOne({ _id: userId }, { projection: { 'presets.nameKey': 1 } })
-        const isNameTaken = set?.presets.some((preset) => preset.nameKey === nameKey)
+        const userPresets = await this.collection.findOne({ _id: userId }, { projection: { 'presets.nameKey': 1 } })
+        const isNameTaken = userPresets?.presets.some((preset) => preset.nameKey === nameKey)
 
         return isNameTaken ? presetNameTaken() : presetLimitReached()
     }
 
     private async getUpdateRefusal(userId: string, presetId: string) {
-        const set = await this.sets.findOne({ _id: userId, 'presets.id': presetId }, { projection: { _id: 1 } })
+        const userPresets = await this.collection.findOne(
+            { _id: userId, 'presets.id': presetId },
+            { projection: { _id: 1 } },
+        )
 
-        return set ? presetNameTaken() : presetNotFound()
+        return userPresets ? presetNameTaken() : presetNotFound()
     }
 }
