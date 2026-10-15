@@ -14,7 +14,7 @@ const UNRESUMABLE_CODES = new Set([260, 280, 286])
 
 // The job fields that change what a client shows. Every other update (a refund, the call mark, an attempt, usage) is
 // left out of the stream, so no instance looks it up or publishes it.
-const PUBLISHED_FIELDS = ['status', 'analysis', 'errorCode', 'presetName']
+const PUBLISHED_FIELDS = ['status', 'analysis', 'errorCode', 'presetId']
 
 export const PUBLISHED_CHANGES = {
     $or: [

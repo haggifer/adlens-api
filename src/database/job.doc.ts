@@ -100,9 +100,10 @@ const jobDocSchema = z.object({
     // Set on a demo job: its file points at a video under demos/, which only the maintainer's script manages.
     demo: demoSchema.optional(),
     // The preset applied when the job was created; the start counts the run for it while the settings still match.
+    appliedPresetId: z.string().nullable().default(null),
+    // The preset the run was counted for; null when it counted for none. Only the id is kept: the name is read from the
+    // user's presets, so a renamed preset shows its new name on every past run.
     presetId: z.string().nullable().default(null),
-    // The name of the preset the run was counted for, as it was named then; null when it counted for none.
-    presetName: z.string().nullable().default(null),
 })
 
 export type JobDoc = z.infer<typeof jobDocSchema>

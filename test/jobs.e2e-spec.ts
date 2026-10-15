@@ -1533,7 +1533,7 @@ describe('Jobs API (e2e)', () => {
             const started = await send('post', `/v1/jobs/${jobId}/analyze`).expect(202)
             const read = await send('get', `/v1/jobs/${jobId}`).expect(200)
 
-            expect(started.body.job.presetName).toBe(read.body.job.presetName)
+            expect(started.body.job.presetId).toBe(read.body.job.presetId)
 
             return read.body.job
         }
@@ -1589,13 +1589,13 @@ describe('Jobs API (e2e)', () => {
             network = `203.0.113.${60 + networkCount++}`
         })
 
-        it("counts a run for its preset when the settings match in any order, and keeps the preset's name", async () => {
+        it('counts a run for its preset when the settings match in any order, and names the preset by id', async () => {
             const preset = await createPreset('Meta EU and US')
 
             const job = await runUpload({ settings: REORDERED_SETTINGS, presetId: preset.id })
 
-            expect(job.presetName).toBe('Meta EU and US')
-            expect(job).not.toHaveProperty('presetId')
+            expect(job.presetId).toBe(preset.id)
+            expect(job).not.toHaveProperty('presetName')
             expect(await getUsageCount(preset.id)).toBe(1)
         })
 
@@ -1604,7 +1604,7 @@ describe('Jobs API (e2e)', () => {
 
             const job = await runUpload({ settings: { ...PRESET_SETTINGS, markets: [Market.EU] }, presetId: preset.id })
 
-            expect(job.presetName).toBeNull()
+            expect(job.presetId).toBeNull()
             expect(await getUsageCount(preset.id)).toBe(0)
         })
 
@@ -1617,8 +1617,8 @@ describe('Jobs API (e2e)', () => {
                 presetId: preset.id,
             })
 
-            expect(counted.presetName).toBe('Meta EU and US')
-            expect(changed.presetName).toBeNull()
+            expect(counted.presetId).toBe(preset.id)
+            expect(changed.presetId).toBeNull()
             expect(await getUsageCount(preset.id)).toBe(1)
         })
 
@@ -1627,7 +1627,7 @@ describe('Jobs API (e2e)', () => {
 
             const job = await runUpload({ settings: PRESET_SETTINGS })
 
-            expect(job.presetName).toBeNull()
+            expect(job.presetId).toBeNull()
             expect(await getUsageCount(preset.id)).toBe(0)
         })
 
@@ -1638,7 +1638,7 @@ describe('Jobs API (e2e)', () => {
 
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
-            expect(job).toMatchObject({ status: JobStatus.Queued, presetName: null })
+            expect(job).toMatchObject({ status: JobStatus.Queued, presetId: null })
         })
 
         it('starts the run when counting fails', async () => {
@@ -1648,7 +1648,7 @@ describe('Jobs API (e2e)', () => {
 
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
-            expect(job).toMatchObject({ status: JobStatus.Queued, presetName: null })
+            expect(job).toMatchObject({ status: JobStatus.Queued, presetId: null })
             expect(dispatch).toHaveBeenCalledWith(job.id)
         })
 
@@ -1661,7 +1661,7 @@ describe('Jobs API (e2e)', () => {
 
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
-            expect(job).toMatchObject({ status: JobStatus.Queued, presetName: 'Meta EU and US' })
+            expect(job).toMatchObject({ status: JobStatus.Queued, presetId: preset.id })
             expect(await getUsageCount(preset.id)).toBe(1)
         })
 
@@ -1671,12 +1671,14 @@ describe('Jobs API (e2e)', () => {
                 .send({ file: FILE, settings: PRESET_SETTINGS, presetId: preset.id })
                 .expect(201)
 
+            expect(created.body.job.presetId).toBeNull()
+
             dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
 
             await send('post', `/v1/jobs/${created.body.job.id}/analyze`).expect(503)
             const read = await send('get', `/v1/jobs/${created.body.job.id}`).expect(200)
 
-            expect(read.body.job).toMatchObject({ status: JobStatus.Error, presetName: null })
+            expect(read.body.job).toMatchObject({ status: JobStatus.Error, presetId: null })
             expect(await getUsageCount(preset.id)).toBe(0)
         })
     })

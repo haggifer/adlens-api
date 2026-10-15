@@ -294,19 +294,14 @@ export class PresetsService {
         }
     }
 
-    // Counts a started run for the preset and answers its name; null when the preset is gone or its settings differ
-    // from the run's. The update matches the preset as it was read, so an edit in between counts nothing.
-    async recordUse(
-        userId: string,
-        presetId: string,
-        settings: AnalysisSettings,
-        now = new Date(),
-    ): Promise<string | null> {
+    // Counts a started run for the preset; false when the preset is gone or its settings differ from the run's. The
+    // update matches the preset as it was read, so an edit in between counts nothing.
+    async recordUse(userId: string, presetId: string, settings: AnalysisSettings, now = new Date()): Promise<boolean> {
         const userPresets = await this.collection.findOne({ _id: userId })
         const stored = userPresets?.presets.find((preset) => preset.id === presetId)
 
         if (!stored || !isSameSettings(stored.settings, settings)) {
-            return null
+            return false
         }
 
         const counted = await this.collection.updateOne(
@@ -315,7 +310,7 @@ export class PresetsService {
             { arrayFilters: [{ 'p.id': presetId, 'p.updatedAt': stored.updatedAt }] },
         )
 
-        return counted.modifiedCount === 1 ? stored.name : null
+        return counted.modifiedCount === 1
     }
 
     // Sign-in or sign-up moves an anonymous user's presets to the account: a clashing name gets a number, the account

@@ -133,7 +133,7 @@ describe('PUBLISHED_CHANGES', () => {
             { name: 'status', ...updateOf({ status: 'analyzing', attempts: 1, updatedAt: new Date() }) },
             { name: 'analysis', ...updateOf({ status: 'analyzed', analysis: {} }) },
             { name: 'errorCode', ...updateOf({ errorCode: 'ANALYSIS_FAILED' }) },
-            { name: 'presetName', ...updateOf({ presetName: 'Meta US' }) },
+            { name: 'presetId', ...updateOf({ presetId: 'p1' }) },
             { name: 'replace', operationType: 'replace' },
             { name: 'refund', ...updateOf({ chargedRunId: null, chargedIpRunId: null, updatedAt: new Date() }) },
             { name: 'call mark', ...updateOf({ modelCallStartedAt: new Date() }) },
@@ -143,6 +143,6 @@ describe('PUBLISHED_CHANGES', () => {
 
         const passed = await events.find(PUBLISHED_CHANGES).toArray()
 
-        expect(passed.map((event) => event.name)).toEqual(['status', 'analysis', 'errorCode', 'presetName', 'replace'])
+        expect(passed.map((event) => event.name)).toEqual(['status', 'analysis', 'errorCode', 'presetId', 'replace'])
     })
 })

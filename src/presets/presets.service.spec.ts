@@ -350,7 +350,7 @@ describe('PresetsService', () => {
         const now = new Date('2026-10-13T12:00:00Z')
         const reordered = { ...TIKTOK_EU, markets: [Market.UK, Market.EU] }
 
-        expect(await presets.recordUse(userId, preset.id, reordered, now)).toBe('TikTok EU')
+        expect(await presets.recordUse(userId, preset.id, reordered, now)).toBe(true)
 
         const [counted, untouched] = await presets.list(userId)
 
@@ -362,7 +362,7 @@ describe('PresetsService', () => {
         const preset = await create('TikTok EU', { settings: TIKTOK_EU })
         const before = await presets.list(userId)
 
-        expect(await presets.recordUse(userId, preset.id, { ...TIKTOK_EU, markets: [Market.EU] })).toBeNull()
+        expect(await presets.recordUse(userId, preset.id, { ...TIKTOK_EU, markets: [Market.EU] })).toBe(false)
         expect(await presets.list(userId)).toEqual(before)
     })
 
@@ -371,15 +371,15 @@ describe('PresetsService', () => {
 
         await presets.remove(userId, preset.id)
 
-        expect(await presets.recordUse(userId, preset.id, META_US)).toBeNull()
-        expect(await presets.recordUse(userId, 'unknown', META_US)).toBeNull()
-        expect(await presets.recordUse(new Types.ObjectId().toString(), 'unknown', META_US)).toBeNull()
+        expect(await presets.recordUse(userId, preset.id, META_US)).toBe(false)
+        expect(await presets.recordUse(userId, 'unknown', META_US)).toBe(false)
+        expect(await presets.recordUse(new Types.ObjectId().toString(), 'unknown', META_US)).toBe(false)
     })
 
     it("counts nothing for another user's preset", async () => {
         const preset = await create('Meta US')
 
-        expect(await presets.recordUse(new Types.ObjectId().toString(), preset.id, META_US)).toBeNull()
+        expect(await presets.recordUse(new Types.ObjectId().toString(), preset.id, META_US)).toBe(false)
         expect((await presets.list(userId))[0]).toMatchObject({ usageCount: 0, lastUsedAt: null })
     })
 

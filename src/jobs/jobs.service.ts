@@ -64,7 +64,7 @@ export class JobsService {
             status: JobStatus.Pending,
             settings,
             file: { ...file, bucket: this.storage.bucketName, path },
-            presetId: presetId ?? null,
+            appliedPresetId: presetId ?? null,
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
@@ -88,7 +88,7 @@ export class JobsService {
             file: sample.file,
             media: sample.media,
             sampleId: sample._id.toString(),
-            presetId: presetId ?? null,
+            appliedPresetId: presetId ?? null,
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
@@ -97,8 +97,8 @@ export class JobsService {
         return toPublicJob(created.toObject<StoredJob>())
     }
 
-    async recordPresetName(jobId: string, name: string): Promise<void> {
-        await this.model.updateOne({ _id: jobId }, { $set: { presetName: name } })
+    async recordCountedPreset(jobId: string, presetId: string): Promise<void> {
+        await this.model.updateOne({ _id: jobId }, { $set: { presetId } })
     }
 
     async get(userId: string, jobId: string): Promise<Job> {

@@ -67,9 +67,9 @@ export class JobAnalysisService {
             await this.tryRecordExecution(jobId, execution)
         }
 
-        const presetName = await this.countPresetUse(userId, queued)
+        const presetId = await this.countPresetUse(userId, queued)
 
-        return toPublicJob({ ...queued, presetName })
+        return toPublicJob({ ...queued, presetId })
     }
 
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
@@ -102,25 +102,27 @@ export class JobAnalysisService {
     }
 
     // A run counts for its preset once its worker started (a failed start refunds the run), whatever the analysis then
-    // ends as, and only when its settings still match the preset; counting never fails the run. Answers the name stored
-    // on the job, or null.
+    // ends as, and only when its settings still match the preset; counting never fails the run. Answers the preset id
+    // stored on the job, or null.
     private async countPresetUse(userId: string, job: StoredJob): Promise<string | null> {
-        if (!job.presetId) {
+        const presetId = job.appliedPresetId
+
+        if (!presetId) {
             return null
         }
 
         try {
-            const name = await this.presets.recordUse(userId, job.presetId, job.settings)
+            const isCounted = await this.presets.recordUse(userId, presetId, job.settings)
 
-            if (name) {
-                await this.jobs.recordPresetName(job._id.toString(), name)
+            if (!isCounted) {
+                return null
             }
 
-            return name
+            await this.jobs.recordCountedPreset(job._id.toString(), presetId)
+
+            return presetId
         } catch (err) {
-            this.logger.error(
-                `could not count preset ${job.presetId} for job ${job._id.toString()}: ${describeError(err)}`,
-            )
+            this.logger.error(`could not count preset ${presetId} for job ${job._id.toString()}: ${describeError(err)}`)
 
             return null
         }
