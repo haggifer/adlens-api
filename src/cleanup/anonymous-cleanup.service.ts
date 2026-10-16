@@ -7,7 +7,7 @@ import { USER_COLLECTION, type UserExtras } from '../database/user.doc'
 import type { CleanupResult } from './types'
 
 // The privacy policy promises this: a week after the browser was last used, unless it signed up or in first.
-export const ANONYMOUS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+const ANONYMOUS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 // Better Auth's adapter may store a reference as an ObjectId or as its string form, so a lookup matches both.
 const byUser = (_id: Types.ObjectId) => ({ userId: { $in: [_id, _id.toString()] } })

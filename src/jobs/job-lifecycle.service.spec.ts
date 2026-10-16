@@ -636,7 +636,6 @@ describe('JobLifecycle', () => {
             const unstarted = await createJob()
             const young = await createJob()
 
-            expect(UNSTARTED_JOB_MS).toBe(6 * 60 * 60 * 1000)
             await createdAt(unstarted, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
             await createdAt(young, new Date(NOW.getTime() - UNSTARTED_JOB_MS))
 

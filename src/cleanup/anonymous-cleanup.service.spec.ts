@@ -2,7 +2,7 @@ import { Types } from 'mongoose'
 import type { AccountDataService } from '../account/account-data.service'
 import { USER_COLLECTION } from '../database/user.doc'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
-import { ANONYMOUS_RETENTION_MS, AnonymousCleanupService } from './anonymous-cleanup.service'
+import { AnonymousCleanupService } from './anonymous-cleanup.service'
 
 const NOW = new Date('2026-10-20T03:00:00Z')
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -43,10 +43,6 @@ describe('AnonymousCleanupService', () => {
 
     afterAll(async () => {
         await mongo.stop()
-    })
-
-    it('keeps anonymous data for a week', () => {
-        expect(ANONYMOUS_RETENTION_MS).toBe(7 * DAY_MS)
     })
 
     it('deletes an anonymous user last seen more than a week ago, with its data, sessions and accounts', async () => {

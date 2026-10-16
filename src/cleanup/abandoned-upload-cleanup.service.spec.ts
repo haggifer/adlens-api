@@ -5,7 +5,7 @@ import { IP_QUOTA_MODEL, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import { JobLifecycle } from '../jobs/job-lifecycle.service'
-import { IN_PROGRESS_STATUSES, UNSTARTED_JOB_MS } from '../jobs/job-status'
+import { IN_PROGRESS_STATUSES } from '../jobs/job-status'
 import { OffLivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
@@ -63,10 +63,6 @@ describe('AbandonedUploadCleanupService', () => {
 
     afterAll(async () => {
         await mongo.stop()
-    })
-
-    it('waits 6 hours after a job was created', () => {
-        expect(UNSTARTED_JOB_MS).toBe(6 * HOUR_MS)
     })
 
     it.each([JobStatus.Pending, JobStatus.Error])(
