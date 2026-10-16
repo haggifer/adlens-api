@@ -39,7 +39,7 @@ import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-pr
 import { LivePublisher } from '../src/live/live-publisher'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { PresetsService } from '../src/presets/presets.service'
-import { type ObjectContent, type ObjectInfo, StorageService } from '../src/storage/storage.service'
+import { type ObjectContent, type ObjectInfo, SIGNED_URL_TTL_MS, StorageService } from '../src/storage/storage.service'
 import { RecordingLivePublisher } from '../src/testing/recording-live-publisher'
 
 const OWNER = new Types.ObjectId().toString()
@@ -488,17 +488,22 @@ describe('Jobs API (e2e)', () => {
 
             await samples.updateOne({ _id: sampleId }, { $set: { 'file.path': 'samples/moved.mp4' } })
 
-            const res = await request(app.getHttpServer())
-                .post(`/v1/jobs/${created.body.job.id}/analyze`)
-                .set(as(SAMPLER))
-                .expect(404)
-            const job = await request(app.getHttpServer()).get(`/v1/jobs/${created.body.job.id}`).set(as(SAMPLER))
+            try {
+                const res = await request(app.getHttpServer())
+                    .post(`/v1/jobs/${created.body.job.id}/analyze`)
+                    .set(as(SAMPLER))
+                    .expect(404)
+                const job = await request(app.getHttpServer()).get(`/v1/jobs/${created.body.job.id}`).set(as(SAMPLER))
 
-            await samples.updateOne({ _id: sampleId }, { $set: { 'file.path': 'samples/running-shoes.mp4' } })
-
-            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
-            expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoCheckFailed })
-            expect(dispatch).not.toHaveBeenCalled()
+                expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+                expect(job.body.job).toMatchObject({
+                    status: JobStatus.Error,
+                    errorCode: JobErrorCode.VideoCheckFailed,
+                })
+                expect(dispatch).not.toHaveBeenCalled()
+            } finally {
+                await samples.updateOne({ _id: sampleId }, { $set: { 'file.path': 'samples/running-shoes.mp4' } })
+            }
         })
 
         it('deletes a sample analysis without touching the shared sample video', async () => {
@@ -635,7 +640,8 @@ describe('Jobs API (e2e)', () => {
         })
 
         describe('while its upload URL may still work', () => {
-            const URL_TTL_MS = 15 * 60 * 1000
+            // An upload that started just before its URL expired may still be arriving for an hour after.
+            const UPLOAD_MARGIN_MS = 60 * 60 * 1000
             let tombstones: Model<UploadTombstoneDoc>
 
             const tombstonesFor = (jobId: string) =>
@@ -653,7 +659,9 @@ describe('Jobs API (e2e)', () => {
 
                 const [tombstone] = await tombstonesFor(jobId)
 
-                expect(tombstone.deleteAfter.getTime()).toBeGreaterThanOrEqual(createdAt + URL_TTL_MS)
+                expect(tombstone.deleteAfter.getTime()).toBeGreaterThanOrEqual(
+                    createdAt + SIGNED_URL_TTL_MS + UPLOAD_MARGIN_MS,
+                )
                 await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(404)
             })
 

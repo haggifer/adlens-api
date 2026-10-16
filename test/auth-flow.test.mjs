@@ -328,14 +328,10 @@ test('a password reset works through the emailed link and revokes existing sessi
     assert.equal(signIn.status, 200)
 })
 
-test("update-user can't set isAdmin or grant quota runs", async () => {
+test("update-user can't set isAdmin", async () => {
     // Better Auth refuses the whole body because isAdmin has `input: false`; the name change in the same body shows
-    // nothing was partly written. `runs` isn't a Better Auth field, so it could never be written through it.
-    const res = await post(
-        '/api/auth/update-user',
-        { name: 'Flow Updated', isAdmin: true, runs: [{ id: 'x', startedAt: new Date().toISOString(), jobId: 'x' }] },
-        freshSession,
-    )
+    // nothing was partly written.
+    const res = await post('/api/auth/update-user', { name: 'Flow Updated', isAdmin: true }, freshSession)
     const body = await res.json()
     const user = await withDb((db) => db.collection('user').findOne({ email: EMAIL }))
 
@@ -343,6 +339,19 @@ test("update-user can't set isAdmin or grant quota runs", async () => {
     assert.equal(body.code, 'FIELD_NOT_ALLOWED')
     assert.notEqual(user.name, 'Flow Updated')
     assert.notEqual(user.isAdmin, true)
+})
+
+// `runs` isn't a Better Auth field: the rest of the body is written and `runs` is dropped.
+test("update-user can't grant quota runs", async () => {
+    const res = await post(
+        '/api/auth/update-user',
+        { name: 'Flow Runs', runs: [{ id: 'x', startedAt: new Date().toISOString(), jobId: 'x' }] },
+        freshSession,
+    )
+    const user = await storedUser(EMAIL)
+
+    assert.equal(res.status, 200)
+    assert.equal(user.name, 'Flow Runs')
     assert.equal(user.runs, undefined)
 })
 
@@ -946,9 +955,12 @@ test('confirming an email lifts the unconfirmed limits at once', async () => {
     await confirmEmail(email, account.cookie)
 
     const confirmed = await createSampleJob(account.cookie, '203.0.113.93')
+    const { job: confirmedJob } = await confirmed.json()
+    const reanalyzed = await analyzeJob(account.cookie, '203.0.113.93', confirmedJob.id)
 
     assert.equal(confirmed.status, 201)
-    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: Number(process.env.QUOTA_LIMIT) })
+    assert.equal(reanalyzed.status, 202)
+    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 2, limit: Number(process.env.QUOTA_LIMIT) })
 })
 
 test('an anonymous session cannot link a social provider', async () => {
@@ -1062,6 +1074,7 @@ test('rate limits key a multi-entry X-Forwarded-For on its rightmost entry, the 
     assert.deepEqual(statuses, [429, 200])
 })
 
+const CONNECTION_CUT_CODES = ['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']
 const OVERSIZED_BODY = JSON.stringify({ email: 'big@example.com', password: 'big-password', name: 'x'.repeat(70_000) })
 
 test('an auth request whose declared body is over 64 KB is refused before it is read', async () => {
@@ -1074,12 +1087,15 @@ test('an auth request whose declared body is over 64 KB is refused before it is 
 })
 
 test('an auth request whose chunked body grows past 64 KB is cut off', async () => {
-    const chunk = Buffer.from(OVERSIZED_BODY.slice(0, 16_000))
-    let sent = 0
+    const CHUNK_BYTES = 16_000
+    const body = Buffer.from(OVERSIZED_BODY)
+    let offset = 0
+    // A valid sign-up, so only the cut-off keeps the user from being created.
     const stream = new ReadableStream({
         pull: (controller) => {
-            if (sent++ < 8) {
-                controller.enqueue(chunk)
+            if (offset < body.length) {
+                controller.enqueue(body.subarray(offset, offset + CHUNK_BYTES))
+                offset += CHUNK_BYTES
             } else {
                 controller.close()
             }
@@ -1092,7 +1108,13 @@ test('an auth request whose chunked body grows past 64 KB is cut off', async () 
         duplex: 'half',
     }).catch((err) => err)
 
-    assert.ok(res instanceof Error || res.status === 413, `answered ${res.status}`)
+    // The answer is written before the connection is cut, but a client still sending may see only the cut.
+    if (res instanceof Error) {
+        assert.ok(CONNECTION_CUT_CODES.includes(res.cause?.code), String(res.cause ?? res))
+    } else {
+        assert.equal(res.status, 413)
+    }
+
     assert.equal(await storedUser('big@example.com'), null)
 })
 
@@ -1118,6 +1140,10 @@ test('a chunked auth body under the limit reaches Better Auth', async () => {
 
 test("every flow above ran with Better Auth's collections indexed, unique emails and session tokens included", async () => {
     const { AUTH_INDEXES } = require('../dist/auth/auth-indexes')
+
+    // A password reset stores a verification row, so the expiry check below always has one to look at.
+    await post('/api/auth/request-password-reset', { email: 'squatted@example.com' })
+
     const names = await withDb(async (db) => {
         const lists = await Promise.all(
             ['session', 'user', 'account', 'verification'].map((name) => db.collection(name).indexes()),
@@ -1138,7 +1164,6 @@ test("every flow above ran with Better Auth's collections indexed, unique emails
 
     const verificationCount = await withDb((db) => db.collection('verification').countDocuments())
 
-    if (verificationCount > 0) {
-        assert.strictEqual(await nonDateExpiry('verification'), 0)
-    }
+    assert.ok(verificationCount > 0)
+    assert.strictEqual(await nonDateExpiry('verification'), 0)
 })
