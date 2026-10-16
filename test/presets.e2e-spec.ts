@@ -22,6 +22,7 @@ import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { MediaProber } from '../src/jobs/verification/media-prober'
 import { LivePublisher } from '../src/live/live-publisher'
 import { Mailer } from '../src/mail/mailer'
+import { WRITES_PER_USER } from '../src/presets/preset-limits'
 import { StorageService } from '../src/storage/storage.service'
 import { RecordingLivePublisher } from '../src/testing/recording-live-publisher'
 
@@ -222,11 +223,11 @@ describe('Presets API (e2e)', () => {
         expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
     })
 
-    it('refuses a user’s writes past 60 a minute with RATE_LIMITED, leaving other users alone', async () => {
+    it('refuses a user’s writes past the per-minute limit with RATE_LIMITED, leaving other users alone', async () => {
         const clearDefault = (userId = owner) =>
             request(app.getHttpServer()).put('/v1/presets/default').set(as(userId)).send({ presetId: null })
 
-        for (let index = 0; index < 60; index++) {
+        for (let index = 0; index < WRITES_PER_USER.max; index++) {
             await clearDefault().expect(204)
         }
 
