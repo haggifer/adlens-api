@@ -1,9 +1,9 @@
 # adlens-api
 
 Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against an
-ad-policy ruleset of several hundred rules with one Gemini pass, and you get cited, timestamped findings pushed to the
-browser in realtime. This repo holds the HTTP API and the analysis worker; the web client and the API contract live in
-their own repos.
+ad-policy ruleset of several hundred rules with one Gemini pass, and you get cited, timestamped findings, with each
+step announced to the browser as it happens. This repo holds the HTTP API and the analysis worker; the web client and
+the API contract live in their own repos.
 
 - Web (Next.js on Vercel): <https://github.com/haggifer/adlens>
 - API contract (Zod schemas, published to npm): [`adlens-shared`](https://github.com/haggifer/adlens-shared)
@@ -11,22 +11,22 @@ their own repos.
 ## Architecture
 
 ```
- Browser (Next.js on Vercel)
-   │  REST /v1/*  ·  /api/auth/*  ·  Socket.IO job:updated        signed PUT (exact type + size)
+ Browser (Next.js on Vercel) ◄── Ably: "presets" / "job" on user:<id>, published by the API, worker and cleanup
+   │  REST /v1/*  ·  /api/auth/*  ·  token for Ably               signed PUT (exact type + size)
    ▼                                                                   │
  ┌──────────────────────────────┐      runJob(WORKER_JOB_ID)      ┌────▼──────────────┐
  │ Cloud Run service: adlens-api │ ─────────────────────────────►  │ GCS uploads bucket │
  │ node dist/main               │                                  └────▲──────────────┘
  │ · Better Auth · verification │   ┌──────────────────────────────┐    │ gs:// URI
  │ · quota · job lifecycle      │   │ Cloud Run Job: adlens-analyze │    │
- └──────┬───────────────▲───────┘   │ node dist/worker (on demand)  │────┘
-        │ Mongoose       │ Change    │ · rules · Gemini on Vertex    │
-        ▼                │ Stream    └──────────────┬───────────────┘
-      MongoDB Atlas ─────┘  (jobs, ip_quotas, Better Auth collections) ◄┘
+ └──────┬───────────────────────┘   │ node dist/worker (on demand)  │────┘
+        │ Mongoose                  │ · rules · Gemini on Vertex    │
+        ▼                           └──────────────┬───────────────┘
+      MongoDB Atlas       (jobs, ip_quotas, Better Auth collections) ◄┘
 ```
 
 - **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run at `api.useadlens.com`. Better Auth, Mongoose on Atlas,
-  GCS signed URLs, ffprobe verification, quota, Socket.IO.
+  GCS signed URLs, ffprobe verification, quota, live update tokens.
 - **Worker** (`src/worker.ts` → `WorkerModule`): the same image run as an **on-demand Cloud Run Job**. The API starts
   one execution per analysis; the worker analyzes that job once and exits. It has no HTTP layer and no dispatcher, so
   it can never start another worker.
@@ -52,14 +52,15 @@ their own repos.
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
   go through the same logger. Locally the default is Nest's readable text.
-- **Realtime**: a MongoDB Change Stream on `jobs` pushes every update a client shows (one that sets `status`,
-  `analysis`, `errorCode` or `presetId`; refunds, the call mark and usage aren't streamed) to the owner's Socket.IO
-  room, and an instance holding none of the owner's sockets does nothing with it. The stream is
-  reopened from its last resume token after errors, or from now when MongoDB can never resume from that token (its
-  history rolled out of the oplog); a socket that missed an update refetches the job when it reconnects. Cloud Run bills an instance for as long as a socket to it is open,
-  so [`JobsGateway`](src/realtime/jobs.gateway.ts) accepts a socket (WebSocket only, at most 3 per user per instance)
-  only while its user has a job verifying, queued or analyzing, and closes the user's sockets right after the update
-  that ends their last one.
+- **Live updates** ([`LivePublisher`](src/live/live-publisher.ts)): the code that writes a user's presets or one of
+  their jobs tells that user's open tabs right after the write, through [Ably](https://ably.com) on the channel
+  `user:<id>`: `presets` after any preset write, `job` with the job's id after any change a tab shows (a status
+  transition in `JobLifecycle`, or the counted preset). The message carries no data; a tab refetches through the
+  API. The API, the worker and the cleanup all publish, awaited with a 3-second limit (Cloud Run throttles the CPU
+  once a response is sent), and a failed publish is logged, never failing the write. A tab gets a token from
+  `GET /v1/live/token` that may only subscribe to its own channel, signed with `ABLY_API_KEY` without a call to Ably.
+  Ably holds the browsers' connections, so no Cloud Run instance stays up for an open tab. Without `ABLY_API_KEY`
+  nothing is published, the token is `null`, and tabs rely on their reads.
 - **Contract**: every request body, response and error has a Zod schema in `adlens-shared`. The API returns the
   public job shape only; owner, storage paths, execution names and accounting stay server-side.
 
@@ -252,16 +253,14 @@ answering is a plain reply; its text isn't stored.
 
 - **Sessions are httpOnly, `SameSite=Lax` cookies.** The web app (`www.useadlens.com`) and the API (`api.useadlens.com`)
   share the parent domain (`COOKIE_DOMAIN`), so the cookie is first-party for both and no token ever sits in
-  JavaScript-readable storage. Socket.IO authenticates its handshake with the same cookie, and accepts a handshake
-  only from the web app's origins (CORS never applies to a WebSocket; a missing `Origin` is refused, since browsers
-  always send one). The API's own session reads (`AuthService.getUserId`: the guard, admission, the socket handshake)
+  JavaScript-readable storage. The API's own session reads (`AuthService.getUserId`: the guard and admission)
   never refresh a session, since the refreshed cookie would be dropped while the database row is extended; the web's
   `get-session` refreshes it.
 - **Anonymous sessions** (Better Auth's `anonymous` plugin): the web signs a visitor in anonymously right before their
   first analysis or their first preset save, whichever comes first, never on page load. An anonymous user is a real `user` document (`isAnonymous: true`, email
-  `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and Socket.IO
-  work unchanged. When they sign up or sign in (`/sign-up/email`, `/sign-in/*`), `onLinkAccount` moves their jobs
-  (`userId`), quota runs and presets to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts);
+  `<id>@anonymous.placeholder.invalid`, which is never sent mail), so jobs, the quota, history, replay and live
+  updates work unchanged. When they sign up or sign in (`/sign-up/email`, `/sign-in/*`), `onLinkAccount` moves their
+  jobs (`userId`), quota runs and presets to the account ([`AccountDataService.adopt`](src/account/account-data.service.ts);
   a preset whose name the account already uses gets a number, `Name (2)`; the move may take the account past the 20
   limit, but never past 40: then the most recently used or edited presets move and the rest are deleted),
   then the plugin deletes the anonymous user; a failed move answers 500 `ACCOUNT_LINK_FAILED` and leaves the history
@@ -375,6 +374,7 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                                                                                                                                                                   | `{ url, expiresAt }`                                 |
 | `DELETE /v1/jobs/:id`       | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs)                                                                                                                                                                                                                                                          | **204**                                              |
 | `GET /v1/me/quota`          | The caller's quota window                                                                                                                                                                                                                                                                                                                                | `{ quota }`                                          |
+| `GET /v1/live/token`        | A signed Ably token request that may only subscribe to the caller's channel (`user:<id>`); `null` when live updates are off                                                                                                                                                                                                                              | `{ tokenRequest }`                                   |
 | `GET /v1/presets`           | The caller's saved analysis presets (the `user_presets` collection: one document per user, its `_id` the user's id, holding at most 20), default flag and usage included. Every preset route allows a user 300 reads and 60 writes a minute ([`PresetLimits`](src/presets/preset-limits.ts), counters in `rate_limits`), then answers 429 `RATE_LIMITED` | `{ presets }`                                        |
 | `POST /v1/presets`          | Save a preset. A taken name (ignoring case, inner whitespace and Unicode compatibility forms: `toNameKey`) is `409 PRESET_NAME_TAKEN` unless `overwrite: true`; a 21st is `409 PRESET_LIMIT_REACHED`                                                                                                                                                     | **201** `{ preset }` (**200** when it overwrote one) |
 | `PUT /v1/presets/:id`       | Edit a preset's name and settings (same refusals, `404 NOT_FOUND` for an unknown id)                                                                                                                                                                                                                                                                     | `{ preset }`                                         |
@@ -468,7 +468,7 @@ pipeline and is billed like any run, outside every quota. Set `"isActive": false
 src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup) and lab.ts (adlens-lab's only import
             surface), one Nest module per feature: jobs,
             analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
-            realtime, database, config; shared helpers in common/, test helpers in testing/
+            live, database, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image repository cleanup policy
 ```
@@ -481,41 +481,42 @@ The image ships `.env` too, so a value set there (such as `QUOTA_LIMIT`) applies
 alike; Cloud Run's own env vars take precedence over it, and `.env.local` is never shipped. In production, secrets come from one Secret Manager secret, `API_SECRETS`, mounted as a JSON file and merged into the
 config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](infra/setup.sh).
 
-| Variable                 | Default                                | Purpose                                                                                                                                                          |
-| ------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SECRETS_FILE`           | —                                      | Path to a mounted JSON file of secrets; unset locally. Its keys fill gaps in the environment, never override it                                                  |
-| `MONGODB_URI`            | required                               | Atlas connection string (Mongoose, Better Auth, Change Stream)                                                                                                   |
-| `GOOGLE_CLOUD_PROJECT`   | required                               | GCP project for Vertex and Cloud Run                                                                                                                             |
-| `STORAGE_BUCKET`         | required                               | The uploads bucket                                                                                                                                               |
-| `PUBLIC_MEDIA_BUCKET`    | —                                      | Publicly readable bucket of demo and sample videos, served at their plain address; unset, they are signed                                                        |
-| `BETTER_AUTH_SECRET`     | required by the API                    | Better Auth signing secret                                                                                                                                       |
-| `BETTER_AUTH_URL`        | `http://localhost:8080`                | The API's own public URL                                                                                                                                         |
-| `WEB_ORIGIN`             | `http://localhost:3000`                | Web origin for CORS, Socket.IO, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
-| `COOKIE_DOMAIN`          | —                                      | Parent domain for the session cookie in production (`useadlens.com`)                                                                                             |
-| `RESEND_API_KEY`         | required by the API                    | Resend sending key; the API won't start without it                                                                                                               |
-| `CONTACT_EMAIL`          | required by the API                    | Where Contact form messages go; the API won't start without it                                                                                                   |
-| `GOOGLE_CLIENT_ID`       | —                                      | Google sign-in; enabled with `GOOGLE_CLIENT_SECRET` (both or neither)                                                                                            |
-| `GOOGLE_CLIENT_SECRET`   | —                                      | Google OAuth client secret                                                                                                                                       |
-| `GITHUB_CLIENT_ID`       | —                                      | GitHub sign-in; enabled with `GITHUB_CLIENT_SECRET` (both or neither)                                                                                            |
-| `GITHUB_CLIENT_SECRET`   | —                                      | GitHub OAuth client secret                                                                                                                                       |
-| `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                                                                                                                            |
-| `PORT`                   | `8080`                                 | API listen port                                                                                                                                                  |
-| `LOG_FORMAT`             | `text`                                 | `json` on Cloud Run: one Cloud Logging entry per line, with `severity`                                                                                           |
-| `STORAGE_KEY_FILE`       | —                                      | Local only: SA key used to sign V4 URLs (user ADC can't sign)                                                                                                    |
-| `GCP_REGION`             | `europe-west1`                         | Region of the analysis Cloud Run Job                                                                                                                             |
-| `ANALYZE_JOB_NAME`       | `adlens-analyze`                       | The Cloud Run Job the API executes                                                                                                                               |
-| `ANALYZE_LOCAL`          | `0`                                    | `1`: run each analysis as a local `node dist/worker` child process                                                                                               |
-| `ANALYZE_MAX_RETRIES`    | `2`                                    | Must equal the job's `--max-retries`, so the worker knows its last attempt                                                                                       |
-| `QUOTA_LIMIT`            | — (required, `5` in `.env`)            | Analyses per rolling 7-day window for a confirmed account (before confirmation a user gets 1 in total)                                                           |
-| `IP_ANON_LIMIT`          | `3`                                    | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window                                                                       |
-| `IP_SOFT_LIMIT`          | `10`                                   | Analyses per network before everyone needs a Turnstile check                                                                                                     |
-| `IP_HARD_LIMIT`          | `30`                                   | Analyses per network, for everyone                                                                                                                               |
-| `TRUSTED_PROXY_HOPS`     | `1`                                    | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                                                                                                        |
-| `TURNSTILE_SECRET_KEY`   | —                                      | Cloudflare Turnstile secret; unset, a required check never passes                                                                                                |
-| `GEMINI_MODEL`           | `gemini-3.8-flash`                     | Model id                                                                                                                                                         |
-| `GEMINI_LOCATION`        | `global`                               | Vertex serving location                                                                                                                                          |
-| `WORKER_JOB_ID`          | —                                      | Worker only: set per execution by the dispatcher                                                                                                                 |
-| `CLOUD_RUN_TASK_ATTEMPT` | `0`                                    | Worker only: set by Cloud Run on each attempt                                                                                                                    |
+| Variable                 | Default                                | Purpose                                                                                                                                               |
+| ------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SECRETS_FILE`           | —                                      | Path to a mounted JSON file of secrets; unset locally. Its keys fill gaps in the environment, never override it                                       |
+| `MONGODB_URI`            | required                               | Atlas connection string (Mongoose, Better Auth)                                                                                                       |
+| `GOOGLE_CLOUD_PROJECT`   | required                               | GCP project for Vertex and Cloud Run                                                                                                                  |
+| `STORAGE_BUCKET`         | required                               | The uploads bucket                                                                                                                                    |
+| `PUBLIC_MEDIA_BUCKET`    | —                                      | Publicly readable bucket of demo and sample videos, served at their plain address; unset, they are signed                                             |
+| `BETTER_AUTH_SECRET`     | required by the API                    | Better Auth signing secret                                                                                                                            |
+| `BETTER_AUTH_URL`        | `http://localhost:8080`                | The API's own public URL                                                                                                                              |
+| `WEB_ORIGIN`             | `http://localhost:3000`                | Web origin for CORS, Better Auth and email links; a `localhost` origin also allows the next 5 ports (a dev server that finds its port taken moves on) |
+| `COOKIE_DOMAIN`          | —                                      | Parent domain for the session cookie in production (`useadlens.com`)                                                                                  |
+| `RESEND_API_KEY`         | required by the API                    | Resend sending key; the API won't start without it                                                                                                    |
+| `CONTACT_EMAIL`          | required by the API                    | Where Contact form messages go; the API won't start without it                                                                                        |
+| `GOOGLE_CLIENT_ID`       | —                                      | Google sign-in; enabled with `GOOGLE_CLIENT_SECRET` (both or neither)                                                                                 |
+| `GOOGLE_CLIENT_SECRET`   | —                                      | Google OAuth client secret                                                                                                                            |
+| `GITHUB_CLIENT_ID`       | —                                      | GitHub sign-in; enabled with `GITHUB_CLIENT_SECRET` (both or neither)                                                                                 |
+| `GITHUB_CLIENT_SECRET`   | —                                      | GitHub OAuth client secret                                                                                                                            |
+| `MAIL_FROM`              | `AdLens <no-reply@mail.useadlens.com>` | Sender of auth emails                                                                                                                                 |
+| `PORT`                   | `8080`                                 | API listen port                                                                                                                                       |
+| `LOG_FORMAT`             | `text`                                 | `json` on Cloud Run: one Cloud Logging entry per line, with `severity`                                                                                |
+| `STORAGE_KEY_FILE`       | —                                      | Local only: SA key used to sign V4 URLs (user ADC can't sign)                                                                                         |
+| `GCP_REGION`             | `europe-west1`                         | Region of the analysis Cloud Run Job                                                                                                                  |
+| `ANALYZE_JOB_NAME`       | `adlens-analyze`                       | The Cloud Run Job the API executes                                                                                                                    |
+| `ANALYZE_LOCAL`          | `0`                                    | `1`: run each analysis as a local `node dist/worker` child process                                                                                    |
+| `ANALYZE_MAX_RETRIES`    | `2`                                    | Must equal the job's `--max-retries`, so the worker knows its last attempt                                                                            |
+| `QUOTA_LIMIT`            | — (required, `5` in `.env`)            | Analyses per rolling 7-day window for a confirmed account (before confirmation a user gets 1 in total)                                                |
+| `IP_ANON_LIMIT`          | `3`                                    | Analyses by anonymous users and unconfirmed accounts per network in a rolling 7-day window                                                            |
+| `IP_SOFT_LIMIT`          | `10`                                   | Analyses per network before everyone needs a Turnstile check                                                                                          |
+| `IP_HARD_LIMIT`          | `30`                                   | Analyses per network, for everyone                                                                                                                    |
+| `TRUSTED_PROXY_HOPS`     | `1`                                    | Proxies that append to `X-Forwarded-For` (1 on Cloud Run)                                                                                             |
+| `TURNSTILE_SECRET_KEY`   | —                                      | Cloudflare Turnstile secret; unset, a required check never passes                                                                                     |
+| `ABLY_API_KEY`           | —                                      | Ably key (publish and subscribe) for live updates; unset, nothing is published and tabs rely on their reads                                           |
+| `GEMINI_MODEL`           | `gemini-3.8-flash`                     | Model id                                                                                                                                              |
+| `GEMINI_LOCATION`        | `global`                               | Vertex serving location                                                                                                                               |
+| `WORKER_JOB_ID`          | —                                      | Worker only: set per execution by the dispatcher                                                                                                      |
+| `CLOUD_RUN_TASK_ATTEMPT` | `0`                                    | Worker only: set by Cloud Run on each attempt                                                                                                         |
 
 ## Local development
 
@@ -609,12 +610,13 @@ Why the system is built this way, and what was rejected. Decisions that span the
 - **The cleanup is a scheduled Cloud Run Job, not a cron inside the API.** The API scales to zero and may run several
   instances, so an in-process timer would miss days or run twice; Cloud Scheduler starting a job runs it once a day for
   free (3 scheduler jobs per billing account are free) and shows each run's outcome in the console.
-- **MongoDB (Atlas) over Postgres.** A job is one nested document (settings, media facts, analysis), and Change Streams
-  give realtime updates without a separate broker. They need a replica set, which Atlas provides (and Better Auth needs
-  for transactions).
-- **Realtime through Socket.IO fed by a Change Stream**, one watcher per API instance: every instance sees every
-  update and pushes it to its own sockets, so the instances (up to 3) need no shared Socket.IO adapter while updates
-  come only from the database.
+- **MongoDB (Atlas) over Postgres.** A job is one nested document (settings, media facts, analysis). Atlas provides
+  the replica set Better Auth needs for transactions.
+- **Live updates through Ably, published by the writer** (2026-10-16). Socket.IO fed by a Change Stream kept a Cloud
+  Run instance billed for every open socket, so sockets were allowed only while a job ran, and presets were never
+  live. A hosted pub/sub holds the browsers' connections instead (free package: 6M messages a month, 200 concurrent
+  connections), and every writer is AdLens code, so publishing right after the write needs no process watching the
+  database. The message is only a signal: what a user may read is still decided by the API.
 - **Gemini on Vertex AI with Application Default Credentials**, so no API key exists. Gemini 3 models are served from
   the `global` location.
 
@@ -690,7 +692,7 @@ Why the system is built this way, and what was rejected. Decisions that span the
 **Auth and hosting**
 
 - **Anonymous users are real Better Auth users**, created only when a visitor starts an analysis or saves a preset, so
-  every existing path (jobs, quota, history, presets, Socket.IO) works unchanged and crawlers create none. Once nobody
+  every existing path (jobs, quota, history, presets, live updates) works unchanged and crawlers create none. Once nobody
   can reach one (its session expired or was signed out), the daily cleanup deletes it a week after it was last seen.
 - **One analysis without an account, then sign up; one without a confirmed email, then confirm.** It's the
   2026-08-13 design (first analysis anonymous, an account from the second), applied on 2026-10-01; anonymous users

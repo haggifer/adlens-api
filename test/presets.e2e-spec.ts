@@ -2,6 +2,8 @@ import type { INestApplication } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import {
     type AnalysisSettings,
+    getLiveChannel,
+    LiveEvent,
     Market,
     Placement,
     Platform,
@@ -19,9 +21,10 @@ import { AuthService } from '../src/auth/auth.service'
 import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { MediaProber } from '../src/jobs/verification/media-prober'
+import { LivePublisher } from '../src/live/live-publisher'
 import { Mailer } from '../src/mail/mailer'
-import { JobEventsService } from '../src/realtime/job-events.service'
 import { StorageService } from '../src/storage/storage.service'
+import { RecordingLivePublisher } from '../src/testing/recording-live-publisher'
 
 const SETTINGS: AnalysisSettings = {
     platforms: [Platform.Meta],
@@ -39,6 +42,7 @@ describe('Presets API (e2e)', () => {
     let app: INestApplication
     // A new user per test, so no test sees another's presets.
     let owner: string
+    const live = new RecordingLivePublisher()
 
     const as = (userId: string) => ({ 'x-test-user': userId })
     const input = (name: string, fields: Partial<SavePresetInput> = {}): SavePresetInput => ({
@@ -78,8 +82,8 @@ describe('Presets API (e2e)', () => {
             .useValue({ send: async () => undefined })
             .overrideProvider(ChallengeVerifier)
             .useValue({ verify: async () => true })
-            .overrideProvider(JobEventsService)
-            .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
+            .overrideProvider(LivePublisher)
+            .useValue(live)
             .compile()
 
         app = moduleRef.createNestApplication()
@@ -89,6 +93,7 @@ describe('Presets API (e2e)', () => {
 
     beforeEach(() => {
         owner = new Types.ObjectId().toString()
+        live.clear()
     })
 
     afterAll(async () => {
@@ -97,6 +102,24 @@ describe('Presets API (e2e)', () => {
 
     it('requires a session', async () => {
         const res = await request(app.getHttpServer()).get('/v1/presets').expect(401)
+
+        expect(res.body.errorCode).toBe(RequestErrorCode.Unauthenticated)
+    })
+
+    it("tells the owner's tabs that their presets changed", async () => {
+        await create('Meta US')
+
+        expect(live.events).toEqual([{ channel: getLiveChannel(owner), event: LiveEvent.Presets }])
+    })
+
+    it("answers a live token for the session user's own channel only", async () => {
+        const res = await request(app.getHttpServer()).get('/v1/live/token').set(as(owner)).expect(200)
+
+        expect(JSON.parse(res.body.tokenRequest.capability)).toEqual({ [getLiveChannel(owner)]: ['subscribe'] })
+    })
+
+    it('requires a session for a live token', async () => {
+        const res = await request(app.getHttpServer()).get('/v1/live/token').expect(401)
 
         expect(res.body.errorCode).toBe(RequestErrorCode.Unauthenticated)
     })

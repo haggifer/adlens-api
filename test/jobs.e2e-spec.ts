@@ -2,9 +2,11 @@ import type { INestApplication } from '@nestjs/common'
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
 import {
+    getLiveChannel,
     type Job,
     JobErrorCode,
     JobStatus,
+    LiveEvent,
     Market,
     MAX_DURATION_S,
     Placement,
@@ -35,10 +37,11 @@ import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
 import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
 import { JobLifecycle } from '../src/jobs/job-lifecycle.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
+import { LivePublisher } from '../src/live/live-publisher'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
 import { PresetsService } from '../src/presets/presets.service'
-import { JobEventsService } from '../src/realtime/job-events.service'
 import { type ObjectContent, type ObjectInfo, StorageService } from '../src/storage/storage.service'
+import { RecordingLivePublisher } from '../src/testing/recording-live-publisher'
 
 const OWNER = new Types.ObjectId().toString()
 const STRANGER = new Types.ObjectId().toString()
@@ -56,6 +59,7 @@ describe('Jobs API (e2e)', () => {
     // An Error: ffprobe can't reach the video.
     let probeFailure: Error | null
     const dispatch = jest.fn(async () => 'executions/exec-1')
+    const live = new RecordingLivePublisher()
     const deleteObject = jest.fn(async (_path: string) => undefined)
     // The Contact form's uploaded images, by path; an Error: storage can't be reached.
     const contactObjects = new Map<string, ObjectContent | Error>()
@@ -129,8 +133,8 @@ describe('Jobs API (e2e)', () => {
             .useValue({ send: sendMail })
             .overrideProvider(ChallengeVerifier)
             .useValue({ verify: verifyChallenge })
-            .overrideProvider(JobEventsService)
-            .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
+            .overrideProvider(LivePublisher)
+            .useValue(live)
             .compile()
 
         app = moduleRef.createNestApplication()
@@ -1597,6 +1601,19 @@ describe('Jobs API (e2e)', () => {
             expect(job.presetId).toBe(preset.id)
             expect(job).not.toHaveProperty('presetName')
             expect(await getUsageCount(preset.id)).toBe(1)
+        })
+
+        it("tells the owner's tabs about the started run and its counted preset", async () => {
+            const preset = await createPreset('Meta EU and US')
+
+            live.clear()
+
+            const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
+            const channel = getLiveChannel(member)
+            const jobEvent = { channel, event: LiveEvent.Job, data: { id: job.id } }
+
+            // verifying, queued, then the counted preset: the preset's usage and the job's presetId.
+            expect(live.events).toEqual([jobEvent, jobEvent, { channel, event: LiveEvent.Presets }, jobEvent])
         })
 
         it('counts nothing when the settings differ from the preset', async () => {

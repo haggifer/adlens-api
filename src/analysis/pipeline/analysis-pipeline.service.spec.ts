@@ -7,6 +7,7 @@ import { USER_COLLECTION } from '../../database/user.doc'
 import { IpQuotaService } from '../../ip-quota/ip-quota.service'
 import type { IpCharge } from '../../ip-quota/ip-rules'
 import { JobLifecycle } from '../../jobs/job-lifecycle.service'
+import { OffLivePublisher } from '../../live/live-publisher'
 import { QuotaService } from '../../quota/quota.service'
 import { RulesetService } from '../../rules/ruleset.service'
 import { configStub } from '../../testing/config-stub'
@@ -106,6 +107,7 @@ describe('AnalysisPipeline', () => {
                 mongo.connection,
                 configStub({ IP_ANON_LIMIT: 3, IP_SOFT_LIMIT: 10, IP_HARD_LIMIT: 30 }),
             ),
+            new OffLivePublisher(),
         )
     })
 

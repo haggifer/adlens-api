@@ -1,6 +1,8 @@
 import { HttpStatus } from '@nestjs/common'
 import {
     type AnalysisSettings,
+    getLiveChannel,
+    LiveEvent,
     Market,
     MAX_PRESETS,
     Placement,
@@ -12,6 +14,7 @@ import {
 import { Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
+import { RecordingLivePublisher } from '../testing/recording-live-publisher'
 import { USER_PRESETS_COLLECTION, type UserPresetsDoc } from '../database/user-presets.doc'
 import { PresetsService } from './presets.service'
 
@@ -32,6 +35,7 @@ const NOT_FOUND = refusal(HttpStatus.NOT_FOUND, RequestErrorCode.NotFound)
 describe('PresetsService', () => {
     let mongo: MemoryMongo
     let presets: PresetsService
+    let live: RecordingLivePublisher
     let userId: string
 
     const userPresetDocs = () => mongo.connection.collection<UserPresetsDoc>(USER_PRESETS_COLLECTION)
@@ -62,7 +66,8 @@ describe('PresetsService', () => {
 
     beforeAll(async () => {
         mongo = await startMemoryMongo()
-        presets = new PresetsService(mongo.connection)
+        live = new RecordingLivePublisher()
+        presets = new PresetsService(mongo.connection, live)
     })
 
     beforeEach(() => {
@@ -70,6 +75,7 @@ describe('PresetsService', () => {
     })
 
     afterEach(async () => {
+        live.clear()
         await userPresetDocs().deleteMany({})
     })
 
@@ -392,6 +398,48 @@ describe('PresetsService', () => {
         await expect(presets.setDefault(otherUserId, preset.id)).rejects.toMatchObject(NOT_FOUND)
         expect(await presets.list(otherUserId)).toEqual([])
         expect(await getNames()).toEqual(['Meta US'])
+    })
+
+    describe('live updates', () => {
+        const presetsEvent = (owner = userId) => ({ channel: getLiveChannel(owner), event: LiveEvent.Presets })
+
+        it("tells the owner's tabs about every change to their presets", async () => {
+            const preset = await create('Meta US')
+
+            await presets.update(userId, preset.id, input('Meta US and EU'))
+            await presets.setDefault(userId, preset.id)
+            await presets.setDefault(userId, null)
+            await presets.recordUse(userId, preset.id, META_US)
+            await presets.remove(userId, preset.id)
+
+            expect(live.events).toEqual(Array.from({ length: 6 }, () => presetsEvent()))
+        })
+
+        it('tells nobody about a refused write or a run its preset no longer matches', async () => {
+            const preset = await create('Meta US')
+
+            await create('TikTok EU', { settings: TIKTOK_EU })
+            live.clear()
+
+            await expect(create('meta us')).rejects.toMatchObject(NAME_TAKEN)
+            await expect(presets.update(userId, 'unknown', input('Other'))).rejects.toMatchObject(NOT_FOUND)
+            await expect(presets.remove(userId, 'unknown')).rejects.toMatchObject(NOT_FOUND)
+            await expect(presets.setDefault(userId, 'unknown')).rejects.toMatchObject(NOT_FOUND)
+            await presets.recordUse(userId, preset.id, TIKTOK_EU)
+
+            expect(live.events).toEqual([])
+        })
+
+        it("tells the account's tabs when the sign-in moves presets to it", async () => {
+            const anonymousId = new Types.ObjectId().toString()
+
+            await createFor(anonymousId, 'Meta US')
+            live.clear()
+
+            await presets.transfer(anonymousId, userId)
+
+            expect(live.events).toEqual([presetsEvent(userId)])
+        })
     })
 
     describe('transfer', () => {

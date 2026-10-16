@@ -23,6 +23,7 @@
 #   GOOGLE_CLIENT_SECRET=<the Google OAuth client secret>
 #   GITHUB_CLIENT_SECRET=<the GitHub OAuth app client secret>
 #   TURNSTILE_SECRET_KEY=<the Turnstile widget's secret key, Cloudflare dashboard>
+#   ABLY_API_KEY=<an Ably API key with publish and subscribe on the AdLens app, Ably dashboard>
 # It is not .env.local: that file holds local values (e.g. Turnstile's always-pass test key) that must never reach
 # production. The first run after upgrading from one-secret-per-key needs no file for the keys the old individual
 # secrets of the same names already held: it folds those in.
@@ -68,7 +69,7 @@ GITHUB_CLIENT_ID=Ov23ct4gfbO6JyiOGopx
 # tier counts active secret *versions*, not secrets, so one bundle uses one version however many keys it holds.
 SECRETS_BUNDLE=API_SECRETS
 SECRETS_PATH=/secrets/api.json
-BUNDLE_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL GOOGLE_CLIENT_SECRET GITHUB_CLIENT_SECRET TURNSTILE_SECRET_KEY"
+BUNDLE_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL GOOGLE_CLIENT_SECRET GITHUB_CLIENT_SECRET TURNSTILE_SECRET_KEY ABLY_API_KEY"
 # RESEND_API_KEY and CONTACT_EMAIL are required because MailModule and ContactService assert them at startup; the API
 # won't boot without them.
 REQUIRED_KEYS="MONGODB_URI BETTER_AUTH_SECRET RESEND_API_KEY CONTACT_EMAIL"
@@ -438,8 +439,9 @@ gcloud scheduler jobs "$SCHEDULER_VERB" http "$CLEANUP_JOB" --location="$REGION"
 
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 # Pinned so a re-created service can't fall back to Cloud Run's defaults (up to 100 instances). 3 instances × 80
-# concurrent requests is far above the traffic, and caps what a flood or stuck sockets can cost and how many MongoDB
-# connections the API can open. CPU is billed only while a request (or an open socket) is in flight.
+# concurrent requests is far above the traffic, and caps what a flood can cost and how many MongoDB connections the
+# API can open. CPU is billed only while a request is in flight: Ably, not the API, holds the browsers' live
+# connections.
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
     --min-instances=0 --max-instances=3 --concurrency=80 --timeout=300 \

@@ -11,6 +11,7 @@ import {
 import { type Connection, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { type StoredPreset, USER_PRESETS_COLLECTION, type UserPresetsDoc } from '../database/user-presets.doc'
+import { LivePublisher } from '../live/live-publisher'
 import { isSameSettings } from './same-settings'
 
 interface PresetChanges {
@@ -211,7 +212,10 @@ const getRemovePipeline = (presetId: string, now: Date) => {
 // the default and the sign-in move take several writes.
 @Injectable()
 export class PresetsService {
-    constructor(@InjectConnection() private readonly connection: Connection) {}
+    constructor(
+        @InjectConnection() private readonly connection: Connection,
+        private readonly live: LivePublisher,
+    ) {}
 
     private get collection() {
         return this.connection.collection<UserPresetsDoc>(USER_PRESETS_COLLECTION)
@@ -229,22 +233,11 @@ export class PresetsService {
 
     // A taken name is refused unless the save asks to overwrite that preset.
     async create(userId: string, input: SavePresetPayload): Promise<{ preset: Preset; isCreated: boolean }> {
-        const now = new Date()
-        const changes = toChanges(input, now)
+        const saved = await this.save(userId, input)
 
-        await this.ensureSet(userId, now)
+        await this.live.publishPresets(userId)
 
-        if (input.overwrite) {
-            const overwritten = await this.overwriteByName(userId, changes, input.isDefault)
-
-            if (overwritten) {
-                return { preset: overwritten, isCreated: false }
-            }
-        }
-
-        const preset = await this.push(userId, createStoredPreset(changes), input.isDefault)
-
-        return { preset, isCreated: true }
+        return saved
     }
 
     async update(userId: string, presetId: string, input: SavePresetPayload): Promise<Preset> {
@@ -261,6 +254,8 @@ export class PresetsService {
             throw refusal
         }
 
+        await this.live.publishPresets(userId)
+
         return preset
     }
 
@@ -273,6 +268,8 @@ export class PresetsService {
         if (!removed.matchedCount) {
             throw presetNotFound()
         }
+
+        await this.live.publishPresets(userId)
     }
 
     async setDefault(userId: string, presetId: string | null): Promise<void> {
@@ -280,6 +277,7 @@ export class PresetsService {
 
         if (presetId === null) {
             await this.collection.updateOne({ _id: userId }, { $set: { defaultPresetId: null, updatedAt: now } })
+            await this.live.publishPresets(userId)
 
             return
         }
@@ -292,6 +290,8 @@ export class PresetsService {
         if (!updated.matchedCount) {
             throw presetNotFound()
         }
+
+        await this.live.publishPresets(userId)
     }
 
     // Counts a started run for the preset; false when the preset is gone or its settings differ from the run's. The
@@ -310,7 +310,13 @@ export class PresetsService {
             { arrayFilters: [{ 'p.id': presetId, 'p.updatedAt': stored.updatedAt }] },
         )
 
-        return counted.modifiedCount === 1
+        const isCounted = counted.modifiedCount === 1
+
+        if (isCounted) {
+            await this.live.publishPresets(userId)
+        }
+
+        return isCounted
     }
 
     // Sign-in or sign-up moves an anonymous user's presets to the account: a clashing name gets a number, the account
@@ -336,6 +342,7 @@ export class PresetsService {
             if (isPushed) {
                 await this.adoptDefault(toUserId, from.defaultPresetId)
                 await this.collection.deleteOne({ _id: fromUserId })
+                await this.live.publishPresets(toUserId)
 
                 return
             }
@@ -346,6 +353,25 @@ export class PresetsService {
 
     async purge(userId: string): Promise<void> {
         await this.collection.deleteOne({ _id: userId })
+    }
+
+    private async save(userId: string, input: SavePresetPayload): Promise<{ preset: Preset; isCreated: boolean }> {
+        const now = new Date()
+        const changes = toChanges(input, now)
+
+        await this.ensureSet(userId, now)
+
+        if (input.overwrite) {
+            const overwritten = await this.overwriteByName(userId, changes, input.isDefault)
+
+            if (overwritten) {
+                return { preset: overwritten, isCreated: false }
+            }
+        }
+
+        const preset = await this.push(userId, createStoredPreset(changes), input.isDefault)
+
+        return { preset, isCreated: true }
     }
 
     // Every user's document exists before a conditional write, so a refused write is told apart from a missing

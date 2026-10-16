@@ -16,6 +16,7 @@ import { ApiException } from '../common/api-exception'
 import { jobVideoPath } from '../common/paths'
 import { JOB_MODEL, type JobDoc, type StoredJob } from '../database/job.doc'
 import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../database/upload-tombstone.doc'
+import { LivePublisher } from '../live/live-publisher'
 import { SamplesService } from '../samples/samples.service'
 import { SIGNED_URL_TTL_MS, StorageService } from '../storage/storage.service'
 import { JobLifecycle } from './job-lifecycle.service'
@@ -49,6 +50,7 @@ export class JobsService {
         private readonly storage: StorageService,
         private readonly lifecycle: JobLifecycle,
         private readonly samples: SamplesService,
+        private readonly live: LivePublisher,
     ) {}
 
     async create(
@@ -97,8 +99,9 @@ export class JobsService {
         return toPublicJob(created.toObject<StoredJob>())
     }
 
-    async recordCountedPreset(jobId: string, presetId: string): Promise<void> {
-        await this.model.updateOne({ _id: jobId }, { $set: { presetId } })
+    async recordCountedPreset(job: Pick<StoredJob, '_id' | 'userId'>, presetId: string): Promise<void> {
+        await this.model.updateOne({ _id: job._id }, { $set: { presetId } })
+        await this.live.publishJob(job)
     }
 
     async get(userId: string, jobId: string): Promise<Job> {

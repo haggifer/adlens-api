@@ -119,7 +119,6 @@ before(async () => {
     const { AUTH } = require('../dist/auth/auth.instance')
     const { mountAuthRoute } = require('../dist/auth/auth-route')
     const { Mailer } = require('../dist/mail/mailer')
-    const { JobEventsService } = require('../dist/realtime/job-events.service')
     const { StorageService } = require('../dist/storage/storage.service')
     const { ChallengeVerifier } = require('../dist/challenge/challenge-verifier')
     const { AnalysisDispatcher } = require('../dist/analysis/dispatch/analysis-dispatcher')
@@ -141,8 +140,6 @@ before(async () => {
             delete: async (path) => deletedPaths.push(path),
             deletePrefix: async (prefix) => purgedPrefixes.push(prefix),
         })
-        .overrideProvider(JobEventsService)
-        .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
         // Only the token 'pass' passes; nothing reaches Cloudflare.
         .overrideProvider(ChallengeVerifier)
         .useValue({ verify: async (token) => token === CHALLENGE_PASS })

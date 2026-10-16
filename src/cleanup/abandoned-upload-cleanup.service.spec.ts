@@ -6,6 +6,7 @@ import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/j
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import { JobLifecycle } from '../jobs/job-lifecycle.service'
 import { IN_PROGRESS_STATUSES, UNSTARTED_JOB_MS } from '../jobs/job-status'
+import { OffLivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
 import { configStub } from '../testing/config-stub'
@@ -110,7 +111,7 @@ describe('AbandonedUploadCleanupService', () => {
         const now = new Date()
         const quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
         const ipQuota = new IpQuotaService(mongo.connection, configStub({}))
-        const lifecycle = new JobLifecycle(jobs, quota, ipQuota)
+        const lifecycle = new JobLifecycle(jobs, quota, ipQuota, new OffLivePublisher())
         const { jobId, path } = await createJob(7, { status: JobStatus.Analyzing }, now)
 
         await jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { updatedAt: hoursAgo(2, now) } })
@@ -125,7 +126,7 @@ describe('AbandonedUploadCleanupService', () => {
         const now = new Date()
         const quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
         const ipQuota = new IpQuotaService(mongo.connection, configStub({}))
-        const lifecycle = new JobLifecycle(jobs, quota, ipQuota)
+        const lifecycle = new JobLifecycle(jobs, quota, ipQuota, new OffLivePublisher())
         const { jobId, path } = await createJob(7, {}, now)
 
         expect(await lifecycle.expireStaleJobs(undefined, now)).toEqual({ expired: 1, failed: 0 })

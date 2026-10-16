@@ -3,6 +3,7 @@ import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
 import { USER_PRESETS_COLLECTION, type UserPresetsDoc } from '../database/user-presets.doc'
+import { OffLivePublisher } from '../live/live-publisher'
 import { PresetsService } from '../presets/presets.service'
 import { QuotaService } from '../quota/quota.service'
 import type { StorageService } from '../storage/storage.service'
@@ -53,7 +54,7 @@ describe('AccountDataService', () => {
     beforeAll(async () => {
         mongo = await startMemoryMongo()
         jobs = mongo.connection.model<JobDoc>(JOB_MODEL, JobSchema)
-        presets = new PresetsService(mongo.connection)
+        presets = new PresetsService(mongo.connection, new OffLivePublisher())
         accountData = new AccountDataService(
             jobs,
             storage as unknown as StorageService,

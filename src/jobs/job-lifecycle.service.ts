@@ -7,6 +7,7 @@ import { describeError } from '../common/error-message'
 import { JOB_MODEL, type JobDoc, type ModelCall, type StoredJob } from '../database/job.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
+import { LivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
 import { UNSTARTED_JOB_MS } from './job-status'
 
@@ -89,6 +90,7 @@ export class JobLifecycle {
         @InjectModel(JOB_MODEL) private readonly model: Model<JobDoc>,
         private readonly quota: QuotaService,
         private readonly ipQuota: IpQuotaService,
+        private readonly live: LivePublisher,
     ) {}
 
     // pending → verifying. null when the job isn't the caller's pending job.
@@ -175,13 +177,19 @@ export class JobLifecycle {
 
     // queued / analyzing → analyzing for one worker attempt. null when the job is already final or unknown.
     async startAttempt(jobId: string): Promise<StoredJob | null> {
-        return this.model
+        const job = await this.model
             .findOneAndUpdate(
                 { _id: jobId, status: { $in: IN_FLIGHT } },
                 { $set: { status: JobStatus.Analyzing }, $inc: { attempts: 1 } },
                 { new: true },
             )
             .lean<StoredJob>()
+
+        if (job) {
+            await this.live.publishJob(job)
+        }
+
+        return job
     }
 
     // Marks the attempt's Gemini call as started, so no later attempt makes one again. 'repeated' when an earlier
@@ -210,13 +218,21 @@ export class JobLifecycle {
     // analyzing → analyzed. false when the job was finalized elsewhere meanwhile (e.g. expired as stale). The call is
     // added to what earlier, failed attempts recorded, so the job holds everything its analysis was billed for.
     async complete(jobId: string, analysis: Analysis, call: ModelCall): Promise<boolean> {
-        const done = await this.model.findOneAndUpdate(
-            { _id: jobId, status: JobStatus.Analyzing },
-            { $set: { status: JobStatus.Analyzed, analysis }, ...recordCall(call) },
-            { new: true },
-        )
+        const done = await this.model
+            .findOneAndUpdate(
+                { _id: jobId, status: JobStatus.Analyzing },
+                { $set: { status: JobStatus.Analyzed, analysis }, ...recordCall(call) },
+                { new: true },
+            )
+            .lean<StoredJob>()
 
-        return done !== null
+        if (!done) {
+            return false
+        }
+
+        await this.live.publishJob(done)
+
+        return true
     }
 
     // The call of an attempt whose answer couldn't be used: billed all the same. Safe to repeat: a write that failed
@@ -345,12 +361,19 @@ export class JobLifecycle {
         }
     }
 
-    private transition(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<StoredJob | null> {
-        return this.model.findOneAndUpdate(filter, { $set: set }, { new: true }).lean<StoredJob>()
+    private async transition(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<StoredJob | null> {
+        const job = await this.model.findOneAndUpdate(filter, { $set: set }, { new: true }).lean<StoredJob>()
+
+        if (job) {
+            await this.live.publishJob(job)
+        }
+
+        return job
     }
 
     // Applies a guarded status change, then refunds the charges the job holds. A failed refund leaves them on the job,
-    // where the next sweep finds them; the status change stands either way.
+    // where the next sweep finds them; the status change stands either way. Tabs hear of it after the refund, so a quota
+    // they read then no longer counts the run.
     private async settle(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<boolean> {
         const settled = await this.model.findOneAndUpdate(filter, { $set: set }, { new: true }).lean<StoredJob>()
 
@@ -359,6 +382,7 @@ export class JobLifecycle {
         }
 
         await this.tryRefund(settled)
+        await this.live.publishJob(settled)
 
         return true
     }

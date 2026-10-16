@@ -11,7 +11,6 @@ import { createLogger } from './common/cloud-logger'
 import type { Env } from './config/env'
 import { readLogFormat } from './config/log-format'
 import { allowedWebOrigins } from './config/web-origins'
-import { RealtimeIoAdapter } from './realtime/realtime-io.adapter'
 
 const bootstrap = async () => {
     // bodyParser: false so the Better Auth handler can read the raw request before JSON parsing.
@@ -27,7 +26,6 @@ const bootstrap = async () => {
     app.enableCors({ origin: webOrigins, credentials: true })
     app.enableShutdownHooks()
     app.useGlobalFilters(new ApiExceptionFilter())
-    app.useWebSocketAdapter(new RealtimeIoAdapter(app, webOrigins))
     mountAuthRoute(app.getHttpAdapter().getInstance(), auth)
     app.useBodyParser('json', { limit: '1mb' })
 

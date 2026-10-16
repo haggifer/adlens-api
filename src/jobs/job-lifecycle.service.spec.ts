@@ -1,9 +1,11 @@
 import { Logger } from '@nestjs/common'
 import {
     type Analysis,
+    getLiveChannel,
     JobErrorCode,
     type JobMedia,
     JobStatus,
+    LiveEvent,
     Placement,
     Platform,
     RequestErrorCode,
@@ -12,7 +14,7 @@ import {
 import { type FilterQuery, type Model, Types } from 'mongoose'
 import { UserAccess } from '../common/user-access'
 import { IP_QUOTA_COLLECTION, IP_QUOTA_MODEL, type IpQuotaDoc, IpQuotaSchema } from '../database/ip-quota.doc'
-import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
+import { DEMO_OWNER, JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
@@ -20,6 +22,7 @@ import { QuotaService } from '../quota/quota.service'
 import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { buildModelCall, usageOf } from '../testing/model-call'
+import { RecordingLivePublisher } from '../testing/recording-live-publisher'
 import { JobLifecycle } from './job-lifecycle.service'
 import { UNSTARTED_JOB_MS } from './job-status'
 
@@ -60,6 +63,7 @@ describe('JobLifecycle', () => {
     let lifecycle: JobLifecycle
     let quota: QuotaService
     let ipQuota: IpQuotaService
+    let live: RecordingLivePublisher
 
     const users = () => mongo.connection.collection(USER_COLLECTION)
 
@@ -133,7 +137,8 @@ describe('JobLifecycle', () => {
         await mongo.connection.model(IP_QUOTA_MODEL, IpQuotaSchema).init()
         quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT }))
         ipQuota = new IpQuotaService(mongo.connection, configStub(IP_LIMITS))
-        lifecycle = new JobLifecycle(jobs, quota, ipQuota)
+        live = new RecordingLivePublisher()
+        lifecycle = new JobLifecycle(jobs, quota, ipQuota, live)
     })
 
     beforeEach(async () => {
@@ -145,6 +150,8 @@ describe('JobLifecycle', () => {
 
     afterEach(async () => {
         jest.restoreAllMocks()
+        live.clear()
+        live.failure = null
         await Promise.all([
             jobs.deleteMany({}),
             users().deleteMany({}),
@@ -711,6 +718,70 @@ describe('JobLifecycle', () => {
             expect([(await findJob(first))?.status, (await findJob(second))?.status]).toEqual(
                 expect.arrayContaining([JobStatus.Verifying, JobStatus.Error]),
             )
+        })
+    })
+
+    describe('live updates', () => {
+        const jobEvent = (jobId: string, userId = USER) => ({
+            channel: getLiveChannel(userId),
+            event: LiveEvent.Job,
+            data: { id: jobId },
+        })
+
+        it("tells the owner's tabs about every status a run goes through", async () => {
+            const jobId = await queueJob()
+
+            await lifecycle.startAttempt(jobId)
+            await lifecycle.markModelCall(jobId)
+            await lifecycle.complete(jobId, ANALYSIS, CALL)
+
+            // verifying, queued, analyzing, analyzed: the call mark changes nothing a tab shows.
+            expect(live.events).toEqual(Array.from({ length: 4 }, () => jobEvent(jobId)))
+        })
+
+        it('tells them when a run fails, fails to start or expires', async () => {
+            const failed = await queueJob()
+            const undispatched = await queueJob()
+            const unverified = await claimJob()
+            const expired = await createJob()
+
+            await createdAt(expired, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            live.clear()
+
+            await lifecycle.fail(failed, JobErrorCode.AnalysisFailed, 'boom')
+            await lifecycle.failDispatch(undispatched)
+            await lifecycle.failStart(unverified, JobErrorCode.VideoCheckFailed)
+            await lifecycle.expireStale(USER, NOW)
+
+            expect(live.events).toEqual([failed, undispatched, unverified, expired].map((jobId) => jobEvent(jobId)))
+        })
+
+        it('tells nobody when nothing changed', async () => {
+            const jobId = await createJob()
+
+            await lifecycle.claimForVerification(OTHER_USER, jobId)
+            await lifecycle.startAttempt(jobId)
+            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')
+
+            expect(live.events).toEqual([])
+        })
+
+        it("tells nobody about a demo job, which has no owner's tabs", async () => {
+            const jobId = await createJob(JobStatus.Queued, DEMO_OWNER)
+
+            await lifecycle.startAttempt(jobId)
+
+            expect(live.events).toEqual([])
+        })
+
+        it('keeps a status change whose announcement failed', async () => {
+            const jobId = await createJob()
+
+            live.failure = new Error('Ably unavailable')
+            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+            expect(await lifecycle.claimForVerification(USER, jobId)).not.toBeNull()
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Verifying)
         })
     })
 

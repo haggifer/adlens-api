@@ -6,9 +6,9 @@ import { DatabaseModule } from './database/database.module'
 import { DemosModule } from './demos/demos.module'
 import { HealthController } from './health.controller'
 import { JobsModule } from './jobs/jobs.module'
+import { LiveModule } from './live/live.module'
 import { MeModule } from './me/me.module'
 import { PresetsModule } from './presets/presets.module'
-import { RealtimeModule } from './realtime/realtime.module'
 import { SamplesModule } from './samples/samples.module'
 
 @Module({
@@ -19,7 +19,7 @@ import { SamplesModule } from './samples/samples.module'
         JobsModule,
         MeModule,
         PresetsModule,
-        RealtimeModule,
+        LiveModule,
         SamplesModule,
         DemosModule,
         ContactModule,

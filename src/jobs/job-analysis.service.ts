@@ -118,7 +118,7 @@ export class JobAnalysisService {
                 return null
             }
 
-            await this.jobs.recordCountedPreset(job._id.toString(), presetId)
+            await this.jobs.recordCountedPreset(job, presetId)
 
             return presetId
         } catch (err) {
