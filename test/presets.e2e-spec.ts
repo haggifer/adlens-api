@@ -5,6 +5,7 @@ import {
     getLiveChannel,
     LiveEvent,
     Market,
+    MAX_PRESETS,
     Placement,
     Platform,
     type Preset,
@@ -155,7 +156,7 @@ describe('Presets API (e2e)', () => {
     })
 
     it('refuses a new name past the limit with PRESET_LIMIT_REACHED', async () => {
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < MAX_PRESETS; i++) {
             await create(`Preset ${i}`)
         }
 

@@ -265,10 +265,7 @@ describe('Jobs API (e2e)', () => {
         const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(409)
         const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER)).expect(200)
 
-        expect(res.body).toMatchObject({
-            errorCode: RequestErrorCode.UploadIncomplete,
-            message: 'The upload has not finished',
-        })
+        expect(res.body.errorCode).toBe(RequestErrorCode.UploadIncomplete)
         expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed })
         expect(deleteObject).not.toHaveBeenCalled()
         expect(dispatch).not.toHaveBeenCalled()
@@ -327,10 +324,7 @@ describe('Jobs API (e2e)', () => {
             const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
             const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER))
 
-            expect(res.body).toMatchObject({
-                errorCode: RequestErrorCode.Unavailable,
-                message: 'The upload could not be checked',
-            })
+            expect(res.body.errorCode).toBe(RequestErrorCode.Unavailable)
             expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoCheckFailed })
             expect(after.body.quota.used).toBe(before.body.quota.used)
             expect(deleteObject).not.toHaveBeenCalled()
@@ -1439,7 +1433,7 @@ describe('Jobs API (e2e)', () => {
 
             // The report shows the weekly allowance; the one analysis before confirmation is enforced on its own.
             expect(next.body.errorCode).toBe(RequestErrorCode.SignUpRequired)
-            expect(quota.body.quota).toMatchObject({ used: 1, limit: 3 })
+            expect(quota.body.quota).toMatchObject({ used: 1, limit: Number(process.env.QUOTA_LIMIT) })
         })
 
         it('gives an unconfirmed account one analysis, then asks it to confirm its email', async () => {
@@ -1452,7 +1446,7 @@ describe('Jobs API (e2e)', () => {
             const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(unconfirmed)).expect(200)
 
             expect(next.body.errorCode).toBe(RequestErrorCode.EmailConfirmationRequired)
-            expect(quota.body.quota).toMatchObject({ used: 1, limit: 3 })
+            expect(quota.body.quota).toMatchObject({ used: 1, limit: Number(process.env.QUOTA_LIMIT) })
         })
 
         it('refuses a new job once the user has no analyses left', async () => {

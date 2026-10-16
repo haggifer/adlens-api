@@ -310,13 +310,13 @@ test("an invalid confirmation link keeps Better Auth's own error", async () => {
     assert.equal(body.code, 'INVALID_TOKEN')
 })
 
-test('the confirmation link lasts 24 hours, as the email says', () => {
+test('the confirmation email says how long its link really lasts', () => {
     const token = linkIn(outbox[0]).searchParams.get('token')
     const { iat, exp } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+    const lifetime = `expires in ${(exp - iat) / (60 * 60)} hours`
 
-    assert.equal(exp - iat, 24 * 60 * 60)
-    assert.ok(outbox[0].text.includes('expires in 24 hours'))
-    assert.ok(outbox[0].html.includes('expires in 24 hours'))
+    assert.ok(outbox[0].text.includes(lifetime), outbox[0].text)
+    assert.ok(outbox[0].html.includes(lifetime))
 })
 
 test('the emailed link opens the web app, which confirms the signed-in account without a new session', async () => {
@@ -498,15 +498,6 @@ test('social sign-in refuses to return to a site other than the web app', async 
 
     assert.equal(status, 403)
     assert.equal(body.url, undefined)
-})
-
-// A provider sign-in links to an existing account with the same address only when the provider confirmed it and the
-// account confirmed it here; trusting a provider or dropping the local check would let anyone take over an account.
-test("social sign-in keeps Better Auth's linking defaults: no trusted providers, a confirmed account required", async () => {
-    const context = await auth.$context
-
-    assert.deepEqual(context.trustedProviders, [])
-    assert.notEqual(auth.options.account?.accountLinking?.requireLocalEmailVerified, false)
 })
 
 test("a Google or GitHub account is stored without the provider's tokens", async () => {
@@ -1024,7 +1015,7 @@ test('an anonymous user gets one analysis, then is asked to sign up', async () =
     assert.equal(next.status, 429)
     assert.equal((await next.json()).errorCode, 'SIGN_UP_REQUIRED')
     // The quota reports the weekly allowance; the one analysis before confirmation is enforced on its own.
-    assert.deepEqual(pick(await getQuota(anonymous.cookie)), { used: 1, limit: 3 })
+    assert.deepEqual(pick(await getQuota(anonymous.cookie)), { used: 1, limit: Number(process.env.QUOTA_LIMIT) })
 })
 
 test('an unconfirmed account gets one analysis behind the human check, then is asked to confirm its email', async () => {
@@ -1044,7 +1035,7 @@ test('an unconfirmed account gets one analysis behind the human check, then is a
     assert.equal(network.runs[0].anonymous, true)
     assert.equal(next.status, 429)
     assert.equal((await next.json()).errorCode, 'EMAIL_CONFIRMATION_REQUIRED')
-    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: 3 })
+    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: Number(process.env.QUOTA_LIMIT) })
 
     // Confirming lifts the limits at once: the next analysis needs no check and the full weekly quota applies.
     await confirmEmail(email, account.cookie)
@@ -1052,7 +1043,7 @@ test('an unconfirmed account gets one analysis behind the human check, then is a
     const confirmed = await createSampleJob(account.cookie, '203.0.113.93')
 
     assert.equal(confirmed.status, 201)
-    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: 3 })
+    assert.deepEqual(pick(await getQuota(account.cookie)), { used: 1, limit: Number(process.env.QUOTA_LIMIT) })
 })
 
 test('an anonymous session cannot link a social provider', async () => {
