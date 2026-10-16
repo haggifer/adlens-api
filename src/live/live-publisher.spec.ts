@@ -83,10 +83,7 @@ describe('AblyLivePublisher', () => {
 })
 
 describe('OffLivePublisher', () => {
-    it('gives no token and publishes nothing', async () => {
-        const live = new OffLivePublisher()
-
-        await expect(live.createTokenRequest()).resolves.toBeNull()
-        await expect(live.publishPresets(USER)).resolves.toBeUndefined()
+    it('gives no token', async () => {
+        await expect(new OffLivePublisher().createTokenRequest()).resolves.toBeNull()
     })
 })

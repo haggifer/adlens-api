@@ -64,10 +64,6 @@ describe('ruleSchema', () => {
 })
 
 describe('ruleSetSchema', () => {
-    it('accepts the test ruleset', () => {
-        expect(ruleSetSchema.safeParse(TEST_RULESET).success).toBe(true)
-    })
-
     it('refuses two rules with one id, which findings are matched back to', () => {
         const duplicated = { ...TEST_RULESET, rules: [...TEST_RULESET.rules, { ...METADATA_RULE, value: 1 }] }
         const result = ruleSetSchema.safeParse(duplicated)

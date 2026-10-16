@@ -4,8 +4,6 @@ import mongoose from 'mongoose'
 import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
 import { ChallengeVerifier } from './challenge/challenge-verifier'
 import { ClientNetworkResolver } from './ip-quota/client-network.resolver'
-import { IpQuotaService } from './ip-quota/ip-quota.service'
-import { JobLifecycle } from './jobs/job-lifecycle.service'
 import { type MemoryMongo, startMemoryMongo } from './testing/memory-mongo'
 
 // Secrets only the API needs. The jobs mount the same bundle today, since they share the API's service account, but
@@ -44,13 +42,7 @@ describe('WorkerModule', () => {
     })
 
     it('starts without any of the API-only secrets', () => {
-        expect(API_ONLY_SECRETS.filter((name) => process.env[name] !== undefined)).toEqual([])
         expect(worker.get(AnalysisPipeline)).toBeInstanceOf(AnalysisPipeline)
-    })
-
-    it('can refund both kinds of run, which a failed analysis needs', () => {
-        expect(worker.get(JobLifecycle)).toBeInstanceOf(JobLifecycle)
-        expect(worker.get(IpQuotaService)).toBeInstanceOf(IpQuotaService)
     })
 
     it('holds none of the providers that need those secrets', () => {

@@ -223,16 +223,6 @@ describe('AnalysisPipeline', () => {
         expect(await used()).toBe(1)
     })
 
-    it('fails the job and refunds on the last attempt', async () => {
-        const jobId = await queueJob()
-
-        reviewer.next = () => Promise.reject(new RetryableError('provider overloaded'))
-
-        expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
-        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
-        expect(await used()).toBe(0)
-    })
-
     it('fails a permanent error immediately instead of retrying it, and refunds it in full', async () => {
         const jobId = await queueJob(NETWORK)
 

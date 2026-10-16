@@ -42,11 +42,13 @@ describe('toIpRefusal', () => {
     })
 
     it('answers the network limit and the challenge the same for everyone', () => {
-        expect(toIpRefusal(IpVerdict.NetworkLimit, UserAccess.Unconfirmed)).toMatchObject({
-            response: { errorCode: RequestErrorCode.NetworkQuotaExceeded },
-        })
-        expect(toIpRefusal(IpVerdict.NeedsChallenge, UserAccess.Unconfirmed)).toMatchObject({
-            response: { errorCode: RequestErrorCode.ChallengeRequired },
-        })
+        for (const access of Object.values(UserAccess)) {
+            expect(toIpRefusal(IpVerdict.NetworkLimit, access)).toMatchObject({
+                response: { errorCode: RequestErrorCode.NetworkQuotaExceeded },
+            })
+            expect(toIpRefusal(IpVerdict.NeedsChallenge, access)).toMatchObject({
+                response: { errorCode: RequestErrorCode.ChallengeRequired },
+            })
+        }
     })
 })

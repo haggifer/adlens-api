@@ -71,7 +71,7 @@ describe('contactEmail', () => {
         expect(text).not.toContain('Device:')
     })
 
-    it('says the account couldn’t be read, and still sends', () => {
+    it('says the account couldn’t be read', () => {
         const sender = { account: null, device: null, lookupError: 'connection refused' }
 
         expect(contactEmail(buildInput({ sender })).text).toContain("Account: couldn't be read (connection refused)")
@@ -95,7 +95,7 @@ describe('contactEmail', () => {
         const mail = contactEmail(buildInput({ attachments, apiVersion: null }))
 
         expect(mail.text).toContain('Screenshots: shot.png')
-        expect(mail.text).toContain('Ref: 3F9A2C\n'.trim())
+        expect(mail.text).toMatch(/\nRef: 3F9A2C$/)
         expect(mail.text).not.toContain('API ')
         expect(mail.attachments).toBe(attachments)
     })

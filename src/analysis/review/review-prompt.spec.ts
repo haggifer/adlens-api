@@ -94,6 +94,7 @@ describe('parseReviewOutput', () => {
         const text = JSON.stringify({
             transcript: [],
             findings: [{ id: 'r', verdict: 'fail', evidence: 'e', startS: 0.5 }],
+            advisories: [],
         })
 
         expect(() => parseReviewOutput(text)).toThrow()
