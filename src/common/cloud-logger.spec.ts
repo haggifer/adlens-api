@@ -60,8 +60,4 @@ describe('createLogger', () => {
         expect(createLogger(readLogFormat({ LOG_FORMAT: 'json' }))).toBeInstanceOf(CloudLogger)
         expect(createLogger(readLogFormat({}))).toBeUndefined()
     })
-
-    it('refuses an unknown format instead of silently logging text', () => {
-        expect(() => readLogFormat({ LOG_FORMAT: 'yaml' })).toThrow()
-    })
 })

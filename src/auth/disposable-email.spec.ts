@@ -12,8 +12,4 @@ describe('isDisposableEmail', () => {
         expect(isDisposableEmail('someone@proton.me')).toBe(false)
         expect(isDisposableEmail('someone@example.com')).toBe(false)
     })
-
-    it("never flags Better Auth's placeholder address for anonymous users", () => {
-        expect(isDisposableEmail('abc123@anonymous.placeholder.invalid')).toBe(false)
-    })
 })

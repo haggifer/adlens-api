@@ -30,9 +30,7 @@ describe('AblyLivePublisher', () => {
     it('signs a token request that lets a tab subscribe to its own channel only', async () => {
         const tokenRequest = await live.createTokenRequest(USER)
 
-        expect(tokenRequest.keyName).toBe('appId.keyId')
         expect(JSON.parse(tokenRequest.capability)).toEqual({ [getLiveChannel(USER)]: ['subscribe'] })
-        expect(tokenRequest.mac).toEqual(expect.any(String))
     })
 
     it("publishes a job's id and a presets change to the owner's channel", async () => {

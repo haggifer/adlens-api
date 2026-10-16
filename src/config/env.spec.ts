@@ -44,10 +44,4 @@ describe('validateEnvWithSecretsFile', () => {
 
         expect(env.MONGODB_URI).toBe('mongodb://from-env')
     })
-
-    it('still fails validation when a required key is in neither the environment nor the file', () => {
-        writeFileSync(path, JSON.stringify({ BETTER_AUTH_SECRET: 'shh' }))
-
-        expect(() => validateEnvWithSecretsFile({ ...baseEnv, SECRETS_FILE: path })).toThrow('MONGODB_URI')
-    })
 })

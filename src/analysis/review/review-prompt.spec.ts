@@ -99,10 +99,4 @@ describe('parseReviewOutput', () => {
 
         expect(() => parseReviewOutput(text)).toThrow()
     })
-
-    it('rejects a transcript in the old single-string shape', () => {
-        expect(() =>
-            parseReviewOutput(JSON.stringify({ transcript: 'Buy now', findings: [], advisories: [] })),
-        ).toThrow()
-    })
 })

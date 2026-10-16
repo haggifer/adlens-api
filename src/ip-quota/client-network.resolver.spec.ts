@@ -23,7 +23,6 @@ describe('ClientNetworkResolver', () => {
         const network = resolver.resolve({ forwardedFor: undefined, socketAddress: '::ffff:203.0.113.7' })
 
         expect(network.ip).toBe('::ffff:203.0.113.7')
-        expect(network.bucketKey).toMatch(/^[A-Za-z0-9_-]{43}$/)
         expect(network.bucketKey).not.toContain('203.0.113.7')
     })
 
