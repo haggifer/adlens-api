@@ -665,7 +665,7 @@ test('signing up from an anonymous session moves its history to the new, unconfi
         await db
             .collection('user')
             .updateOne({ _id: new ObjectId(anonymous.user.id) }, { $set: { runs: [run('anonymous-run')] } })
-        await db.collection('presets').insertOne({
+        await db.collection('user_presets').insertOne({
             _id: anonymous.user.id,
             presets: [{ id: 'linked-preset', name: 'Linked', nameKey: 'linked' }],
             defaultPresetId: 'linked-preset',
@@ -687,8 +687,8 @@ test('signing up from an anonymous session moves its history to the new, unconfi
     )
     const [linkerPresets, anonymousPresets] = await withDb((db) =>
         Promise.all([
-            db.collection('presets').findOne({ _id: linker._id.toString() }),
-            db.collection('presets').findOne({ _id: anonymous.user.id }),
+            db.collection('user_presets').findOne({ _id: linker._id.toString() }),
+            db.collection('user_presets').findOne({ _id: anonymous.user.id }),
         ]),
     )
 
@@ -714,7 +714,7 @@ test('deleting an account also deletes the videos it adopted from an anonymous s
     const linker = await withDb((db) => db.collection('user').findOne({ email: 'linker@example.com' }))
     const deleted = await post('/api/auth/delete-user', { password: 'first-password' }, linkerSession)
 
-    const presets = await withDb((db) => db.collection('presets').findOne({ _id: linker._id.toString() }))
+    const presets = await withDb((db) => db.collection('user_presets').findOne({ _id: linker._id.toString() }))
 
     assert.equal(deleted.status, 200)
     assert.deepEqual(deletedPaths, [adoptedUpload])
