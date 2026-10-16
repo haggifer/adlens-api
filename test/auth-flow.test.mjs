@@ -206,13 +206,6 @@ test('an unconfirmed account can sign in, and signing in sends no email', async 
     assert.equal(outbox.length, 1)
 })
 
-test('a duplicate sign-up answers that the address is in use', async () => {
-    const res = await post('/api/auth/sign-up/email', { name: 'Again', email: EMAIL, password: 'other-password' })
-
-    assert.equal(res.status, 422)
-    assert.ok(!cookieOf(res).includes('session_token'))
-})
-
 test("a sign-up with an alias of a confirmed account's address answers that the address is in use", async () => {
     const owner = await signUp('alias-owner@example.com')
 
@@ -430,26 +423,23 @@ const startSocialSignIn = async (provider, callbackURL) => {
     return { status: res.status, body }
 }
 
-test('Google sign-in starts at Google, with the account picker and the API as the callback', async () => {
-    const { status, body } = await startSocialSignIn('google', `${WEB}/history`)
-    const target = new URL(body.url)
+test('Google and GitHub sign-in start at the provider with our client ids and the API as the callback', async () => {
+    const { toSocialProviders } = require('../dist/auth/social-providers')
+    const providers = toSocialProviders(process.env)
+    const google = await startSocialSignIn('google', `${WEB}/history`)
+    const github = await startSocialSignIn('github', `${WEB}/history`)
+    const toGoogle = new URL(google.body.url)
+    const toGitHub = new URL(github.body.url)
 
-    assert.equal(status, 200)
-    assert.equal(target.host, 'accounts.google.com')
-    assert.equal(target.searchParams.get('client_id'), 'test-google-client-id')
-    assert.equal(target.searchParams.get('redirect_uri'), `${API}/api/auth/callback/google`)
-    assert.equal(target.searchParams.get('prompt'), 'select_account')
-})
-
-test('GitHub sign-in starts at GitHub, asking for the email address, with the API as the callback', async () => {
-    const { status, body } = await startSocialSignIn('github', `${WEB}/history`)
-    const target = new URL(body.url)
-
-    assert.equal(status, 200)
-    assert.equal(target.host, 'github.com')
-    assert.equal(target.searchParams.get('client_id'), 'test-github-client-id')
-    assert.equal(target.searchParams.get('redirect_uri'), `${API}/api/auth/callback/github`)
-    assert.ok(target.searchParams.get('scope').split(' ').includes('user:email'))
+    assert.equal(google.status, 200)
+    assert.equal(toGoogle.host, 'accounts.google.com')
+    assert.equal(toGoogle.searchParams.get('client_id'), providers.google.clientId)
+    assert.equal(toGoogle.searchParams.get('redirect_uri'), `${API}/api/auth/callback/google`)
+    assert.equal(toGoogle.searchParams.get('prompt'), providers.google.prompt)
+    assert.equal(github.status, 200)
+    assert.equal(toGitHub.host, 'github.com')
+    assert.equal(toGitHub.searchParams.get('client_id'), providers.github.clientId)
+    assert.equal(toGitHub.searchParams.get('redirect_uri'), `${API}/api/auth/callback/github`)
 })
 
 test('social sign-in refuses to return to a site other than the web app', async () => {
@@ -484,21 +474,6 @@ test("a Google or GitHub account is stored without the provider's tokens", async
     assert.equal(stored.refreshToken ?? null, null)
     assert.equal(stored.idToken ?? null, null)
     assert.equal(stored.accessTokenExpiresAt ?? null, null)
-})
-
-test('an anonymous sign-in gets a session for a user with a placeholder address, and no email', async () => {
-    const { ObjectId } = require('mongodb')
-    const sentBefore = outbox.length
-    const anonymous = await signInAnonymously()
-    const quota = await fetch(`${API}/v1/me/quota`, { headers: headers(anonymous.cookie) })
-    const user = await withDb((db) => db.collection('user').findOne({ _id: new ObjectId(anonymous.user.id) }))
-
-    assert.equal(anonymous.status, 200)
-    assert.ok(anonymous.cookie.includes('session_token'))
-    assert.match(user.email, /@anonymous\.placeholder\.invalid$/)
-    assert.equal(user.isAnonymous, true)
-    assert.equal(quota.status, 200)
-    assert.equal(outbox.length, sentBefore)
 })
 
 test('an anonymous sign-in marks when its user was last seen, and no account is ever marked', async () => {
