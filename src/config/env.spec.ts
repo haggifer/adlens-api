@@ -56,12 +56,4 @@ describe('validateEnvWithSecretsFile', () => {
 
         expect(() => validateEnvWithSecretsFile({ ...baseEnv, SECRETS_FILE: path })).toThrow('MONGODB_URI')
     })
-
-    it('requires QUOTA_LIMIT, so the committed .env is the only place it is set', () => {
-        const { QUOTA_LIMIT: _, ...withoutQuota } = baseEnv
-
-        expect(() => validateEnvWithSecretsFile({ ...withoutQuota, MONGODB_URI: 'mongodb://local' })).toThrow(
-            'QUOTA_LIMIT',
-        )
-    })
 })

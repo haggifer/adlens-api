@@ -9,8 +9,8 @@ interface LimitRule {
 
 // Far above what the web does (one list per page, one request per click), so only a script or a runaway loop meets
 // them. Each preset document is capped anyway; these bound the work and the writes one account can cause.
-const READS_PER_USER: LimitRule = { window: 60, max: 300 }
-const WRITES_PER_USER: LimitRule = { window: 60, max: 60 }
+export const READS_PER_USER: LimitRule = { window: 60, max: 300 }
+export const WRITES_PER_USER: LimitRule = { window: 60, max: 60 }
 
 // Per-user caps on the preset routes, counted like Better Auth's rate limits: one atomic upsert per counter, under a
 // keyed hash, in the shared rate-limit collection.

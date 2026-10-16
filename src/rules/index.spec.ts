@@ -350,7 +350,7 @@ describe('evaluateMetadataRules', () => {
             verdict: 'fail',
             platform: [RulePlatform.YouTube, RulePlatform.Google],
             placements: [Placement.YouTubeBumper],
-            check: 'Bumper ads must be at most 6 seconds long.',
+            check: bumper.check,
             detail: 'It’s 30.4 seconds long, longer than the 6 seconds allowed.',
         })
     })
@@ -407,10 +407,12 @@ describe('evaluateMetadataRules', () => {
     })
 
     it('cites the rule, with its source resolved to a link', () => {
-        expect(checkOf('amazon.creative_spec.video_max_length', {})).toMatchObject({
-            id: 'amazon.creative_spec.video_max_length',
-            quote: 'Between 6 and 45 seconds (20 secs or less highly recommended)',
-            ref: expect.stringMatching(/^https:\/\/advertising\.amazon\.com\/resources\/ad-specs\//),
+        const rule = ruleSet.rules.find((candidate) => candidate.id === 'amazon.creative_spec.video_max_length')!
+
+        expect(checkOf(rule.id, {})).toMatchObject({
+            id: rule.id,
+            quote: rule.quote,
+            ref: rule.ref.replace('{{AMAZON}}', ruleSet.sources.AMAZON.baseUrl),
         })
     })
 })

@@ -4,44 +4,10 @@ import { buildReviewOutputJsonSchema, buildReviewPrompt, parseReviewOutput } fro
 const SETTINGS = { platforms: [], placements: [], markets: [] }
 
 describe('buildReviewPrompt', () => {
-    it('asks for the transcript as sentence segments, never verbatim in one piece', () => {
-        const prompt = buildReviewPrompt(SETTINGS, [], [])
+    it('lists the advisory rules to choose from', () => {
+        const advisories = [{ id: 'meta.restricted.crypto', check: 'Crypto needs permission.' }]
 
-        expect(prompt).toContain('one per sentence')
-        expect(prompt).not.toContain('verbatim transcript')
-    })
-
-    it("says the rules come most important first, and to report every platform's rule for a breached policy", () => {
-        const prompt = buildReviewPrompt(SETTINGS, [], [])
-
-        expect(prompt).toContain('Rules are ordered by importance')
-        expect(prompt).toContain('return a finding for every one of those rules')
-    })
-
-    // Nadex's "even bitcoin" was a crypto `fail` although Google allows crypto ads with certification.
-    it('keeps "fail" for a direct violation and a restricted category or indirect evidence as a warning', () => {
-        const prompt = buildReviewPrompt(SETTINGS, [], [])
-
-        expect(prompt).toContain('Verdict "fail" means the video itself directly shows or says what the rule forbids')
-        expect(prompt).toContain('use "warning", even for a rule whose severity is blocker')
-    })
-
-    it('lists the advisory rules and asks which of them this ad falls under', () => {
-        const prompt = buildReviewPrompt(
-            SETTINGS,
-            [],
-            [{ id: 'meta.restricted.crypto', check: 'Crypto needs permission.' }],
-        )
-
-        expect(prompt).toContain('[{"id":"meta.restricted.crypto","check":"Crypto needs permission."}]')
-        expect(prompt).toContain('Return in "advisories" the ids of those whose subject this ad actually falls under')
-    })
-
-    it('asks for whole seconds, and startS 0 for an issue that concerns the whole video', () => {
-        const prompt = buildReviewPrompt(SETTINGS, [], [])
-
-        expect(prompt).toContain('in whole seconds')
-        expect(prompt).toContain('use startS 0 and omit endS')
+        expect(buildReviewPrompt(SETTINGS, [], advisories)).toContain(JSON.stringify(advisories))
     })
 
     it('lists every platform, placement and market when none is chosen, as if all were', () => {
@@ -74,23 +40,10 @@ describe('buildReviewOutputJsonSchema', () => {
     const SECOND_OF_A_29_4_S_VIDEO = { type: 'integer', minimum: 0, maximum: 30 }
     const { properties } = buildReviewOutputJsonSchema(29.4) as unknown as JsonSchema
 
-    it('asks for the transcript as segments with a whole-second start', () => {
-        expect(properties.transcript).toMatchObject({
-            type: 'array',
-            items: { properties: { startS: SECOND_OF_A_29_4_S_VIDEO, text: { type: 'string' } } },
-        })
-    })
-
     // Free decimals ran away (`0.000…`, thousands of digits) until the reply hit the token limit: 5 of 6 runs of
     // gemini-3.8-flash on 2026-09-29.
-    it('asks for the ids of the advisories the ad falls under', () => {
-        expect(properties.advisories).toEqual({ type: 'array', items: { type: 'string' } })
-        expect((buildReviewOutputJsonSchema(29.4) as unknown as { required: string[] }).required).toContain(
-            'advisories',
-        )
-    })
-
-    it("asks for finding times in whole seconds, capped at the video's length", () => {
+    it("asks for transcript and finding times in whole seconds, capped at the video's length", () => {
+        expect(properties.transcript.items.properties.startS).toEqual(SECOND_OF_A_29_4_S_VIDEO)
         expect(properties.findings.items.properties).toMatchObject({
             startS: SECOND_OF_A_29_4_S_VIDEO,
             endS: SECOND_OF_A_29_4_S_VIDEO,

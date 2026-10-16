@@ -1,11 +1,10 @@
 import type { Db } from 'mongodb'
 import { RATE_LIMIT_COLLECTION, RATE_LIMIT_MODEL, RateLimitSchema } from '../database/rate-limit.doc'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
-import { PresetLimits } from './preset-limits'
+import { PresetLimits, READS_PER_USER, WRITES_PER_USER } from './preset-limits'
 
 const SECRET = 'preset-limits-test-secret'
 const START = new Date('2026-10-14T10:00:00Z').getTime()
-const MINUTE_MS = 60 * 1000
 
 describe('the preset limits', () => {
     let mongo: MemoryMongo
@@ -40,27 +39,27 @@ describe('the preset limits', () => {
         await mongo.stop()
     })
 
-    it('allows 60 writes a minute per user, then refuses until the next minute', async () => {
-        const results = await allowMany('user-1', true, 61)
+    it("allows a user's writes up to the cap, then refuses until the window ends", async () => {
+        const results = await allowMany('user-1', true, WRITES_PER_USER.max + 1)
 
-        expect(results.filter(Boolean)).toHaveLength(60)
+        expect(results.filter(Boolean)).toHaveLength(WRITES_PER_USER.max)
         expect(results.at(-1)).toBe(false)
 
-        clock = START + MINUTE_MS
+        clock = START + WRITES_PER_USER.window * 1000
 
         expect(await limits().allow('user-1', true)).toBe(true)
     })
 
-    it('counts reads apart from writes, with a higher cap', async () => {
-        await allowMany('user-1', true, 61)
+    it('counts reads apart from writes, under their own cap', async () => {
+        await allowMany('user-1', true, WRITES_PER_USER.max + 1)
 
-        const reads = await allowMany('user-1', false, 301)
+        const reads = await allowMany('user-1', false, READS_PER_USER.max + 1)
 
-        expect(reads.filter(Boolean)).toHaveLength(300)
+        expect(reads.filter(Boolean)).toHaveLength(READS_PER_USER.max)
     })
 
     it('counts each user apart', async () => {
-        await allowMany('user-1', true, 61)
+        await allowMany('user-1', true, WRITES_PER_USER.max + 1)
 
         expect(await limits().allow('user-2', true)).toBe(true)
     })

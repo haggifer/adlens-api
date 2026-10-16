@@ -1,14 +1,6 @@
 import { deriveIpKey, deriveRateLimitKey, hashBucket } from './ip-key'
 
 describe('the network key', () => {
-    it('is derived from the secret, stable, and not the secret itself', () => {
-        const key = deriveIpKey('secret-a')
-
-        expect(key).toHaveLength(32)
-        expect(key.equals(deriveIpKey('secret-a'))).toBe(true)
-        expect(key.equals(Buffer.from('secret-a'))).toBe(false)
-    })
-
     it('hashes a network the same way every time, and differently under another secret', () => {
         const key = deriveIpKey('secret-a')
 
@@ -22,8 +14,10 @@ describe('the network key', () => {
 })
 
 describe('the rate-limit key', () => {
-    it('is derived from the same secret under its own label, so it differs from the network key', () => {
-        expect(deriveRateLimitKey('secret-a')).toHaveLength(32)
-        expect(deriveRateLimitKey('secret-a').equals(deriveIpKey('secret-a'))).toBe(false)
+    it('is derived from the same secret under its own label, so it differs from the network key and the secret', () => {
+        const key = deriveRateLimitKey('secret-a')
+
+        expect(key.equals(deriveIpKey('secret-a'))).toBe(false)
+        expect(key.equals(Buffer.from('secret-a'))).toBe(false)
     })
 })

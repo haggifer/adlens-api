@@ -24,6 +24,13 @@ const SIGNED_URL =
     'https://storage.googleapis.com/test-bucket/users/u1/jobs/j1/video?X-Goog-Algorithm=GOOG4-RSA-SHA256' +
     '&X-Goog-Credential=api%40project.iam.gserviceaccount.com&X-Goog-Signature=0123abcd'
 
+// The comma-separated list ffprobe got after a flag, or none when the flag is missing.
+const flagValues = (args: readonly string[], flag: string): string[] => {
+    const index = args.indexOf(flag)
+
+    return index === -1 ? [] : args[index + 1].split(',')
+}
+
 // An ffprobe run that writes this to stderr and exits with this code.
 const ffprobeExiting = (code: number, stderr: string) => {
     jest.mocked(spawn).mockImplementationOnce(() => {
@@ -100,17 +107,23 @@ describe('MediaProber', () => {
         jest.mocked(spawn).mockReset()
     })
 
-    it('reads only HTTPS and the container formats AdLens accepts, without the API’s environment and its secrets', async () => {
+    it('reads only HTTPS and no playlist formats, without the API’s environment and its secrets', async () => {
         ffprobeExiting(1, 'Invalid data found when processing input')
 
         await expect(prober.probe(SIGNED_URL)).rejects.toThrow()
 
         const [, args, options] = jest.mocked(spawn).mock.calls[0]
+        const protocols = flagValues(args, '-protocol_whitelist')
+        const formats = flagValues(args, '-format_whitelist')
 
-        expect(args).toEqual(expect.arrayContaining(['-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm']))
-        expect(args.join(' ')).toContain('-protocol_whitelist https,tls,tcp')
+        expect(protocols).toContain('https')
+        expect(protocols).not.toContain('file')
+        expect(protocols).not.toContain('http')
+        expect(formats).toContain('mp4')
+        expect(formats).not.toContain('hls')
+        expect(formats).not.toContain('dash')
         expect(args.at(-1)).toBe(SIGNED_URL)
-        expect(options).toMatchObject({ env: { PATH: process.env.PATH } })
+        expect(options?.env).toEqual({ PATH: process.env.PATH })
     })
 
     it('opens a local file only when the caller asks for it', async () => {

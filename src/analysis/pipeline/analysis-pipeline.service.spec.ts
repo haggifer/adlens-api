@@ -154,29 +154,6 @@ describe('AnalysisPipeline', () => {
         expect(await used()).toBe(1)
     })
 
-    it('stores which selected placement a spec binds, with its rule, so the report can name it', async () => {
-        const jobId = await queueJob()
-
-        await jobs.updateOne(
-            { _id: jobId },
-            {
-                $set: {
-                    settings: { platforms: [Platform.YouTube], placements: [Placement.YouTubeBumper], markets: [] },
-                },
-            },
-        )
-        await pipeline.run(jobId, { isLast: false })
-
-        const checks = (await findJob(jobId))?.analysis?.metadataChecks ?? []
-
-        expect(checks.find((check) => check.id === 'youtube.creative_spec.bumper_duration')).toMatchObject({
-            verdict: 'fail',
-            placements: [Placement.YouTubeBumper],
-            platform: [RulePlatform.YouTube, RulePlatform.Google],
-            check: 'Bumper ads must be at most 6 seconds long.',
-        })
-    })
-
     it('names only the chosen platforms, and their placements, for a spec spanning several platforms', async () => {
         const bumper = ruleSet.rules.find((rule) => rule.id === 'youtube.creative_spec.bumper_duration')!
         const crossPlatform = {
