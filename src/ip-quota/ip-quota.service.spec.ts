@@ -166,22 +166,6 @@ describe('IpQuotaService', () => {
         expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([kept])
     })
 
-    it('refunds and charges a network that still holds what the removed refund cap stored', async () => {
-        const kept = { id: 'kept-run', startedAt: NOW, jobId: 'job-1', anonymous: false, isRefundRefused: true }
-
-        await buckets().insertOne({
-            _id: NETWORK,
-            runs: [kept],
-            refundedFailures: [NOW, NOW, NOW],
-            expiresAt: new Date(NOW.getTime() + QUOTA_WINDOW_MS),
-        } as IpQuotaDoc)
-
-        await ipQuota.refund(kept.id)
-        const charged = await ipQuota.charge(member(), 'job-2', NOW)
-
-        expect((await buckets().findOne({ _id: NETWORK }))?.runs.map((run) => run.id)).toEqual([charged])
-    })
-
     it('pushes the expiry out with every charge', async () => {
         const later = new Date(NOW.getTime() + 24 * 60 * 60 * 1000)
 

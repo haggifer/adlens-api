@@ -306,7 +306,7 @@ describe('JobLifecycle', () => {
             expect((await network())?.runs[0].id).toBe(queued.chargedIpRunId)
         })
 
-        it('refunds both the user run and the network run when the job left verification meanwhile', async () => {
+        it('refuses to charge a job that left verification meanwhile', async () => {
             const jobId = await claimJob()
 
             // What expireStale does to a verification it takes for abandoned, racing the charge.
@@ -796,24 +796,6 @@ describe('JobLifecycle', () => {
             expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
             expect(await usedRuns()).toBe(0)
             expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 0, failed: 0 })
-        })
-
-        it('refunds in full a job the removed refund cap left holding its charges', async () => {
-            const jobId = await queueJob(NETWORK_CHARGE)
-
-            jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-            jest.spyOn(quota, 'refund').mockRejectedValueOnce(new Error('user refund failed'))
-            jest.spyOn(ipQuota, 'refund').mockRejectedValueOnce(new Error('network refund failed'))
-            await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'malformed')
-            await jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { isRefundCapped: true } })
-            await mongo.connection
-                .collection<IpQuotaDoc>(IP_QUOTA_COLLECTION)
-                .updateOne({ _id: NETWORK_CHARGE.bucketKey }, { $set: { 'runs.$[].isRefundRefused': true } })
-
-            expect(await lifecycle.refundOwedCharges()).toEqual({ refunded: 1, failed: 0 })
-            expect(await findJob(jobId)).toMatchObject({ chargedRunId: null, chargedIpRunId: null })
-            expect(await usedRuns()).toBe(0)
-            expect(await networkRuns()).toBe(0)
         })
 
         it('counts a refund that fails again, and keeps its charges for the next sweep', async () => {

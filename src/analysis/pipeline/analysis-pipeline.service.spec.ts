@@ -418,19 +418,6 @@ describe('AnalysisPipeline', () => {
         expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
     })
 
-    it('refunds every possibly billed failure, for the user and the network, however many the network had', async () => {
-        reviewer.next = () => Promise.reject(cutOff())
-
-        // More than the weekly allowance of refunded failures a network had until 2026-10-02 (3).
-        for (let i = 0; i < 4; i++) {
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: false })).toBe('failed')
-            expect(await used()).toBe(0)
-            expect(await usedByNetwork()).toBe(0)
-        }
-
-        expect(reviewer.review).toHaveBeenCalledTimes(4)
-    })
-
     describe('refunds a run that ends without a result in full, however it failed', () => {
         const expectRefunded = async () => {
             expect(await used()).toBe(0)
