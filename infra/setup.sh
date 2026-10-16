@@ -23,7 +23,7 @@
 #   GOOGLE_CLIENT_SECRET=<the Google OAuth client secret>
 #   GITHUB_CLIENT_SECRET=<the GitHub OAuth app client secret>
 #   TURNSTILE_SECRET_KEY=<the Turnstile widget's secret key, Cloudflare dashboard>
-#   ABLY_API_KEY=<an Ably API key with publish and subscribe on the AdLens app, Ably dashboard>
+#   ABLY_API_KEY=<an Ably API key whose capability is publish and subscribe on user:* only, Ably dashboard>
 # It is not .env.local: that file holds local values (e.g. Turnstile's always-pass test key) that must never reach
 # production. The first run after upgrading from one-secret-per-key needs no file for the keys the old individual
 # secrets of the same names already held: it folds those in.

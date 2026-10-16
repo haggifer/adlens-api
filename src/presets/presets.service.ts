@@ -273,24 +273,7 @@ export class PresetsService {
     }
 
     async setDefault(userId: string, presetId: string | null): Promise<void> {
-        const now = new Date()
-
-        if (presetId === null) {
-            await this.collection.updateOne({ _id: userId }, { $set: { defaultPresetId: null, updatedAt: now } })
-            await this.live.publishPresets(userId)
-
-            return
-        }
-
-        const updated = await this.collection.updateOne(
-            { _id: userId, 'presets.id': presetId },
-            { $set: { defaultPresetId: presetId, updatedAt: now } },
-        )
-
-        if (!updated.matchedCount) {
-            throw presetNotFound()
-        }
-
+        await this.writeDefault(userId, presetId)
         await this.live.publishPresets(userId)
     }
 
@@ -460,9 +443,28 @@ export class PresetsService {
         return this.applyDefault(userId, stored.id, isDefault)
     }
 
+    private async writeDefault(userId: string, presetId: string | null): Promise<void> {
+        const now = new Date()
+
+        if (presetId === null) {
+            await this.collection.updateOne({ _id: userId }, { $set: { defaultPresetId: null, updatedAt: now } })
+
+            return
+        }
+
+        const updated = await this.collection.updateOne(
+            { _id: userId, 'presets.id': presetId },
+            { $set: { defaultPresetId: presetId, updatedAt: now } },
+        )
+
+        if (!updated.matchedCount) {
+            throw presetNotFound()
+        }
+    }
+
     private async applyDefault(userId: string, presetId: string, isDefault?: boolean): Promise<Preset> {
         if (isDefault) {
-            await this.setDefault(userId, presetId)
+            await this.writeDefault(userId, presetId)
         }
 
         if (isDefault === false) {

@@ -4,9 +4,10 @@ import { Rest } from 'ably'
 import type { Env } from '../config/env'
 import { AblyLivePublisher, LivePublisher, OffLivePublisher } from './live-publisher'
 
-// Every publish waits for Ably before the write's request answers (Cloud Run throttles the CPU once it has), so a slow
-// Ably may hold a write up to this long, retries to its fallback hosts included.
-const PUBLISH_TIMEOUT_MS = 3 * 1000
+// Every publish waits for Ably before the write's request answers (Cloud Run throttles the CPU once it has). Ably checks
+// the retry budget only after an attempt fails, so an unreachable Ably holds a write for up to twice this (one attempt,
+// one fallback host); LivePublisher then pauses publishing.
+const PUBLISH_TIMEOUT_MS = 2 * 1000
 
 const createLivePublisher = (config: ConfigService<Env, true>): LivePublisher => {
     const key = config.get('ABLY_API_KEY', { infer: true })

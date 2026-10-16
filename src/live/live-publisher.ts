@@ -6,6 +6,10 @@ import { DEMO_OWNER, type StoredJob } from '../database/job.doc'
 
 type JobOwner = Pick<StoredJob, '_id' | 'userId'>
 
+// After a failed publish, publishing waits this long: while Ably is unreachable each publish would hold its write for
+// the whole timeout, and a run's start alone publishes four times.
+const PAUSE_AFTER_FAILURE_MS = 60 * 1000
+
 // Tells a user's open tabs that their presets or one of their jobs changed, right after the write that changed them.
 // A live update is a convenience: a failed publish is logged and never fails the write, whose tabs catch up on their
 // next read.
@@ -43,6 +47,8 @@ export abstract class LivePublisher {
 }
 
 export class AblyLivePublisher extends LivePublisher {
+    private pausedUntil = 0
+
     constructor(private readonly client: Rest) {
         super()
     }
@@ -53,7 +59,17 @@ export class AblyLivePublisher extends LivePublisher {
     }
 
     protected async send(channel: string, event: LiveEvent, data?: LiveJobEvent): Promise<void> {
-        await this.client.channels.get(channel).publish(event, data)
+        if (Date.now() < this.pausedUntil) {
+            return
+        }
+
+        try {
+            await this.client.channels.get(channel).publish(event, data)
+        } catch (err) {
+            this.pausedUntil = Date.now() + PAUSE_AFTER_FAILURE_MS
+
+            throw err
+        }
     }
 }
 

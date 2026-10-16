@@ -54,10 +54,12 @@ the API contract live in their own repos.
   go through the same logger. Locally the default is Nest's readable text.
 - **Live updates** ([`LivePublisher`](src/live/live-publisher.ts)): the code that writes a user's presets or one of
   their jobs tells that user's open tabs right after the write, through [Ably](https://ably.com) on the channel
-  `user:<id>`: `presets` after any preset write, `job` with the job's id after any change a tab shows (a status
-  transition in `JobLifecycle`, or the counted preset). The message carries no data; a tab refetches through the
-  API. The API, the worker and the cleanup all publish, awaited with a 3-second limit (Cloud Run throttles the CPU
-  once a response is sent), and a failed publish is logged, never failing the write. A tab gets a token from
+  `user:<id>`: `presets` after any preset write, `job` with the job's id after an update a tab shows (a status
+  transition in `JobLifecycle`, or the counted preset). Only updates are announced: a job created, deleted or moved
+  to an account at sign-in shows on the tab's next read. The message carries no data; a tab refetches through the
+  API. The API, the worker and the cleanup all publish, awaited with a 2-second timeout (Cloud Run throttles the CPU
+  once a response is sent), and a failed publish is logged, never failing the write, and pauses publishing for a
+  minute. A tab gets a token from
   `GET /v1/live/token` that may only subscribe to its own channel, signed with `ABLY_API_KEY` without a call to Ably.
   Ably holds the browsers' connections, so no Cloud Run instance stays up for an open tab. Without `ABLY_API_KEY`
   nothing is published, the token is `null`, and tabs rely on their reads.

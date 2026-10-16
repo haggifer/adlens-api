@@ -54,6 +54,24 @@ describe('AblyLivePublisher', () => {
         expect(publish).not.toHaveBeenCalled()
     })
 
+    it('publishes nothing for a minute after a failed publish, so an unreachable Ably slows writes only once', async () => {
+        const now = jest.spyOn(Date, 'now').mockReturnValue(0)
+
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+        publish.mockRejectedValueOnce(new Error('Ably unavailable'))
+
+        await live.publishPresets(USER)
+        now.mockReturnValue(59_999)
+        await live.publishPresets(USER)
+
+        expect(publish).toHaveBeenCalledTimes(1)
+
+        now.mockReturnValue(60_000)
+        await live.publishPresets(USER)
+
+        expect(publish).toHaveBeenCalledTimes(2)
+    })
+
     it('logs a failed publish instead of failing the write', async () => {
         const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 

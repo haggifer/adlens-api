@@ -415,6 +415,15 @@ describe('PresetsService', () => {
             expect(live.events).toEqual(Array.from({ length: 6 }, () => presetsEvent()))
         })
 
+        it('tells them once about an overwrite that also makes the preset the default', async () => {
+            await create('Meta US')
+            live.clear()
+
+            await presets.create(userId, input('Meta US', { overwrite: true, isDefault: true }))
+
+            expect(live.events).toEqual([presetsEvent()])
+        })
+
         it('tells nobody about a refused write or a run its preset no longer matches', async () => {
             const preset = await create('Meta US')
 
