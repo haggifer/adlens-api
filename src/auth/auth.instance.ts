@@ -47,10 +47,12 @@ const VERIFICATION_TOKEN_TTL_S = 24 * 60 * 60
 
 // Bounds how many anonymous users one client can create by calling the API directly; the web only signs in
 // anonymously right before a first analysis.
-const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
+/** @public */
+export const ANONYMOUS_SIGN_IN_LIMIT = { window: 60 * 60, max: 10 }
 
 // Emails of one kind to one address per hour, whoever asks for them.
-const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 5 }
+/** @public */
+export const MAIL_PER_ADDRESS_LIMIT = { window: 60 * 60, max: 5 }
 
 // Better Auth merges a create hook's data into the row, so the token fields are overwritten rather than omitted.
 const NO_PROVIDER_TOKENS = {

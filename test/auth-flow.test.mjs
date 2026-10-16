@@ -248,13 +248,15 @@ test('confirmation emails to one address stop at 5 an hour, however often they a
 
     assert.equal(signedUp.status, 200)
 
-    for (let i = 0; i < 6; i++) {
+    const { max } = authLimits().MAIL_PER_ADDRESS_LIMIT
+
+    for (let i = 0; i <= max; i++) {
         const resent = await post('/api/auth/send-verification-email', { email }, signedUp.cookie)
 
         assert.equal(resent.status, 200)
     }
 
-    assert.equal(outbox.filter((message) => message.to === email).length, 5)
+    assert.equal(outbox.filter((message) => message.to === email).length, max)
 })
 
 test('a confirmation link opened without a session asks to sign in, and sets no cookie', async () => {
@@ -1036,15 +1038,17 @@ test('rate limits store only a keyed hash, never the client address', async () =
     assert.equal(legacyRows.length, 0)
 })
 
-const ANONYMOUS_SIGN_INS_PER_HOUR = 10
-const HOUR_S = 60 * 60
+// Read lazily: dist is built before the suite runs, and its config needs the env the setup sets.
+const authLimits = () => require('../dist/auth/auth.instance')
+const authBodyLimit = () => require('../dist/auth/auth-route').AUTH_BODY_LIMIT_BYTES
 
 test('anonymous sign-in is limited to 10 an hour per client', async () => {
+    const { max, window } = authLimits().ANONYMOUS_SIGN_IN_LIMIT
     const { statuses, retryAfter } = await withRateLimits(async () => {
         const seen = []
         let refused
 
-        for (let i = 0; i <= ANONYMOUS_SIGN_INS_PER_HOUR; i++) {
+        for (let i = 0; i <= max; i++) {
             refused = await signInAnonymouslyFrom('203.0.113.60')
             seen.push(refused.status)
         }
@@ -1054,14 +1058,15 @@ test('anonymous sign-in is limited to 10 an hour per client', async () => {
         return { statuses: [...seen, otherClient.status], retryAfter: Number(refused.headers.get('x-retry-after')) }
     })
 
-    assert.deepEqual(statuses, [...Array(ANONYMOUS_SIGN_INS_PER_HOUR).fill(200), 429, 200])
+    assert.deepEqual(statuses, [...Array(max).fill(200), 429, 200])
     // An hour, not Better Auth's 10-second window for sign-in paths.
-    assert.ok(retryAfter > HOUR_S - 60 && retryAfter <= HOUR_S, `retry after ${retryAfter}s`)
+    assert.ok(retryAfter > window - 60 && retryAfter <= window, `retry after ${retryAfter}s`)
 })
 
 test('rate limits key a multi-entry X-Forwarded-For on its rightmost entry, the one our front end wrote', async () => {
+    const { max } = authLimits().ANONYMOUS_SIGN_IN_LIMIT
     const statuses = await withRateLimits(async () => {
-        for (let i = 0; i < ANONYMOUS_SIGN_INS_PER_HOUR; i++) {
+        for (let i = 0; i < max; i++) {
             await signInAnonymouslyFrom(`198.51.100.${i}, 203.0.113.62`)
         }
 
@@ -1075,10 +1080,11 @@ test('rate limits key a multi-entry X-Forwarded-For on its rightmost entry, the 
 })
 
 const CONNECTION_CUT_CODES = ['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']
-const OVERSIZED_BODY = JSON.stringify({ email: 'big@example.com', password: 'big-password', name: 'x'.repeat(70_000) })
+const oversizedBody = () =>
+    JSON.stringify({ email: 'big@example.com', password: 'big-password', name: 'x'.repeat(authBodyLimit() + 1) })
 
 test('an auth request whose declared body is over 64 KB is refused before it is read', async () => {
-    const res = await post('/api/auth/sign-up/email', JSON.parse(OVERSIZED_BODY))
+    const res = await post('/api/auth/sign-up/email', JSON.parse(oversizedBody()))
     const body = await res.json()
 
     assert.equal(res.status, 413)
@@ -1088,7 +1094,7 @@ test('an auth request whose declared body is over 64 KB is refused before it is 
 
 test('an auth request whose chunked body grows past 64 KB is cut off', async () => {
     const CHUNK_BYTES = 16_000
-    const body = Buffer.from(OVERSIZED_BODY)
+    const body = Buffer.from(oversizedBody())
     let offset = 0
     // A valid sign-up, so only the cut-off keeps the user from being created.
     const stream = new ReadableStream({

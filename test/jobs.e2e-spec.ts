@@ -26,6 +26,7 @@ import { AuthService } from '../src/auth/auth.service'
 import { ChallengeVerifier } from '../src/challenge/challenge-verifier'
 import { ApiExceptionFilter } from '../src/common/api-exception.filter'
 import { UserAccess } from '../src/common/user-access'
+import { DRAFT_TTL_MS } from '../src/contact/contact.service'
 import { CONTACT_DRAFT_MODEL, type ContactDraftDoc } from '../src/database/contact-draft.doc'
 import { DEMO_OWNER, JOB_MODEL, type JobDoc, type StoredJob } from '../src/database/job.doc'
 import { RATE_LIMIT_COLLECTION } from '../src/database/rate-limit.doc'
@@ -35,6 +36,7 @@ import { USER_COLLECTION } from '../src/database/user.doc'
 import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
 import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
 import { JobLifecycle } from '../src/jobs/job-lifecycle.service'
+import { UPLOAD_URL_MARGIN_MS } from '../src/jobs/jobs.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
 import { LivePublisher } from '../src/live/live-publisher'
 import { Mailer, type MailMessage } from '../src/mail/mailer'
@@ -640,8 +642,6 @@ describe('Jobs API (e2e)', () => {
         })
 
         describe('while its upload URL may still work', () => {
-            // An upload that started just before its URL expired may still be arriving for an hour after.
-            const UPLOAD_MARGIN_MS = 60 * 60 * 1000
             let tombstones: Model<UploadTombstoneDoc>
 
             const tombstonesFor = (jobId: string) =>
@@ -660,7 +660,7 @@ describe('Jobs API (e2e)', () => {
                 const [tombstone] = await tombstonesFor(jobId)
 
                 expect(tombstone.deleteAfter.getTime()).toBeGreaterThanOrEqual(
-                    createdAt + SIGNED_URL_TTL_MS + UPLOAD_MARGIN_MS,
+                    createdAt + SIGNED_URL_TTL_MS + UPLOAD_URL_MARGIN_MS,
                 )
                 await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(DELETER)).expect(404)
             })
@@ -903,8 +903,8 @@ describe('Jobs API (e2e)', () => {
                     { ...JPEG, path: `contact/${res.body.draftId}/1.jpg` },
                 ])
                 expect(draft?.usedAt).toBeNull()
-                expect(draft?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 59 * 60 * 1000)
-                expect(draft?.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 60 * 60 * 1000)
+                expect(draft?.expiresAt.getTime()).toBeGreaterThan(Date.now() + DRAFT_TTL_MS - 60 * 1000)
+                expect(draft?.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + DRAFT_TTL_MS)
             })
 
             it('refuses uploads whose Turnstile check fails', async () => {

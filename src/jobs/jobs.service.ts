@@ -35,7 +35,7 @@ export type ListJobsQuery = z.output<typeof listJobsQuerySchema>
 
 // The upload URL is signed just after the job is created, and an upload that started before it expired may still be
 // arriving after it.
-const UPLOAD_URL_MARGIN_MS = 60 * 60 * 1000
+export const UPLOAD_URL_MARGIN_MS = 60 * 60 * 1000
 
 const inProgress = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobInProgress, 'The analysis is still running')

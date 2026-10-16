@@ -25,7 +25,7 @@ import { ContactSenderReader } from './contact-sender'
 import { ContactLimits } from './contact-limits'
 
 // Long enough to upload five images on a slow connection and finish writing; the signed URLs expire sooner.
-const DRAFT_TTL_MS = 60 * 60 * 1000
+export const DRAFT_TTL_MS = 60 * 60 * 1000
 
 const unavailable = (message: string) =>
     new ApiException(HttpStatus.SERVICE_UNAVAILABLE, RequestErrorCode.Unavailable, message)

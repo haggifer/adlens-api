@@ -9,7 +9,7 @@ type BodyRequest = IncomingMessage & { body?: unknown }
 
 // Better Auth's request bodies are a few short fields. better-call reads them with no limit of its own: only the
 // declared content-length bounds a body, and a chunked one has none at all.
-const AUTH_BODY_LIMIT_BYTES = 64 * 1024
+export const AUTH_BODY_LIMIT_BYTES = 64 * 1024
 
 const TOO_LARGE: ApiError = {
     statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
