@@ -113,10 +113,14 @@ describe('Presets API (e2e)', () => {
         expect(live.events).toEqual([{ channel: getLiveChannel(owner), event: LiveEvent.Presets }])
     })
 
-    it("answers a live token for the session user's own channel only", async () => {
-        const res = await request(app.getHttpServer()).get('/v1/live/token').set(as(owner)).expect(200)
+    it('answers the live token request made for the session user', async () => {
+        const createTokenRequest = jest.spyOn(live, 'createTokenRequest')
 
-        expect(JSON.parse(res.body.tokenRequest.capability)).toEqual({ [getLiveChannel(owner)]: ['subscribe'] })
+        const res = await request(app.getHttpServer()).get('/v1/live/token').set(as(owner)).expect(200)
+        const tokenRequest = await createTokenRequest.mock.results[0].value
+
+        expect(createTokenRequest.mock.calls).toEqual([[owner]])
+        expect(res.body.tokenRequest).toEqual(tokenRequest)
     })
 
     it('requires a session for a live token', async () => {

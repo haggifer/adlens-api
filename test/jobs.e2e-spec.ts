@@ -61,6 +61,12 @@ describe('Jobs API (e2e)', () => {
     const dispatch = jest.fn(async () => 'executions/exec-1')
     const live = new RecordingLivePublisher()
     const deleteObject = jest.fn(async (_path: string) => undefined)
+    const createUploadTarget = jest.fn(async (_path: string, contentType: string, _size: number) => ({
+        url: 'https://storage.googleapis.com/signed-upload',
+        headers: { 'Content-Type': contentType },
+    }))
+    const readUrl = { url: 'https://storage.googleapis.com/signed-read', expiresAt: new Date() }
+    const createFileReadUrl = jest.fn(async (_file: { bucket: string; path: string }) => readUrl)
     // The Contact form's uploaded images, by path; an Error: storage can't be reached.
     const contactObjects = new Map<string, ObjectContent | Error>()
     const sendMail = jest.fn(async (_message: MailMessage) => undefined)
@@ -87,18 +93,9 @@ describe('Jobs API (e2e)', () => {
             .overrideProvider(StorageService)
             .useValue({
                 bucketName: 'test-bucket',
-                createUploadTarget: async (_path: string, contentType: string, size: number) => ({
-                    url: 'https://storage.googleapis.com/signed-upload',
-                    headers: { 'Content-Type': contentType, 'x-goog-content-length-range': `${size},${size}` },
-                }),
-                createReadUrl: async () => ({
-                    url: 'https://storage.googleapis.com/signed-read',
-                    expiresAt: new Date(),
-                }),
-                createFileReadUrl: async () => ({
-                    url: 'https://storage.googleapis.com/signed-read',
-                    expiresAt: new Date(),
-                }),
+                createUploadTarget,
+                createReadUrl: async () => readUrl,
+                createFileReadUrl,
                 getObjectInfo: async () => {
                     if (storedObject instanceof Error) {
                         throw storedObject
@@ -162,6 +159,8 @@ describe('Jobs API (e2e)', () => {
         probeFailure = null
         dispatch.mockClear()
         deleteObject.mockClear()
+        createUploadTarget.mockClear()
+        createFileReadUrl.mockClear()
         sendMail.mockClear()
         verifyChallenge.mockClear()
     })
@@ -223,16 +222,20 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.errorCode).toBe(RequestErrorCode.ValidationFailed)
     })
 
-    it('creates a pending job with a signed upload bound to the declared size', async () => {
+    it('creates a pending job with an upload signed for its path and the declared type and size', async () => {
         const res = await request(app.getHttpServer())
             .post('/v1/jobs')
             .set(as(OWNER))
             .send({ settings: SETTINGS, file: FILE })
             .expect(201)
+        const signed = await createUploadTarget.mock.results[0].value
 
         expect(res.body.job).toMatchObject({ status: JobStatus.Pending, file: FILE })
         expect(res.body.job).not.toHaveProperty('userId')
-        expect(res.body.upload.headers['x-goog-content-length-range']).toBe(`${FILE.size},${FILE.size}`)
+        expect(createUploadTarget.mock.calls).toEqual([
+            [`users/${OWNER}/jobs/${res.body.job.id}/video`, FILE.contentType, FILE.size],
+        ])
+        expect(res.body.upload).toEqual(signed)
     })
 
     it("hides other users' jobs", async () => {
@@ -713,14 +716,17 @@ describe('Jobs API (e2e)', () => {
             jobs = app.get(getModelToken(JOB_MODEL))
         })
 
-        it('signs a read URL for a verified upload', async () => {
+        it("signs a read URL for a verified upload's stored file", async () => {
             const jobId = await createJob()
 
             await jobs.updateOne({ _id: jobId }, { $set: { media: { ...MEDIA, contentType: FILE.contentType } } })
 
             const res = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}/video`).set(as(OWNER)).expect(200)
 
-            expect(res.body.url).toBe('https://storage.googleapis.com/signed-read')
+            expect(createFileReadUrl).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'test-bucket', path: `users/${OWNER}/jobs/${jobId}/video` }),
+            )
+            expect(res.body).toEqual({ url: readUrl.url, expiresAt: readUrl.expiresAt.toISOString() })
         })
 
         it('answers not found once the cleanup deleted the video', async () => {
@@ -921,16 +927,13 @@ describe('Jobs API (e2e)', () => {
 
             it('answers a draft and one signed upload per image, in order, under the draft folder', async () => {
                 const res = await createUploads({ files: [PNG, JPEG], challengeToken: 'pass' }).expect(201)
-
-                expect(res.body.uploads).toHaveLength(2)
-                expect(res.body.uploads[0].headers).toMatchObject({
-                    'Content-Type': PNG.contentType,
-                    'x-goog-content-length-range': `${PNG.size},${PNG.size}`,
-                })
-                expect(res.body.uploads[1].headers).toMatchObject({ 'Content-Type': JPEG.contentType })
-
                 const draft = await contactDrafts.findById(res.body.draftId).lean()
 
+                expect(createUploadTarget.mock.calls).toEqual([
+                    [`contact/${res.body.draftId}/0.png`, PNG.contentType, PNG.size],
+                    [`contact/${res.body.draftId}/1.jpg`, JPEG.contentType, JPEG.size],
+                ])
+                expect(res.body.uploads).toHaveLength(2)
                 expect(draft?.files).toEqual([
                     { ...PNG, path: `contact/${res.body.draftId}/0.png` },
                     { ...JPEG, path: `contact/${res.body.draftId}/1.jpg` },
