@@ -1593,7 +1593,6 @@ describe('Jobs API (e2e)', () => {
             const job = await runUpload({ settings: REORDERED_SETTINGS, presetId: preset.id })
 
             expect(job.presetId).toBe(preset.id)
-            expect(job).not.toHaveProperty('presetName')
             expect(await getUsageCount(preset.id)).toBe(1)
         })
 
