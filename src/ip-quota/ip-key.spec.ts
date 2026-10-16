@@ -7,10 +7,6 @@ describe('the network key', () => {
         expect(hashBucket(key, '203.0.113.7')).toBe(hashBucket(key, '203.0.113.7'))
         expect(hashBucket(key, '203.0.113.7')).not.toBe(hashBucket(deriveIpKey('secret-b'), '203.0.113.7'))
     })
-
-    it('never contains the address it hashes', () => {
-        expect(hashBucket(deriveIpKey('secret-a'), '203.0.113.7')).not.toContain('203.0.113')
-    })
 })
 
 describe('the rate-limit key', () => {

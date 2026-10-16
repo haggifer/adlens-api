@@ -16,11 +16,8 @@ describe('readSecretsFile', () => {
         rmSync(dir, { recursive: true, force: true })
     })
 
-    it('gives an empty object for an unset path', () => {
+    it('gives an empty object for an unset or empty path', () => {
         expect(readSecretsFile(undefined)).toEqual({})
-    })
-
-    it('gives an empty object for an empty path', () => {
         expect(readSecretsFile('')).toEqual({})
     })
 

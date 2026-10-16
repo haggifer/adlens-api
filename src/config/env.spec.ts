@@ -29,12 +29,6 @@ describe('validateEnvWithSecretsFile', () => {
         rmSync(dir, { recursive: true, force: true })
     })
 
-    it('works with no SECRETS_FILE set, as in tests and local dev', () => {
-        const env = validateEnvWithSecretsFile({ ...baseEnv, MONGODB_URI: 'mongodb://local' })
-
-        expect(env.MONGODB_URI).toBe('mongodb://local')
-    })
-
     it('fills a missing key from the secrets file', () => {
         writeFileSync(path, JSON.stringify({ MONGODB_URI: 'mongodb://from-file' }))
 

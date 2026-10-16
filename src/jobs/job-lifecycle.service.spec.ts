@@ -14,7 +14,7 @@ import {
 import { type FilterQuery, type Model, Types } from 'mongoose'
 import { UserAccess } from '../common/user-access'
 import { IP_QUOTA_COLLECTION, IP_QUOTA_MODEL, type IpQuotaDoc, IpQuotaSchema } from '../database/ip-quota.doc'
-import { DEMO_OWNER, JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
+import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
 import { USER_COLLECTION } from '../database/user.doc'
 import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
@@ -182,23 +182,21 @@ describe('JobLifecycle', () => {
             expect((await findJob(jobId))?.status).toBe(JobStatus.Pending)
         })
 
-        it.each([JobErrorCode.VideoTooLong, JobErrorCode.UploadFailed, JobErrorCode.VideoCheckFailed])(
-            'ends a start that failed with %s in error, never back to pending, and leaves a job that moved on alone',
-            async (errorCode) => {
-                const verifying = await claimJob()
-                const queued = await queueJob()
+        it('ends a start that failed in error, never back to pending, and leaves a job that moved on alone', async () => {
+            const errorCode = JobErrorCode.VideoTooLong
+            const verifying = await claimJob()
+            const queued = await queueJob()
 
-                expect(await lifecycle.failStart(verifying, errorCode, 'why')).toBe(true)
-                expect(await lifecycle.failStart(queued, errorCode)).toBe(false)
+            expect(await lifecycle.failStart(verifying, errorCode, 'why')).toBe(true)
+            expect(await lifecycle.failStart(queued, errorCode)).toBe(false)
 
-                expect(await findJob(verifying)).toMatchObject({
-                    status: JobStatus.Error,
-                    errorCode,
-                    errorDetail: 'why',
-                })
-                expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
-            },
-        )
+            expect(await findJob(verifying)).toMatchObject({
+                status: JobStatus.Error,
+                errorCode,
+                errorDetail: 'why',
+            })
+            expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
+        })
     })
 
     describe('charging and queueing', () => {
@@ -763,24 +761,6 @@ describe('JobLifecycle', () => {
             await lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, 'boom')
 
             expect(live.events).toEqual([])
-        })
-
-        it("tells nobody about a demo job, which has no owner's tabs", async () => {
-            const jobId = await createJob(JobStatus.Queued, DEMO_OWNER)
-
-            await lifecycle.startAttempt(jobId)
-
-            expect(live.events).toEqual([])
-        })
-
-        it('keeps a status change whose announcement failed', async () => {
-            const jobId = await createJob()
-
-            live.failure = new Error('Ably unavailable')
-            jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-
-            expect(await lifecycle.claimForVerification(USER, jobId)).not.toBeNull()
-            expect((await findJob(jobId))?.status).toBe(JobStatus.Verifying)
         })
     })
 

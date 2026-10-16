@@ -33,19 +33,13 @@ describe('StorageService', () => {
     afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
     describe('createUploadTarget', () => {
-        it('signs a create-only precondition, so the URL can never overwrite an existing object', async () => {
+        it('signs and returns the content type, the exact length and a create-only precondition, so the URL can never overwrite an existing object', async () => {
             const target = await storage.createUploadTarget(PATH, CONTENT_TYPE, SIZE)
             const signedHeaders = new URL(target.url).searchParams.get('X-Goog-SignedHeaders')?.split(';')
 
-            expect(signedHeaders).toEqual(expect.arrayContaining(['x-goog-if-generation-match']))
-            expect(target.headers).toMatchObject({ 'x-goog-if-generation-match': '0' })
-        })
-
-        it('signs and returns the content type and the exact length', async () => {
-            const target = await storage.createUploadTarget(PATH, CONTENT_TYPE, SIZE)
-            const signedHeaders = new URL(target.url).searchParams.get('X-Goog-SignedHeaders')?.split(';')
-
-            expect(signedHeaders).toEqual(expect.arrayContaining(['content-type', 'x-goog-content-length-range']))
+            expect(signedHeaders).toEqual(
+                expect.arrayContaining(['content-type', 'x-goog-content-length-range', 'x-goog-if-generation-match']),
+            )
             expect(target.headers).toEqual({
                 'Content-Type': CONTENT_TYPE,
                 'x-goog-content-length-range': `${SIZE},${SIZE}`,

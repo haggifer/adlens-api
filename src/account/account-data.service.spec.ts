@@ -114,19 +114,11 @@ describe('AccountDataService', () => {
         expect(await presets.list(BYSTANDER)).toHaveLength(1)
     })
 
-    it("deletes a user's presets with their jobs, never another user's", async () => {
-        await savePreset(MEMBER, 'Meta US')
-        await savePreset(BYSTANDER, 'Bystander')
-
-        await accountData.purge(MEMBER)
-
-        expect(await presets.list(MEMBER)).toEqual([])
-        expect(await presets.list(BYSTANDER)).toHaveLength(1)
-    })
-
-    it("deletes adopted uploads outside the account's prefix, never a sample video or another user's data", async () => {
+    it("deletes a user's jobs, presets and adopted uploads outside the account's prefix, never a sample video or another user's data", async () => {
         const bystanderJobId = await createJob(BYSTANDER)
 
+        await savePreset(MEMBER, 'Meta US')
+        await savePreset(BYSTANDER, 'Bystander')
         await createJob(MEMBER, { file: fileAt(`users/${ANONYMOUS}/jobs/adopted/video`) })
         await createJob(MEMBER)
         await createJob(MEMBER, { sampleId: 's1', file: fileAt('samples/running-shoes.mp4') })
@@ -137,6 +129,8 @@ describe('AccountDataService', () => {
         expect(storage.deletePrefix.mock.calls).toEqual([[`users/${MEMBER}/`, new Set()]])
         expect(await jobs.countDocuments({ userId: MEMBER })).toBe(0)
         expect(await jobs.exists({ _id: bystanderJobId })).not.toBeNull()
+        expect(await presets.list(MEMBER)).toEqual([])
+        expect(await presets.list(BYSTANDER)).toHaveLength(1)
     })
 
     // Better Auth only logs a failed delete of a linked anonymous user, so one can outlive its link; its prefix still

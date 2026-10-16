@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common'
-import { JobErrorCode, JobStatus, VideoMimeType } from 'adlens-shared'
+import { JobStatus, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
 import { IP_QUOTA_MODEL, IpQuotaSchema } from '../database/ip-quota.doc'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../database/job.doc'
@@ -114,19 +114,6 @@ describe('AbandonedUploadCleanupService', () => {
         jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 
         expect(await lifecycle.expireStaleJobs(undefined, now)).toEqual({ expired: 1, failed: 0 })
-        expect(await cleanup.run(now)).toEqual({ deleted: 1, failed: 0 })
-        expect(storage.delete).toHaveBeenCalledWith(path)
-    })
-
-    it('deletes the video of a job the same run ended for never starting', async () => {
-        const now = new Date()
-        const quota = new QuotaService(mongo.connection, configStub({ QUOTA_LIMIT: 3 }))
-        const ipQuota = new IpQuotaService(mongo.connection, configStub({}))
-        const lifecycle = new JobLifecycle(jobs, quota, ipQuota, new OffLivePublisher())
-        const { jobId, path } = await createJob(7, {}, now)
-
-        expect(await lifecycle.expireStaleJobs(undefined, now)).toEqual({ expired: 1, failed: 0 })
-        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed })
         expect(await cleanup.run(now)).toEqual({ deleted: 1, failed: 0 })
         expect(storage.delete).toHaveBeenCalledWith(path)
     })

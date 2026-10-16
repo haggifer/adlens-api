@@ -91,18 +91,9 @@ describe('AnonymousCleanupService', () => {
         expect(await exists(active)).toBe(true)
     })
 
-    it('never deletes an account', async () => {
+    it('never deletes an account, confirmed or not, however long it was unused', async () => {
         const member = await insertUser({ email: 'ann@example.com', lastSeenAt: daysAgo(100) })
         const linked = await insertUser({ email: 'bob@example.com', isAnonymous: false, lastSeenAt: daysAgo(100) })
-
-        await cleanup.run(NOW)
-
-        expect(purge).not.toHaveBeenCalled()
-        expect(await exists(member)).toBe(true)
-        expect(await exists(linked)).toBe(true)
-    })
-
-    it('never deletes an unconfirmed account, however long it was unused', async () => {
         const unconfirmed = await insertUser({
             email: 'carol@example.com',
             isAnonymous: false,
@@ -113,6 +104,8 @@ describe('AnonymousCleanupService', () => {
         await cleanup.run(NOW)
 
         expect(purge).not.toHaveBeenCalled()
+        expect(await exists(member)).toBe(true)
+        expect(await exists(linked)).toBe(true)
         expect(await exists(unconfirmed)).toBe(true)
     })
 

@@ -1,5 +1,5 @@
 import { RequestErrorCode } from 'adlens-shared'
-import { UserAccess } from '../common/user-access'
+import { toProvisionalRefusal, UserAccess } from '../common/user-access'
 import { checkIpRules, IpVerdict, toIpRefusal } from './ip-rules'
 
 const LIMITS = { anonymous: 3, soft: 10, hard: 30 }
@@ -30,13 +30,15 @@ describe('checkIpRules', () => {
 })
 
 describe('toIpRefusal', () => {
-    it('asks an anonymous user to sign up, and an unconfirmed account to confirm its email, at the anonymous limit', () => {
-        expect(toIpRefusal(IpVerdict.AnonymousLimit, UserAccess.Anonymous)).toMatchObject({
-            response: { errorCode: RequestErrorCode.SignUpRequired },
-        })
-        expect(toIpRefusal(IpVerdict.AnonymousLimit, UserAccess.Unconfirmed)).toMatchObject({
-            response: { errorCode: RequestErrorCode.EmailConfirmationRequired },
-        })
+    it('answers the anonymous limit with the refusal for that kind of provisional user', () => {
+        for (const access of [UserAccess.Anonymous, UserAccess.Unconfirmed]) {
+            const provisional = toProvisionalRefusal(access)
+
+            expect(toIpRefusal(IpVerdict.AnonymousLimit, access)).toMatchObject({
+                status: provisional.getStatus(),
+                response: provisional.getResponse(),
+            })
+        }
     })
 
     it('answers the network limit and the challenge the same for everyone', () => {

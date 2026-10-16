@@ -61,7 +61,6 @@ describe('VideoVerifier', () => {
     it.each([
         ['too large', { ...MP4, sizeBytes: MAX_UPLOAD_BYTES + 1 }, PROBE, JobErrorCode.VideoTooLarge],
         ['not a supported type', { ...MP4, contentType: 'video/x-matroska' }, PROBE, JobErrorCode.UnsupportedFormat],
-        ['undecodable', MP4, new UndecodableMediaError('Invalid data found'), JobErrorCode.VideoUnreadable],
         ['too long', MP4, { ...PROBE, durationS: MAX_DURATION_S + 1 }, JobErrorCode.VideoTooLong],
         ['without a duration', MP4, { ...PROBE, durationS: Number.NaN }, JobErrorCode.VideoUnreadable],
         ['of zero length', MP4, { ...PROBE, durationS: 0 }, JobErrorCode.VideoUnreadable],

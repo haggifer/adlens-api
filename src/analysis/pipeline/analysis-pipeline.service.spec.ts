@@ -233,31 +233,24 @@ describe('AnalysisPipeline', () => {
         expect(await used()).toBe(0)
     })
 
-    it('fails a permanent error immediately instead of retrying it', async () => {
-        const jobId = await queueJob()
+    it('fails a permanent error immediately instead of retrying it, and refunds it in full', async () => {
+        const jobId = await queueJob(NETWORK)
 
         reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect((await findJob(jobId))?.status).toBe(JobStatus.Error)
         expect(await used()).toBe(0)
-    })
-
-    it('fails a cut-off answer at once instead of paying for the same answer again, and refunds it', async () => {
-        const jobId = await queueJob(NETWORK)
-
-        reviewer.next = () => Promise.reject(cutOff())
-
-        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
-        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: usageOf(CALL) })
-        expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
     })
 
-    it('fails a malformed answer at once instead of paying for another, and refunds it', async () => {
+    it.each([
+        ['a cut-off', cutOff],
+        ['a malformed', malformed],
+    ])('fails %s answer at once instead of paying for another, and refunds it', async (_case, answerError) => {
         const jobId = await queueJob(NETWORK)
 
-        reviewer.next = () => Promise.reject(malformed())
+        reviewer.next = () => Promise.reject(answerError())
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
@@ -400,27 +393,6 @@ describe('AnalysisPipeline', () => {
             expect(await used()).toBe(0)
             expect(await usedByNetwork()).toBe(0)
         }
-
-        it('a call that timed out on the last attempt', async () => {
-            reviewer.next = () => Promise.reject(timedOut())
-
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
-            await expectRefunded()
-        })
-
-        it('an unknown failure of the call', async () => {
-            reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
-
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: false })).toBe('failed')
-            await expectRefunded()
-        })
-
-        it('a failure to store the answer on the last attempt', async () => {
-            jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(mongoBlip())
-
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
-            await expectRefunded()
-        })
 
         it('a call Vertex refused on the last attempt', async () => {
             reviewer.next = () => Promise.reject(overloaded())

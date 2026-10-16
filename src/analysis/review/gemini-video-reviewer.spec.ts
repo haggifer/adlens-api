@@ -84,15 +84,6 @@ describe('GeminiVideoReviewer', () => {
         expect(isRetryable(err)).toBe(false)
     })
 
-    it('leaves a provider error without an answer to a retry', async () => {
-        generateContent.mockRejectedValue(new Error('fetch failed'))
-
-        const err = await reviewError()
-
-        expect(err).not.toBeInstanceOf(ModelAnswerError)
-        expect(isRetryable(err)).toBe(true)
-    })
-
     it('reports an HTTP error status from Vertex as a refused call, retried when the status is transient', async () => {
         generateContent.mockRejectedValue(new ApiError({ message: 'overloaded', status: 503 }))
 
@@ -119,6 +110,7 @@ describe('GeminiVideoReviewer', () => {
 
         expect(isRefusedCall(timedOut)).toBe(false)
         expect(isRetryable(timedOut)).toBe(true)
+        expect(dropped).not.toBeInstanceOf(ModelAnswerError)
         expect(isRefusedCall(dropped)).toBe(false)
         expect(isRetryable(dropped)).toBe(true)
     })

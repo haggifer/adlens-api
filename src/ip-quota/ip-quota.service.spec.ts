@@ -88,10 +88,15 @@ describe('IpQuotaService', () => {
         })
     })
 
-    it('never charges an unconfirmed account that has not passed a challenge', async () => {
-        await expect(ipQuota.charge(unconfirmed({ hasPassedChallenge: false }), 'job-1', NOW)).rejects.toMatchObject({
+    it.each([
+        ['an anonymous user', anonymous],
+        ['an unconfirmed account', unconfirmed],
+    ])('never charges %s that has not passed a challenge', async (_case, charge) => {
+        await expect(ipQuota.charge(charge({ hasPassedChallenge: false }), 'job-1', NOW)).rejects.toMatchObject({
+            status: HttpStatus.FORBIDDEN,
             response: { errorCode: RequestErrorCode.ChallengeRequired },
         })
+        expect(await ipQuota.usage(NETWORK, NOW)).toEqual({ total: 0, anonymous: 0 })
     })
 
     it("doesn't count members' runs against the anonymous allowance", async () => {
@@ -99,14 +104,6 @@ describe('IpQuotaService', () => {
 
         await expect(ipQuota.charge(anonymous(), 'job-anonymous', NOW)).resolves.toEqual(expect.any(String))
         expect(await ipQuota.usage(NETWORK, NOW)).toEqual({ total: LIMITS.IP_ANON_LIMIT + 1, anonymous: 1 })
-    })
-
-    it('never charges an anonymous user who has not passed a challenge', async () => {
-        await expect(ipQuota.charge(anonymous({ hasPassedChallenge: false }), 'job-1', NOW)).rejects.toMatchObject({
-            status: HttpStatus.FORBIDDEN,
-            response: { errorCode: RequestErrorCode.ChallengeRequired },
-        })
-        expect(await ipQuota.usage(NETWORK, NOW)).toEqual({ total: 0, anonymous: 0 })
     })
 
     it('asks everyone for a challenge from the soft limit on', async () => {

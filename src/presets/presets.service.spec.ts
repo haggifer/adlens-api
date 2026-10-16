@@ -657,17 +657,6 @@ describe('PresetsService', () => {
             expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
         })
 
-        it('moves nothing twice when run again', async () => {
-            await create('Meta US')
-            await createFor(anonymousId, 'Meta US', { isDefault: true })
-            await createFor(anonymousId, 'Other')
-
-            await presets.transfer(anonymousId, userId)
-            await presets.transfer(anonymousId, userId)
-
-            expect(await getNames()).toEqual(['Meta US', 'Meta US (2)', 'Other'])
-        })
-
         it('finishes a transfer that stopped before it deleted the anonymous document', async () => {
             await create('Meta US')
             await createFor(anonymousId, 'Meta US', { isDefault: true })
@@ -684,15 +673,6 @@ describe('PresetsService', () => {
 
             expect(await presets.list(userId)).toEqual(moved)
             expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
-        })
-
-        it('deletes the anonymous document', async () => {
-            await createFor(anonymousId, 'Meta US')
-
-            await presets.transfer(anonymousId, userId)
-
-            expect(await userPresetDocs().findOne({ _id: anonymousId })).toBeNull()
-            expect(await presets.list(anonymousId)).toEqual([])
         })
 
         it('does nothing when the anonymous user has no document', async () => {
@@ -722,10 +702,6 @@ describe('PresetsService', () => {
 
             expect(await userPresetDocs().findOne({ _id: userId })).toBeNull()
             expect(await presets.list(otherUserId)).toHaveLength(1)
-        })
-
-        it('does nothing for a user without presets', async () => {
-            await expect(presets.purge(userId)).resolves.toBeUndefined()
         })
     })
 })

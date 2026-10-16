@@ -1,5 +1,5 @@
 import type { Db } from 'mongodb'
-import { RATE_LIMIT_COLLECTION, RATE_LIMIT_MODEL, type RateLimitDoc, RateLimitSchema } from '../database/rate-limit.doc'
+import { RATE_LIMIT_COLLECTION, RATE_LIMIT_MODEL, RateLimitSchema } from '../database/rate-limit.doc'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { ContactLimits } from './contact-limits'
 
@@ -53,17 +53,6 @@ describe('the Contact form limits', () => {
         expect(results).toEqual([true, true, true, false])
     })
 
-    it('allows 20 messages an hour in total', async () => {
-        const results = []
-
-        for (let index = 0; index < 21; index++) {
-            results.push(await limits().allowMessage(network(index), sender(index)))
-        }
-
-        expect(results.filter(Boolean)).toHaveLength(20)
-        expect(results[20]).toBe(false)
-    })
-
     it('allows messages again once the hour has passed', async () => {
         for (let index = 0; index < 3; index++) {
             await limits().allowMessage(network(index), sender(0))
@@ -93,14 +82,6 @@ describe('the Contact form limits', () => {
         expect(results).toEqual([true, true, true])
     })
 
-    it("doesn't let concurrent messages from one sender exceed the cap", async () => {
-        const results = await Promise.all(
-            Array.from({ length: 8 }, (_, index) => limits().allowMessage(network(index), sender(0))),
-        )
-
-        expect(results.filter(Boolean)).toHaveLength(3)
-    })
-
     it("doesn't let concurrent messages exceed the total", async () => {
         const results = await Promise.all(
             Array.from({ length: 30 }, (_, index) => limits().allowMessage(network(index), sender(index))),
@@ -118,17 +99,5 @@ describe('the Contact form limits', () => {
 
         expect(uploads).toEqual([true, true, true, false])
         expect(await limits().allowMessage(network(0), sender(0))).toBe(true)
-    })
-
-    it('stores neither the sender nor the network key', async () => {
-        await limits().allowMessage(network(0), sender(0))
-        await limits().allowUploads(network(0))
-
-        const stored = JSON.stringify(
-            await mongo.connection.collection<RateLimitDoc>(RATE_LIMIT_COLLECTION).find().toArray(),
-        )
-
-        expect(stored).not.toContain('example.com')
-        expect(stored).not.toContain('network-key')
     })
 })

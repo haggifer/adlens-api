@@ -28,12 +28,14 @@ describe('CloudLogger', () => {
         logger.log('job 1: analyzed', 'Worker')
         logger.warn('job 2 expired while queued', 'JobLifecycle')
         logger.debug('probe done', 'VideoVerifier')
+        logger.fatal('cannot start', 'Bootstrap')
 
         expect(lines.every((line) => line.endsWith('\n') && !line.slice(0, -1).includes('\n'))).toBe(true)
         expect(logged()).toEqual([
             { severity: 'INFO', message: 'job 1: analyzed', context: 'Worker' },
             { severity: 'WARNING', message: 'job 2 expired while queued', context: 'JobLifecycle' },
             { severity: 'DEBUG', message: 'probe done', context: 'VideoVerifier' },
+            { severity: 'CRITICAL', message: 'cannot start', context: 'Bootstrap' },
         ])
     })
 
@@ -50,12 +52,6 @@ describe('CloudLogger', () => {
                 stack_trace: 'Error: boom\n    at send (mailer.ts:1:1)',
             },
         ])
-    })
-
-    it('marks a fatal entry as critical', () => {
-        new CloudLogger().fatal('cannot start', 'Bootstrap')
-
-        expect(logged()[0]).toMatchObject({ severity: 'CRITICAL', message: 'cannot start' })
     })
 })
 
