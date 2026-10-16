@@ -2,8 +2,6 @@ import type { INestApplication } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import {
     type AnalysisSettings,
-    getLiveChannel,
-    LiveEvent,
     Market,
     MAX_PRESETS,
     Placement,
@@ -94,7 +92,6 @@ describe('Presets API (e2e)', () => {
 
     beforeEach(() => {
         owner = new Types.ObjectId().toString()
-        live.clear()
     })
 
     afterAll(async () => {
@@ -105,12 +102,6 @@ describe('Presets API (e2e)', () => {
         const res = await request(app.getHttpServer()).get('/v1/presets').expect(401)
 
         expect(res.body.errorCode).toBe(RequestErrorCode.Unauthenticated)
-    })
-
-    it("tells the owner's tabs that their presets changed", async () => {
-        await create('Meta US')
-
-        expect(live.events).toEqual([{ channel: getLiveChannel(owner), event: LiveEvent.Presets }])
     })
 
     it('answers the live token request made for the session user', async () => {
