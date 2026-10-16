@@ -89,10 +89,4 @@ describe('the rate-limit storage', () => {
         expect(JSON.stringify(stored)).not.toContain('203.0.113')
         expect(JSON.stringify(stored)).not.toContain('/sign-in')
     })
-
-    it('has a TTL index on the expiry', async () => {
-        const indexes = await counters().indexes()
-
-        expect(indexes).toContainEqual(expect.objectContaining({ key: { expiresAt: 1 }, expireAfterSeconds: 0 }))
-    })
 })

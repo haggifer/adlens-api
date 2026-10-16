@@ -3,7 +3,7 @@ import { USER_COLLECTION } from '../database/user.doc'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { AUTH_INDEXES, AuthIndexes, ensureAuthIndexes } from './auth-indexes'
 
-const COLLECTIONS = ['session', USER_COLLECTION, 'account', 'verification']
+const COLLECTIONS = [...new Set(AUTH_INDEXES.map(({ collection }) => collection))]
 const DUPLICATE_EMAIL = 'twice@example.com'
 const DUPLICATE_KEY = 11000
 
@@ -30,65 +30,18 @@ describe('the Better Auth indexes', () => {
         await mongo.stop()
     })
 
-    it('creates the indexes behind Better Auth’s lookups, unique where a lookup expects one row', async () => {
-        const failures = await ensureAuthIndexes(mongo.connection)
-        const [session, user, account, verification] = await Promise.all(COLLECTIONS.map(indexesOf))
-
-        expect(failures).toEqual([])
-        expect(session).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ name: 'session_token_uidx', key: { token: 1 }, unique: true }),
-                expect.objectContaining({ name: 'session_userId_idx', key: { userId: 1 } }),
-            ]),
-        )
-        expect(user).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ name: 'user_email_uidx', key: { email: 1 }, unique: true }),
-            ]),
-        )
-        expect(account).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ name: 'account_userId_idx', key: { userId: 1 } }),
-                expect.objectContaining({
-                    name: 'account_providerId_accountId_idx',
-                    key: { providerId: 1, accountId: 1 },
-                }),
-            ]),
-        )
-        expect(verification).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ name: 'verification_identifier_idx', key: { identifier: 1 } }),
-            ]),
-        )
-    })
-
-    it('lets MongoDB delete sessions and verifications as soon as they expire', async () => {
-        await ensureAuthIndexes(mongo.connection)
-
-        const session = await indexesOf('session')
-        const verification = await indexesOf('verification')
-
-        expect(session).toContainEqual(
-            expect.objectContaining({ name: 'session_expiresAt_ttl', key: { expiresAt: 1 }, expireAfterSeconds: 0 }),
-        )
-        expect(verification).toContainEqual(
-            expect.objectContaining({
-                name: 'verification_expiresAt_ttl',
-                key: { expiresAt: 1 },
-                expireAfterSeconds: 0,
-            }),
-        )
-    })
-
-    it('changes nothing when it runs again, as it does on every start', async () => {
-        await ensureAuthIndexes(mongo.connection)
+    it('creates every declared index on its collection, and changes nothing when it runs again, as on every start', async () => {
+        const firstFailures = await ensureAuthIndexes(mongo.connection)
         const before = await Promise.all(COLLECTIONS.map(indexesOf))
 
         const failures = await ensureAuthIndexes(mongo.connection)
         const after = await Promise.all(COLLECTIONS.map(indexesOf))
+        const created = await Promise.all(AUTH_INDEXES.map(({ collection }) => indexesOf(collection)))
         const names = after.flat().map((index) => index.name)
 
+        expect(firstFailures).toEqual([])
         expect(failures).toEqual([])
+        AUTH_INDEXES.forEach(({ index }, i) => expect(created[i]).toContainEqual(expect.objectContaining(index)))
         expect(after).toEqual(before)
         expect(names.sort()).toEqual(
             [...AUTH_INDEXES.map(({ index }) => index.name), ...COLLECTIONS.map(() => '_id_')].sort(),

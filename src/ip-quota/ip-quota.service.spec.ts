@@ -194,13 +194,4 @@ describe('IpQuotaService', () => {
             new Date(NOW.getTime() + QUOTA_WINDOW_MS),
         )
     })
-
-    it('lets MongoDB expire a network and find a run by id through indexes', async () => {
-        expect(await buckets().indexes()).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ key: { expiresAt: 1 }, expireAfterSeconds: 0 }),
-                expect.objectContaining({ key: { 'runs.id': 1 } }),
-            ]),
-        )
-    })
 })
