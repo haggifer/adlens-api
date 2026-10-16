@@ -144,13 +144,14 @@ decode_secret_payload() {
 
 # An ENABLED version must exist before we try to read one: a secret with none yet is not a read failure (use {}),
 # but a real read failure once one exists must abort, not silently become an empty bundle. `tr -d '\r'` strips the
-# CRLF Git Bash's gcloud sometimes emits. `value(name)` is the version's fully qualified resource name, which lets
-# the read below target this exact version instead of re-resolving `latest` (matching what the prune step keeps).
+# CRLF Git Bash's gcloud sometimes emits. The read below targets this exact version instead of re-resolving `latest`
+# (matching what the prune step keeps); gcloud prints `value(name)` as the bare version number, so it names the secret.
 LATEST_ENABLED_VERSION=$(gcloud secrets versions list "$SECRETS_BUNDLE" --filter="state=ENABLED" \
     --sort-by="~createTime" --limit=1 --format="value(name)" | tr -d '\r')
 
 if [ -n "$LATEST_ENABLED_VERSION" ]; then
-    CURRENT_BUNDLE_JSON=$(gcloud secrets versions access "$LATEST_ENABLED_VERSION" --format="get(payload.data)" | decode_secret_payload)
+    CURRENT_BUNDLE_JSON=$(gcloud secrets versions access "$LATEST_ENABLED_VERSION" --secret="$SECRETS_BUNDLE" \
+        --format="get(payload.data)" | decode_secret_payload)
     CURRENT_BUNDLE_JSON="${CURRENT_BUNDLE_JSON%$SENTINEL}"
     IS_FIRST_VERSION=0
 else
