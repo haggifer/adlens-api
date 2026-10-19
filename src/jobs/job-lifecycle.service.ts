@@ -1,6 +1,14 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { type Analysis, JobErrorCode, type JobMedia, JobStatus, RequestErrorCode } from 'adlens-shared'
+import {
+    type Analysis,
+    JOB_START_WINDOW_MS,
+    JobErrorCode,
+    type JobMedia,
+    JobStatus,
+    RequestErrorCode,
+    RESTARTABLE_JOB_ERRORS,
+} from 'adlens-shared'
 import { type FilterQuery, Model, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
@@ -9,7 +17,6 @@ import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
 import { LivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
-import { UNSTARTED_JOB_MS } from './job-status'
 
 // Whether this attempt set the call mark, found it set by an earlier attempt, or found the job no longer analyzed.
 type CallMarking = 'marked' | 'repeated' | 'ended'
@@ -51,7 +58,7 @@ const staleConditions = (now: Date): FilterQuery<JobDoc>[] => {
 
     return [
         // Aged from its creation: no step of the upload touches the job.
-        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
+        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - JOB_START_WINDOW_MS) } },
         { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
         // A refused call clears the mark and restarts this clock (clearModelCall).
         { status: { $in: IN_FLIGHT }, modelCallStartedAt: { $exists: false }, queuedAt: { $lt: startingCutoff } },
@@ -98,10 +105,39 @@ export class JobLifecycle {
         return this.transition({ _id: jobId, userId, status: JobStatus.Pending }, { status: JobStatus.Verifying })
     }
 
+    // error → verifying, for the owner's restart of a run that failed for a reason its video isn't to blame for
+    // (isJobRestartable). Within the start window, so the job still has its video: the cleanup deletes it only after
+    // the window. What the failed run left is cleared, its call mark included, so the new worker may call the model;
+    // the calls it was billed for stay on the job. null when the job isn't the caller's restartable job.
+    async claimForRestart(userId: string, jobId: string, now = new Date()): Promise<StoredJob | null> {
+        const job = await this.model
+            .findOneAndUpdate(
+                {
+                    _id: jobId,
+                    userId,
+                    status: JobStatus.Error,
+                    errorCode: { $in: RESTARTABLE_JOB_ERRORS },
+                    createdAt: { $gt: new Date(now.getTime() - JOB_START_WINDOW_MS) },
+                },
+                {
+                    $set: { status: JobStatus.Verifying },
+                    $unset: { errorCode: 1, errorDetail: 1, execution: 1, modelCallStartedAt: 1 },
+                },
+                { new: true },
+            )
+            .lean<StoredJob>()
+
+        if (job) {
+            await this.live.publishJob(job)
+        }
+
+        return job
+    }
+
     // verifying → error, refunding whatever the job still holds: the run couldn't start (the upload was rejected,
-    // missing or couldn't be checked, the sample is gone, or it couldn't be charged). Never back to pending: the web
-    // never starts a job twice, it creates a new one, so a job put back would stay pending for good. false when the
-    // job already left verification.
+    // missing or couldn't be checked, the sample is gone, or it couldn't be charged). Never back to pending, where
+    // nothing would start it again; only its owner's restart takes it out of error. false when the job already left
+    // verification.
     async failStart(jobId: string, errorCode: JobErrorCode, detail?: string): Promise<boolean> {
         return this.settle(
             { _id: jobId, status: JobStatus.Verifying },

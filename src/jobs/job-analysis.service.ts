@@ -34,9 +34,9 @@ const describeChargeFailure = (err: unknown) => {
     return `The run could not be charged: ${response?.errorCode ?? 'unexpected error'}`
 }
 
-// POST /v1/jobs/:id/analyze. Claims the pending job, verifies the upload, charges the network and the user, and starts
-// the worker. A step that can't complete ends the job in error with any charge refunded: the web never starts a job
-// twice (it creates a new one), so the job never goes back to pending.
+// POST /v1/jobs/:id/analyze and /restart. Claims the pending job, or the failed one its owner restarts, verifies the
+// video, charges the network and the user, and starts the worker. A step that can't complete ends the job in error with
+// any charge refunded; the job never goes back to pending.
 @Injectable()
 export class JobAnalysisService {
     private readonly logger = new Logger(JobAnalysisService.name)
@@ -60,6 +60,27 @@ export class JobAnalysisService {
             throw new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobNotPending, 'Job is not pending')
         }
 
+        return this.run(userId, claimed, ipSource, freeRunUserId)
+    }
+
+    async restart(userId: string, jobId: string, ipSource: IpSource, freeRunUserId: string | null): Promise<Job> {
+        const claimed = await this.lifecycle.claimForRestart(userId, jobId)
+
+        if (!claimed) {
+            await this.jobs.findOwned(userId, jobId)
+            throw new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobNotRestartable, 'Job cannot be restarted')
+        }
+
+        return this.run(userId, claimed, ipSource, freeRunUserId)
+    }
+
+    private async run(
+        userId: string,
+        claimed: StoredJob,
+        ipSource: IpSource,
+        freeRunUserId: string | null,
+    ): Promise<Job> {
+        const jobId = claimed._id.toString()
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
         const execution = await this.startWorker(jobId)
@@ -103,13 +124,17 @@ export class JobAnalysisService {
     }
 
     // A run counts for its preset once its worker started (a failed start refunds the run), whatever the analysis then
-    // ends as, and only when its settings still match the preset; counting never fails the run. Answers the preset id
-    // stored on the job, or null.
+    // ends as, and only when its settings still match the preset; counting never fails the run. A restarted job is
+    // still one analysis, so a run counted before keeps its count. Answers the preset id stored on the job, or null.
     private async countPresetUse(userId: string, job: StoredJob): Promise<string | null> {
         const presetId = job.appliedPresetId
 
         if (!presetId) {
             return null
+        }
+
+        if (job.presetId) {
+            return job.presetId
         }
 
         try {

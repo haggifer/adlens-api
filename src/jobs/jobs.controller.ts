@@ -95,6 +95,23 @@ export class JobsController {
         return { job }
     }
 
+    // A failed run again on the video the job already has (isJobRestartable), charged like a new one.
+    @Post(':id/restart')
+    @HttpCode(HttpStatus.ACCEPTED)
+    async restart(
+        @CurrentUser() userId: string,
+        @Param('id') id: string,
+        @RequestIpSource() ipSource: IpSource,
+        @Req() req: Request,
+        @Res({ passthrough: true }) res: Response,
+    ): Promise<JobResponse> {
+        const job = await this.analysis.restart(userId, id, ipSource, readFreeRunUserId(req))
+
+        writeFreeRunCookie(res, userId, this.isSecureCookie)
+
+        return { job }
+    }
+
     @Get()
     list(
         @CurrentUser() userId: string,

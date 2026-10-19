@@ -79,8 +79,8 @@ conditional update on the expected current status, so two racing callers can nev
    (`x-goog-if-generation-match: 0`), so a verified video can't be replaced by a second PUT. The
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
-   fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
-   job twice, it creates a new one. The HTTP answer still says what went wrong.
+   fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`. The HTTP answer still
+   says what went wrong.
     - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
     - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
       metadata plus ffprobe over a signed read URL (range reads, no download; the image runs Debian's ffprobe, because
@@ -97,6 +97,15 @@ conditional update on the expected current status, so two racing callers can nev
       fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
       code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
     - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
+
+    **Restart** `POST /v1/jobs/:id/restart` runs the same steps on a failed job's own video, charged as a new run. The
+    claim is `error → verifying`, only for the owner, only for a failure the video isn't to blame for
+    (`ANALYSIS_FAILED`, `ANALYSIS_TIMED_OUT`, `MODEL_UNAVAILABLE`, `VIDEO_CHECK_FAILED`) and only within 6 hours of the
+    job's creation (`isJobRestartable` and `JOB_START_WINDOW_MS` in `adlens-shared`), else 409 `JOB_NOT_RESTARTABLE`.
+    The cleanup deletes a failed job's video only after that same window, so a restartable job always has its video.
+    The claim clears the failed run's error, execution and Gemini call mark (its billed calls stay in `usage`); a run
+    already counted for its preset isn't counted again, since it is still one analysis.
+
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
@@ -372,6 +381,7 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `POST /v1/jobs`             | Admission check (optional challengeToken), then a pending job and its signed upload target                                                                                                                                                                                                                                                               | `{ job, upload }`                                    |
 | `POST /v1/jobs/from-sample` | Admission check, then a pending job on a published sample ad (no upload)                                                                                                                                                                                                                                                                                 | `{ job }`                                            |
 | `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch → once the worker started, count the run for its `presetId` when the settings still match it (counted whatever the run's outcome; never fails the start)                                                                                                                                                     | **202** `{ job }`                                    |
+| `POST /v1/jobs/:id/restart` | Re-run a failed job on its own video (see the run flow): 409 `JOB_NOT_RESTARTABLE` when it can't be restarted                                                                                                                                                                                                                                            | **202** `{ job }`                                    |
 | `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)                                                                                                                                                                                                                                                                                             | `{ jobs, nextCursor }`                               |
 | `GET /v1/jobs/:id`          | One owned job                                                                                                                                                                                                                                                                                                                                            | `{ job }`                                            |
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                                                                                                                                                                   | `{ url, expiresAt }`                                 |

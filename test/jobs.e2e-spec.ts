@@ -250,7 +250,7 @@ describe('Jobs API (e2e)', () => {
         expect(quota.body.quota.used).toBe(1)
     })
 
-    // The web never starts the same job twice: a failed start creates a new job, so this one ends.
+    // A missing upload leaves nothing to start again, so the job ends for good.
     it('answers UPLOAD_INCOMPLETE and ends the job as UPLOAD_FAILED when the upload is missing', async () => {
         const jobId = await createJob()
 
@@ -339,6 +339,38 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.errorCode).toBe(RequestErrorCode.Unavailable)
         expect(after.body.quota.used).toBe(before.body.quota.used)
         expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+    })
+
+    it('restarts a failed run on the video it has, charged as a new run, and refuses a second restart', async () => {
+        const jobId = await createJob()
+
+        dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
+        await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
+
+        const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
+        const restarted = await request(app.getHttpServer())
+            .post(`/v1/jobs/${jobId}/restart`)
+            .set(as(OWNER))
+            .expect(202)
+        const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
+        const again = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/restart`).set(as(OWNER)).expect(409)
+
+        expect(restarted.body.job).toMatchObject({ id: jobId, status: JobStatus.Queued })
+        expect(restarted.body.job).not.toHaveProperty('errorCode')
+        expect(dispatch).toHaveBeenLastCalledWith(jobId)
+        expect(after.body.quota.used).toBe(before.body.quota.used + 1)
+        expect(again.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
+    })
+
+    it("doesn't let another user restart the job", async () => {
+        const jobId = await createJob()
+
+        dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
+        await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
+
+        const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/restart`).set(as(STRANGER)).expect(404)
+
+        expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
     })
 
     it("pages the user's own job list newest first", async () => {
@@ -1655,6 +1687,18 @@ describe('Jobs API (e2e)', () => {
 
             expect(read.body.job).toMatchObject({ status: JobStatus.Error, presetId: null })
             expect(await getUsageCount(preset.id)).toBe(0)
+        })
+
+        it('counts a restarted analysis for its preset once', async () => {
+            const preset = await createPreset('Meta EU and US')
+            const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
+
+            await app.get(JobLifecycle).fail(job.id, JobErrorCode.ModelUnavailable, 'overloaded')
+
+            const restarted = await send('post', `/v1/jobs/${job.id}/restart`).expect(202)
+
+            expect(restarted.body.job).toMatchObject({ status: JobStatus.Queued, presetId: preset.id })
+            expect(await getUsageCount(preset.id)).toBe(1)
         })
     })
 })

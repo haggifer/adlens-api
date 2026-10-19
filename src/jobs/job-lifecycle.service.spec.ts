@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common'
 import {
     type Analysis,
     getLiveChannel,
+    JOB_START_WINDOW_MS,
     JobErrorCode,
     type JobMedia,
     JobStatus,
@@ -9,6 +10,7 @@ import {
     Placement,
     Platform,
     RequestErrorCode,
+    RESTARTABLE_JOB_ERRORS,
     VideoMimeType,
 } from 'adlens-shared'
 import { type FilterQuery, type Model, Types } from 'mongoose'
@@ -24,7 +26,6 @@ import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { buildModelCall, usageOf } from '../testing/model-call'
 import { RecordingLivePublisher } from '../testing/recording-live-publisher'
 import { JobLifecycle } from './job-lifecycle.service'
-import { UNSTARTED_JOB_MS } from './job-status'
 
 const USER = new Types.ObjectId().toString()
 const OTHER_USER = new Types.ObjectId().toString()
@@ -196,6 +197,78 @@ describe('JobLifecycle', () => {
                 errorDetail: 'why',
             })
             expect((await findJob(queued))?.status).toBe(JobStatus.Queued)
+        })
+    })
+
+    describe('restarting a failed job', () => {
+        // A run that reached its model call and failed there, as the pipeline leaves it.
+        const failAtModelCall = async (errorCode = RESTARTABLE_JOB_ERRORS[0]): Promise<string> => {
+            const jobId = await queueJob(NETWORK_CHARGE)
+
+            await lifecycle.startAttempt(jobId)
+            await lifecycle.markModelCall(jobId)
+            await lifecycle.addUsage(jobId, CALL)
+            await lifecycle.fail(jobId, errorCode, 'overloaded')
+
+            return jobId
+        }
+
+        it('puts the failed job back into verification without what the failed run left, its billed calls kept', async () => {
+            const jobId = await failAtModelCall()
+
+            expect(await lifecycle.claimForRestart(USER, jobId)).toMatchObject({ status: JobStatus.Verifying })
+
+            const job = await findJob(jobId)
+
+            expect(job).toMatchObject({ status: JobStatus.Verifying, usage: usageOf(CALL) })
+            expect(job?.errorCode).toBeUndefined()
+            expect(job?.errorDetail).toBeUndefined()
+            expect(job?.modelCallStartedAt).toBeUndefined()
+        })
+
+        it('charges the restarted run like a new one', async () => {
+            const jobId = await failAtModelCall()
+
+            await lifecycle.claimForRestart(USER, jobId)
+            await lifecycle.chargeAndQueue(jobId, USER, MEDIA, NETWORK_CHARGE)
+
+            expect((await findJob(jobId))?.status).toBe(JobStatus.Queued)
+            expect(await usedRuns()).toBe(1)
+            expect(await networkRuns()).toBe(1)
+        })
+
+        it('lets exactly one of two concurrent restarts claim the job', async () => {
+            const jobId = await failAtModelCall()
+            const claims = await Promise.all([
+                lifecycle.claimForRestart(USER, jobId),
+                lifecycle.claimForRestart(USER, jobId),
+            ])
+
+            expect(claims.filter(Boolean)).toHaveLength(1)
+        })
+
+        it("doesn't restart another user's job, a job that didn't fail, or one rejected for its video", async () => {
+            const othersJob = await failAtModelCall()
+            const queued = await queueJob()
+            const rejected = await claimJob()
+
+            await lifecycle.failStart(rejected, JobErrorCode.VideoUnreadable)
+
+            expect(await lifecycle.claimForRestart(OTHER_USER, othersJob)).toBeNull()
+            expect(await lifecycle.claimForRestart(USER, queued)).toBeNull()
+            expect(await lifecycle.claimForRestart(USER, rejected)).toBeNull()
+            expect((await findJob(rejected))?.status).toBe(JobStatus.Error)
+        })
+
+        it('restarts a job only within the start window, while the cleanup still keeps its video', async () => {
+            const young = await failAtModelCall()
+            const old = await failAtModelCall()
+
+            await createdAt(young, new Date(NOW.getTime() - JOB_START_WINDOW_MS + 1))
+            await createdAt(old, new Date(NOW.getTime() - JOB_START_WINDOW_MS))
+
+            expect(await lifecycle.claimForRestart(USER, young, NOW)).not.toBeNull()
+            expect(await lifecycle.claimForRestart(USER, old, NOW)).toBeNull()
         })
     })
 
@@ -634,8 +707,8 @@ describe('JobLifecycle', () => {
             const unstarted = await createJob()
             const young = await createJob()
 
-            await createdAt(unstarted, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
-            await createdAt(young, new Date(NOW.getTime() - UNSTARTED_JOB_MS))
+            await createdAt(unstarted, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
+            await createdAt(young, new Date(NOW.getTime() - JOB_START_WINDOW_MS))
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -663,8 +736,8 @@ describe('JobLifecycle', () => {
             const own = await createJob()
             const othersJob = await createJob(JobStatus.Pending, OTHER_USER)
 
-            await createdAt(own, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
-            await createdAt(othersJob, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            await createdAt(own, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
+            await createdAt(othersJob, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
 
             expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 2, failed: 0 })
             expect((await findJob(othersJob))?.errorCode).toBe(JobErrorCode.UploadFailed)
@@ -742,7 +815,7 @@ describe('JobLifecycle', () => {
             const unverified = await claimJob()
             const expired = await createJob()
 
-            await createdAt(expired, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            await createdAt(expired, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
             live.clear()
 
             await lifecycle.fail(failed, JobErrorCode.AnalysisFailed, 'boom')
@@ -751,6 +824,16 @@ describe('JobLifecycle', () => {
             await lifecycle.expireStale(USER, NOW)
 
             expect(live.events).toEqual([failed, undispatched, unverified, expired].map((jobId) => jobEvent(jobId)))
+        })
+
+        it('tells them when a failed run is restarted', async () => {
+            const jobId = await queueJob()
+
+            await lifecycle.fail(jobId, RESTARTABLE_JOB_ERRORS[0], 'boom')
+            live.clear()
+            await lifecycle.claimForRestart(USER, jobId)
+
+            expect(live.events).toEqual([jobEvent(jobId)])
         })
 
         it('tells nobody when nothing changed', async () => {
