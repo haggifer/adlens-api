@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { AdminModule } from './admin/admin.module'
 import { AuthModule } from './auth/auth.module'
 import { appConfigModule } from './config/env'
 import { ContactModule } from './contact/contact.module'
@@ -23,6 +24,7 @@ import { SamplesModule } from './samples/samples.module'
         SamplesModule,
         DemosModule,
         ContactModule,
+        AdminModule,
     ],
     controllers: [HealthController],
 })

@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { zodToMongoose } from '../common/zod-to-mongoose'
 
 export const JOB_MODEL = 'Job'
+export const JOB_COLLECTION = 'jobs'
 
 const tokenCountSchema = z.number().int().nonnegative()
 
@@ -125,7 +126,7 @@ export interface StoredJob extends JobDoc {
     updatedAt: Date
 }
 
-export const JobSchema = zodToMongoose(jobDocSchema, { timestamps: true, collection: 'jobs' })
+export const JobSchema = zodToMongoose(jobDocSchema, { timestamps: true, collection: JOB_COLLECTION })
 JobSchema.index({ userId: 1, _id: -1 })
 JobSchema.index({ status: 1, updatedAt: 1 })
 // The demo page's query; sparse, since all but a few jobs have no demo.
