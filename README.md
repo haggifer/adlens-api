@@ -1,5 +1,10 @@
 # adlens-api
 
+> Part of **[AdLens](https://github.com/haggifer/adlens)**, AI policy checks for video ads · [Live](https://www.useadlens.com)
+
+[![CI](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml/badge.svg?branch=init-setup)](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
+
 Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against an
 ad-policy ruleset of several hundred rules with one Gemini pass, and you get cited, timestamped findings, with each
 step announced to the browser as it happens. This repo holds the HTTP API and the analysis worker; the web client and
