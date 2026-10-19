@@ -693,7 +693,7 @@ describe('Jobs API (e2e)', () => {
             findings: [],
             metadataChecks: [],
             advisories: [],
-            completedAt: '2026-10-07T10:00:00.000Z',
+            completedAt: new Date('2026-10-07T10:00:00.000Z'),
         }
         let jobs: Model<JobDoc>
 

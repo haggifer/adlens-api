@@ -113,8 +113,10 @@ before(async () => {
         GITHUB_CLIENT_SECRET: 'test-github-client-secret',
     })
 
+    const { getConnectionToken } = require('@nestjs/mongoose')
     const { Test } = require('@nestjs/testing')
     const { AppModule } = require('../dist/app.module')
+    const { syncIndexes } = require('../dist/db-job/index-sync')
     const { AccountDataService } = require('../dist/account/account-data.service')
     const { AUTH } = require('../dist/auth/auth.instance')
     const { mountAuthRoute } = require('../dist/auth/auth-route')
@@ -150,6 +152,11 @@ before(async () => {
 
     app = moduleRef.createNestApplication({ bodyParser: false, logger: false })
     app.enableCors({ origin: WEB, credentials: true })
+
+    // No process builds indexes on start; the database job does after every deploy, so the tests do the same.
+    const indexes = await syncIndexes(app.get(getConnectionToken()), true)
+
+    assert.deepEqual(indexes.failed, [])
     auth = app.get(AUTH)
     lifecycle = app.get(JobLifecycle)
 

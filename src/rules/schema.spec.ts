@@ -71,4 +71,34 @@ describe('ruleSetSchema', () => {
         expect(result.success).toBe(false)
         expect(result.error?.issues.map((issue) => issue.message)).toContain(`duplicate rule id ${METADATA_RULE.id}`)
     })
+
+    describe('calendar days', () => {
+        const DAY = '2026-09-29'
+        const [SOURCE_KEY, SOURCE] = Object.entries(TEST_RULESET.sources)[0]
+
+        const withDays = (generatedAt: unknown, fetchedAt: unknown) => ({
+            ...TEST_RULESET,
+            meta: { ...TEST_RULESET.meta, generatedAt },
+            sources: { ...TEST_RULESET.sources, [SOURCE_KEY]: { ...SOURCE, fetchedAt } },
+        })
+
+        it("reads a ruleset file's days as that day's UTC midnight", () => {
+            const parsed = ruleSetSchema.parse(withDays(DAY, DAY))
+
+            expect(parsed.meta.generatedAt).toEqual(new Date(`${DAY}T00:00:00.000Z`))
+            expect(parsed.sources[SOURCE_KEY].fetchedAt).toEqual(new Date(`${DAY}T00:00:00.000Z`))
+        })
+
+        it('reads a stored ruleset whose days are dates already', () => {
+            const day = new Date(DAY)
+
+            expect(ruleSetSchema.parse(withDays(day, day)).meta.generatedAt).toEqual(day)
+        })
+
+        it('refuses a day written any other way', () => {
+            expect(ruleSetSchema.safeParse(withDays('29.09.2026', DAY)).success).toBe(false)
+            expect(ruleSetSchema.safeParse(withDays(DAY, `${DAY}T10:00:00Z`)).success).toBe(false)
+            expect(ruleSetSchema.safeParse(withDays(null, DAY)).success).toBe(false)
+        })
+    })
 })

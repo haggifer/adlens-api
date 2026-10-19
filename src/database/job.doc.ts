@@ -52,6 +52,9 @@ const tokenUsageSchema = z.object({
     calls: z.array(modelCallSchema).optional(),
 })
 
+// The public analysis with its completion time as a date (job.mapper.ts converts between the two).
+const storedAnalysisSchema = analysisSchema.extend({ completedAt: z.date() })
+
 // Every demo job has this owner, which matches no user, so a demo shows up in nobody's History and no account can
 // delete it; only the maintainer's script creates and changes demos.
 export const DEMO_OWNER = 'demo'
@@ -75,7 +78,7 @@ const jobDocSchema = z.object({
     settings: analysisSettingsSchema,
     file: z.object({ ...uploadFileSchema.shape, bucket: z.string(), path: z.string() }),
     media: jobMediaSchema.optional(),
-    analysis: analysisSchema.optional(),
+    analysis: storedAnalysisSchema.optional(),
     errorCode: jobErrorCodeSchema.optional(),
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
@@ -117,6 +120,7 @@ const jobDocSchema = z.object({
 
 export type JobDoc = z.infer<typeof jobDocSchema>
 export type JobDemo = z.infer<typeof demoSchema>
+export type StoredAnalysis = z.infer<typeof storedAnalysisSchema>
 export type TokenUsage = z.infer<typeof tokenUsageSchema>
 export type ModelCall = z.infer<typeof modelCallSchema>
 

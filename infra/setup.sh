@@ -5,10 +5,12 @@
 #
 # The analysis runs as an on-demand Cloud Run Job (adlens-analyze) launched by the API — there is no
 # always-on worker service and no Redis. A second job (adlens-cleanup), started daily by Cloud Scheduler, deletes
-# anonymous users unused for a week and the videos of jobs not analyzed within 6 hours, and retries owed refunds.
+# anonymous users unused for a week and the videos of jobs not analyzed within 6 hours, and retries owed refunds. A
+# third (adlens-db) runs after every deploy: the pending data migrations, every declared index, then the collections'
+# validators.
 #
-# Day-to-day deploys don't use this script: every push to init-setup that passes CI is built into one image and rolled
-# out to both jobs and the API by .github/workflows/ci.yml. This script creates everything that workflow relies on and
+# Day-to-day deploys don't use this script: every push to init-setup that passes CI is built into one image, rolled
+# out to the jobs and the API, and followed by a run of adlens-db, by .github/workflows/ci.yml. This script creates everything that workflow relies on and
 # owns the runtime config (env vars, secrets, limits); it also deploys the current checkout the same way CI does.
 #
 # Prereqs: gcloud authenticated (`gcloud auth login`). To create or rotate a secret, put any subset of the bundle keys
@@ -53,6 +55,7 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${IMAGE_REPO}/api"
 API_SVC=adlens-api
 ANALYZE_JOB=adlens-analyze
 CLEANUP_JOB=adlens-cleanup
+DB_JOB=adlens-db
 # Daily, at a quiet hour for Europe. Anonymous data is kept for a week, so a missed day only delays a deletion.
 CLEANUP_SCHEDULE="0 3 * * *"
 WEB_ORIGIN=https://www.useadlens.com
@@ -440,6 +443,14 @@ gcloud scheduler jobs "$SCHEDULER_VERB" http "$CLEANUP_JOB" --location="$REGION"
     --uri="https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/$CLEANUP_JOB:run" \
     --http-method=POST --oauth-service-account-email="$RUNTIME_SA"
 
+echo "== deploy database job (after every deploy; runs dist/db --apply, no retries: a failure fails the deploy) =="
+# Started by CI as the deploy SA (run.developer) and below by this script; nothing else needs to run it.
+gcloud run jobs deploy "$DB_JOB" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
+    --command="node" --args="dist/db,--apply" --tasks=1 --max-retries=0 --task-timeout=30m \
+    --cpu=1 --memory=512Mi \
+    --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
+
 echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 # Pinned so a re-created service can't fall back to Cloud Run's defaults (up to 100 instances). 3 instances × 80
 # concurrent requests is far above the traffic, and caps what a flood can cost and how many MongoDB connections the
@@ -451,6 +462,9 @@ gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-a
     --cpu=1 --memory=512Mi --cpu-throttling \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,PUBLIC_MEDIA_BUCKET=$PUBLIC_MEDIA_BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
+
+echo "== update the database (migrations, indexes, validators), once the code that reads both shapes is live =="
+gcloud run jobs execute "$DB_JOB" --region="$REGION" --wait
 
 echo "== prune old API_SECRETS versions (the free tier counts disabled versions too) =="
 # CI and this script always roll forward from :latest, so nothing needs an old version — ENABLED or DISABLED. Keep
