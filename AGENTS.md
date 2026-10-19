@@ -14,6 +14,7 @@ npx tsc --noEmit -p tsconfig.json
 npm test                 # unit tests (real MongoDB via mongodb-memory-server)
 npm run test:e2e         # Supertest against the app with fake storage, prober, dispatcher and auth
 npm run test:auth        # after `npm run build`: real Better Auth flows under Node's test runner
+npm run db               # after `npm run build`: dry run of the database job against .env.local (production)
 ```
 
 ## Rules that must not break
@@ -46,9 +47,19 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   with another `TRUSTED_PROXY_HOPS` until that list names the extra proxies).
   Keep its counters in `createRateLimitStorage` (HMAC keys, TTL-deleted), never `rateLimit.storage: 'database'` (raw
   `<ip>|<path>` keys, never deleted), and keep the `session.create.before` hook that sets `ipAddress` to null.
-- Better Auth's collections get their indexes only from `AUTH_INDEXES` in `src/auth/auth-indexes.ts` (its adapter
-  creates none), created on API start and logged, never fatal, on failure. Keep Better Auth's index names, and never
-  log a MongoDB error message there: a duplicate-key message quotes the value, an email address.
+- Indexes are created only by the database job (`src/db.ts`, `adlens-db`), which the deploy runs last: declare a new
+  one on its schema (or in `AUTH_INDEXES` for Better Auth's collections, whose adapter creates none) and never create
+  one on start (`DatabaseModule` keeps `autoIndex` and `autoCreate` off). The job never drops an index; an extra one
+  is the maintainer's to hide, watch and drop. Keep Better Auth's index names, and never log a MongoDB error message
+  there: a duplicate-key message quotes the value, an email address.
+- A change to stored data's shape is a migration in `MIGRATIONS` (`src/db-job/migrations.ts`), never a script outside
+  the repo. It ships with code that reads both the old and the new shape, must be safe to run again, and uses raw
+  updates, which leave `updatedAt` alone (the stale-job sweep reads it). Drop the old shape's reading in a later
+  change, once the deploy that ran the migration has succeeded and the job reports 0 refused documents there. Once a
+  migration has run, roll back (a job or the API) only to a commit that reads the new shape.
+- Every model is built with `zodToMongoose`, whose Zod schema is also its collection's validator (`syncValidators`):
+  a stored shape the Zod schema refuses is either a bug or needs a migration. Validators are in `warn` mode; switch a
+  collection to `error` only after the job has reported 0 refused documents for it.
 - A confirmation link confirms only in the session of the account it was sent to (the `/verify-email` before hook:
   `SIGN_IN_REQUIRED` without one or with an anonymous one, `EMAIL_MISMATCH` for another account) and never creates a
   session (`autoSignInAfterVerification: false`): a link reaches whoever it is forwarded to.
@@ -116,8 +127,9 @@ npm run test:auth        # after `npm run build`: real Better Auth flows under N
   (`getUserAccess`), so a test member needs `emailVerified: true`.
 - The e2e suite sets `BETTER_AUTH_SECRET` in `test/global-setup.ts`: the network key is derived from it. It fakes the
   Turnstile verifier (`'pass'` passes), and `X-Forwarded-For` picks each test's network.
-- A Better Auth index that fails to build only logs `could not create the Better Auth index <name>` at startup. After
-  a deploy that adds one, check the logs, or `getIndexes()` in Atlas.
+- An index that fails to build fails the database job, and so the deploy's last step, after the API is already live:
+  its log line `index <collection>.<name>: could not be created` names it. Migrations run before indexes in the
+  same job, so a migration can make the data fit a new unique index.
 - Before upgrading Better Auth, diff its table-level `indexes` against `AUTH_INDEXES`: an index on the same key with
   a different name or options raises `IndexOptionsConflict` in the adapter's `ensureModelIndexes`, which runs before
   every write, so every write would fail.

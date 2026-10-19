@@ -27,7 +27,8 @@ jobs:
 
     # Production deploy of a verified push to init-setup. Authenticates to Google Cloud through Workload Identity
     # Federation (GitHub's OIDC token, no stored key; the provider only accepts this repo on this branch), builds one
-    # image and rolls both jobs and the API to its digest. Env and secrets stay as infra/setup.sh set them.
+    # image, rolls both jobs and the API to its digest, then runs the database job on it. Env and secrets stay as
+    # infra/setup.sh set them.
     deploy:
         needs: verify
         if: github.event_name == 'push' && github.ref == 'refs/heads/init-setup'
@@ -74,3 +75,9 @@ jobs:
               run: gcloud run services update adlens-api --region "$REGION" --image "$IMAGE_REF"
             - name: Check the API is healthy
               run: curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors https://api.useadlens.com/health
+            # Last, once the code that reads both the old and the new shapes is live everywhere: the pending migrations,
+            # every declared index, then the validators (src/db.ts). A failed execution fails this step.
+            - name: Update the database
+              run: |
+                  gcloud run jobs update adlens-db --region "$REGION" --image "$IMAGE_REF"
+                  gcloud run jobs execute adlens-db --region "$REGION" --wait

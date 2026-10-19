@@ -10,7 +10,7 @@ import { RULESET_MODEL, RulesetSchema } from './ruleset.doc'
 import { SAMPLE_MODEL, SampleSchema } from './sample.doc'
 import { UPLOAD_TOMBSTONE_MODEL, UploadTombstoneSchema } from './upload-tombstone.doc'
 
-const models = MongooseModule.forFeature([
+export const MODEL_DEFINITIONS = [
     { name: JOB_MODEL, schema: JobSchema },
     { name: RULESET_MODEL, schema: RulesetSchema },
     { name: SAMPLE_MODEL, schema: SampleSchema },
@@ -18,14 +18,23 @@ const models = MongooseModule.forFeature([
     { name: IP_QUOTA_MODEL, schema: IpQuotaSchema },
     { name: RATE_LIMIT_MODEL, schema: RateLimitSchema },
     { name: UPLOAD_TOMBSTONE_MODEL, schema: UploadTombstoneSchema },
-])
+]
 
-// The Mongo connection and every model, registered once for both the API and the worker.
+const models = MongooseModule.forFeature(MODEL_DEFINITIONS)
+
+// The Mongo connection and every model, registered once for every process. No process changes the database's
+// structure on start: the database job (db.ts) creates the indexes and validators after each deploy, so a cold start
+// sends no createIndex calls, no instance is the one that builds a new index on a large collection, and the job's dry
+// run changes nothing.
 @Module({
     imports: [
         MongooseModule.forRootAsync({
             inject: [ConfigService],
-            useFactory: (config: ConfigService<Env, true>) => ({ uri: config.get('MONGODB_URI', { infer: true }) }),
+            useFactory: (config: ConfigService<Env, true>) => ({
+                uri: config.get('MONGODB_URI', { infer: true }),
+                autoIndex: false,
+                autoCreate: false,
+            }),
         }),
         models,
     ],

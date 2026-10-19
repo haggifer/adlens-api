@@ -2,7 +2,6 @@ import 'reflect-metadata'
 import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
-import mongoose from 'mongoose'
 import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
 import { createLogger } from './common/cloud-logger'
 import { describeErrorWithStack } from './common/error-message'
@@ -18,11 +17,6 @@ const EXIT_RETRY = 1
 // job, exits 0 because the job document already records it.
 const run = async (): Promise<number> => {
     const logger = new Logger('Worker')
-
-    // The API builds the indexes on its start; a worker cold start shouldn't send a dozen createIndex calls, or be the
-    // process that builds a new index on a large collection.
-    mongoose.set('autoIndex', false)
-
     const app = await NestFactory.createApplicationContext(WorkerModule, {
         logger: createLogger(readLogFormat(process.env)),
     })

@@ -1,7 +1,6 @@
-import { Logger } from '@nestjs/common'
 import { USER_COLLECTION } from '../database/user.doc'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
-import { AUTH_INDEXES, AuthIndexes, ensureAuthIndexes } from './auth-indexes'
+import { AUTH_INDEXES, ensureAuthIndexes } from './auth-indexes'
 
 const COLLECTIONS = [...new Set(AUTH_INDEXES.map(({ collection }) => collection))]
 const DUPLICATE_EMAIL = 'twice@example.com'
@@ -22,7 +21,6 @@ describe('the Better Auth indexes', () => {
     })
 
     afterEach(async () => {
-        jest.restoreAllMocks()
         await mongo.connection.dropDatabase()
     })
 
@@ -30,7 +28,7 @@ describe('the Better Auth indexes', () => {
         await mongo.stop()
     })
 
-    it('creates every declared index on its collection, and changes nothing when it runs again, as on every start', async () => {
+    it('creates every declared index on its collection, and changes nothing when it runs again, as after every deploy', async () => {
         const firstFailures = await ensureAuthIndexes(mongo.connection)
         const before = await Promise.all(COLLECTIONS.map(indexesOf))
 
@@ -54,22 +52,16 @@ describe('the Better Auth indexes', () => {
         const failures = await ensureAuthIndexes(mongo.connection)
         const session = await indexesOf('session')
 
-        expect(failures).toEqual([{ name: 'user_email_uidx', reason: expect.stringContaining(String(DUPLICATE_KEY)) }])
+        expect(failures).toEqual([
+            {
+                collection: USER_COLLECTION,
+                name: 'user_email_uidx',
+                reason: expect.stringContaining(String(DUPLICATE_KEY)),
+            },
+        ])
         expect(JSON.stringify(failures)).not.toContain(DUPLICATE_EMAIL)
         expect(session.map((index) => index.name)).toEqual(
             expect.arrayContaining(['session_token_uidx', 'session_userId_idx', 'session_expiresAt_ttl']),
         )
-    })
-
-    it('logs an index it could not create, by name and error code only, and lets the API start', async () => {
-        const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-
-        await insertDuplicateUsers()
-        await expect(new AuthIndexes(mongo.connection).onApplicationBootstrap()).resolves.toBeUndefined()
-
-        expect(logError).toHaveBeenCalledTimes(1)
-        expect(logError.mock.calls[0][0]).toContain('user_email_uidx')
-        expect(logError.mock.calls[0][0]).toContain(String(DUPLICATE_KEY))
-        expect(logError.mock.calls[0][0]).not.toContain(DUPLICATE_EMAIL)
     })
 })

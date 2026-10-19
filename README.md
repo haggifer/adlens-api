@@ -48,6 +48,20 @@ the API contract live in their own repos.
   ([`UploadTombstoneCleanupService`](src/cleanup/upload-tombstone-cleanup.service.ts)).
   Last, it retries the refunds that ended jobs still owe (see Quota), including any the expiry couldn't make. A step
   that fails for one job or user logs it and goes on; any failure makes the execution exit 1.
+- **Database job** (`src/db.ts` → `DbJobModule`): the same image run as the `adlens-db` Cloud Run Job by the deploy,
+  after the API is healthy. In order:
+    - the data migrations not yet recorded in `migrations` ([`src/db-job/migrations.ts`](src/db-job/migrations.ts));
+    - every index the models and [`AUTH_INDEXES`](src/auth/auth-indexes.ts) declare and the database lacks
+      ([`syncIndexes`](src/db-job/index-sync.ts)). An index that nothing declares is only reported: it can still serve
+      queries nobody declared it for, so the maintainer hides it, watches, then drops it;
+    - each model's collection validator, a `$jsonSchema` generated from the Zod schema the model is built from
+      ([`syncValidators`](src/db-job/validators.ts)), in `moderate`/`warn` mode, and a count of the documents it
+      refuses. A collection's action becomes `error` once its count has stayed 0.
+
+    Without `--apply` it changes nothing and logs what it would do, so `npm run build && npm run db` against
+    `.env.local` (which points at production) is a safe dry run. A failed migration or index exits 1; refused
+    documents are only reported.
+
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
@@ -342,17 +356,16 @@ answering is a plain reply; its text isn't stored.
   `production`.
 - **Sessions don't store the address.** Better Auth records it on every session; a
   `databaseHooks.session.create.before` hook sets `ipAddress` to null and keeps the user agent.
-- **Better Auth's collections are indexed at startup.** Its Mongo adapter only creates indexes a plugin schema
-  declares, and none does, so `user`, `session`, `account` and `verification` would have only `_id` and every session
-  check would scan `session`. [`AuthIndexes`](src/auth/auth-indexes.ts) creates, on every API start, the indexes
-  behind the adapter's lookups: `session.token` (unique), `session.userId`, `user.email` (unique), `account.userId`,
+- **Better Auth's collections are indexed by the database job.** Its Mongo adapter only creates indexes a plugin
+  schema declares, and none does, so `user`, `session`, `account` and `verification` would have only `_id` and every
+  session check would scan `session`. [`AUTH_INDEXES`](src/auth/auth-indexes.ts) lists, and the database job creates
+  after every deploy, the indexes behind the adapter's lookups: `session.token` (unique), `session.userId`, `user.email` (unique), `account.userId`,
   `account.{providerId, accountId}` (social sign-in) and `verification.identifier`, plus TTL indexes on
   `session.expiresAt` and `verification.expiresAt`, because Better Auth deletes an expired session only when its
-  cookie comes back. They use Better Auth's own index names (`<table>_<fields>_<idx|uidx>`, `_ttl` for the TTLs). The
-  worker doesn't create them: it never reads these collections through Better Auth.
-- **Only the API builds the app's own indexes.** Mongoose creates a schema's indexes when its model starts; the worker
-  and the cleanup set `autoIndex` off (`worker.ts`, `cleanup.ts`), so a worker cold start sends no `createIndex` calls
-  and a new index on a large collection is built by the API, on the deploy that adds it.
+  cookie comes back. They use Better Auth's own index names (`<table>_<fields>_<idx|uidx>`, `_ttl` for the TTLs).
+- **No process changes the database's structure on start.** `DatabaseModule` turns Mongoose's `autoIndex` and
+  `autoCreate` off for the API, the worker and the cleanup, so a cold start sends no `createIndex` calls and no
+  instance is the one that builds a new index on a large collection; the database job does it once per deploy.
 
 ## API
 
@@ -467,10 +480,10 @@ pipeline and is billed like any run, outside every quota. Set `"isActive": false
 ## Layout
 
 ```
-src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup) and lab.ts (adlens-lab's only import
-            surface), one Nest module per feature: jobs,
+src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup), db.ts (database job) and lab.ts
+            (adlens-lab's only import surface), one Nest module per feature: jobs,
             analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
-            live, database, config; shared helpers in common/, test helpers in testing/
+            live, database, db-job, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image repository cleanup policy
 ```
@@ -542,13 +555,13 @@ key; 2x0000000000000000000000000000000AA always fails.
 ## Tests
 
 ```bash
-npm test          # unit: quota, network quota, Contact limits, job lifecycle, pipeline, verification, client IP, Better Auth indexes (real MongoDB via mongodb-memory-server)
+npm test          # unit: quota, network quota, Contact limits, job lifecycle, pipeline, verification, client IP, indexes and migrations (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
 npm run test:auth # after a build: sign-up, verification, reset, deletion, anonymous linking and rate limits against the real Better Auth
 ```
 
 `npm run knip` (also in CI) reports unused files, exports and dependencies, which ESLint can't see across files. Its
-config (`knip.json`) lists the three entry points (`main.ts`, `worker.ts`, `cleanup.ts`); add any new one there. It
+config (`knip.json`) lists the four entry points (`main.ts`, `worker.ts`, `cleanup.ts`, `db.ts`); add any new one there. It
 also lists the e2e and auth-flow tests itself, with Knip's Node.js plugin off: that plugin takes every `test-*` file
 for a `node --test` entry, so the unused exports of a helper like `src/testing/test-ruleset.ts` went unreported.
 
@@ -561,13 +574,15 @@ Every push to `init-setup` that passes CI deploys to production
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The `deploy` job signs in to Google Cloud with Workload
 Identity Federation: GitHub's OIDC token is exchanged for a short-lived credential, no service account key exists, and
 only this repository's pushes to `init-setup` are accepted. It builds one image, pushes it to Artifact Registry, rolls
-the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, and ends with a health check.
+the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, checks the API's health,
+and ends by running the `adlens-db` job on that image (see Architecture). That job runs last because a migration ships
+with code that reads both the old and the new shape: the data changes only once every running process can read it.
 
 [`infra/setup.sh`](infra/setup.sh) (plain gcloud, see [Design decisions](#design-decisions)) creates
 everything the workflow relies on: the APIs, the bucket, its CORS policy from [`infra/cors.json`](infra/cors.json) and its lifecycle rule from
 [`infra/lifecycle.json`](infra/lifecycle.json) (Contact form attachments are deleted after 30 days),
 the runtime and deploy service accounts, the Workload Identity provider, the `API_SECRETS` bundle, the image
-repository and the Cloud Scheduler job that starts `adlens-cleanup` daily. It also owns the runtime config (env vars,
+repository, the `adlens-db` job and the Cloud Scheduler job that starts `adlens-cleanup` daily. It also owns the runtime config (env vars,
 secrets, the analysis job's 2 retries and 15-minute timeout, the cleanup job's schedule), which CI
 leaves untouched, and can deploy the current checkout by hand. The API is served at `https://api.useadlens.com`
 through a Cloud Run domain mapping.
@@ -719,12 +734,15 @@ Why the system is built this way, and what was rejected. Decisions that span the
   anonymous plugin deletes a linked anonymous user through the internal adapter, which skips it. That delete only logs
   a failure, so a linked anonymous user can survive and be purged later by the cleanup: a purge keeps every object
   under the user's prefix that another user's job still references.
-- **A Better Auth index that can't be built is logged, not fatal.** Without it the API works as it did before, only
-  slower and keeping expired rows; failing the start would stop every new instance, and Cloud Run starts one on every
-  cold start, so one bad row (a duplicate email) would take the API down until the data was fixed. Each index is
-  created on its own, and the log names the index and MongoDB's error code, never the message, which quotes the
-  duplicate value. Declaring the indexes through a Better Auth plugin schema was rejected: its adapter can't create
-  a TTL, and it creates indexes before each write, so a failed unique index would fail every sign-up and sign-in.
+- **Indexes and migrations run in a job after the deploy, not on start.** Building indexes on every start
+  (Mongoose's default) loads the production database on each cold start, lets whichever process starts first build a
+  new index, and never removes one: two legacy `jobs` indexes had drifted in that way. A job run once per deploy is
+  the one place indexes are created, and its log is where drift shows. An index that can't be built (a duplicate
+  email under a unique index, say) fails that run and the deploy's last step, never an API start: without it the API
+  works as before, only slower. Each Better Auth index is created on its own, and the log names the index and
+  MongoDB's error code, never the message, which quotes the duplicate value. Declaring Better Auth's indexes through a
+  plugin schema was rejected: its adapter can't create a TTL, and it creates indexes before each write, so a failed
+  unique index would fail every sign-up and sign-in.
 - **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
   Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
