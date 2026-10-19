@@ -100,11 +100,13 @@ conditional update on the expected current status, so two racing callers can nev
 
     **Restart** `POST /v1/jobs/:id/restart` runs the same steps on a failed job's own video, charged as a new run. The
     claim is `error → verifying`, only for the owner, only for a failure the video isn't to blame for
-    (`ANALYSIS_FAILED`, `ANALYSIS_TIMED_OUT`, `MODEL_UNAVAILABLE`, `VIDEO_CHECK_FAILED`) and only within 6 hours of the
-    job's creation (`isJobRestartable` and `JOB_START_WINDOW_MS` in `adlens-shared`), else 409 `JOB_NOT_RESTARTABLE`.
-    The cleanup deletes a failed job's video only after that same window, so a restartable job always has its video.
-    The claim clears the failed run's error, execution and Gemini call mark (its billed calls stay in `usage`); a run
-    already counted for its preset isn't counted again, since it is still one analysis.
+    (`ANALYSIS_FAILED`, `ANALYSIS_TIMED_OUT`, `MODEL_UNAVAILABLE`, `VIDEO_CHECK_FAILED`) and only within 5 h 50 min of
+    the job's creation (`isJobRestartable` and `JOB_RESTART_WINDOW_MS` in `adlens-shared`), else 409
+    `JOB_NOT_RESTARTABLE`. The cleanup deletes a failed job's video only after 6 hours (`JOB_START_WINDOW_MS`), so a
+    restartable job always has its video. The claim clears the failed run's error, execution and Gemini call mark (its
+    billed calls stay in `usage`); a run already counted for its preset isn't counted again, since it is still one
+    analysis. Every worker is started with its run's id (`WORKER_RUN_ID`, the job's `chargedRunId`) and starts or marks
+    the job only while that run is the job's, so a late worker of the failed run can't take over the restarted one.
 
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
