@@ -102,13 +102,16 @@ conditional update on the expected current status, so two racing callers can nev
     refusals come first (quota and network, as `GET /v1/admission` answers them), then the rule: the owner's job, in
     `error`, not restarted yet and created less than 6 hours ago (`isJobRestartable` and `JOB_START_WINDOW_MS` in
     `adlens-shared`), whose video is still stored (the object, or a published sample); otherwise 409
-    `JOB_NOT_RESTARTABLE` and nothing changes. The failed job is then claimed with one conditional write
-    (`restartedAs`), and a new pending job (`restartOf`) gets its file, media, settings and counted preset, and is
-    started like any other. The failed job stays as the record of its run: lists leave it out, and a deletion of its
+    `JOB_NOT_RESTARTABLE` and nothing changes. A new pending job (`restartOf`) then gets the failed job's file, media,
+    settings and counted preset, the failed job is claimed with one conditional write (`restartedAs`; if that loses a
+    race, the new job is deleted and the answer is 409), and the new job is started like any other. Tabs hear of the
+    claim only once the new run has started or failed, so an open page of the failed job moves to its restart then. The
+    failed job stays as the record of its run: lists leave it out, its replay URL is refused, and a deletion of its
     restart deletes it too. A restart of a run already counted for its preset isn't counted again.
-    The cleanup can't delete the video under a restart: it claims each video first (`videoDeletingAt`, a conditional
-    write that excludes restarted jobs), then deletes it, then marks `videoDeletedAt`, and a restart refuses a claimed
-    job. A restarted job's video is its restart's, which the cleanup judges by the restart's own age.
+    Nothing deletes the video under a restart: the cleanup claims each video first (`videoDeletingAt`, a conditional
+    write that excludes restarted jobs), then deletes it, then marks `videoDeletedAt`; a deletion claims the same way;
+    and a restart refuses a claimed job. A restarted job's video is its restart's, which the cleanup judges by the
+    restart's own age.
 
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
