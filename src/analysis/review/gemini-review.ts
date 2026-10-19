@@ -20,7 +20,8 @@ import type { VideoReview, VideoReviewRequest } from './video-reviewer'
 export const GEMINI_REQUEST_TIMEOUT_MS = 10 * 60 * 1000
 
 // A full answer for ~60 rules and a 60-second transcript is a few thousand tokens; the cap bounds what a runaway
-// generation can cost per attempt. The lab shows it as production's cap.
+// generation can cost per attempt. Not yet measured against a video at the 3-minute limit (MAX_DURATION_S), whose
+// transcript is longer. The lab shows it as production's cap.
 /** @public */
 export const GEMINI_MAX_OUTPUT_TOKENS = 8192
 
