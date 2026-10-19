@@ -369,7 +369,10 @@ answering is a plain reply; its text isn't stored.
 ## API
 
 Every `/v1/*` route except `GET /v1/samples`, `GET /v1/demos` and `POST /v1/contact` (and `/uploads`) requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
-session cookie (never from the body) and every query is scoped by it. Errors share one shape,
+session cookie (never from the body) and every query is scoped by it. The `/v1/admin/*` routes take
+[`AdminGuard`](src/admin/admin.guard.ts) instead: it reads `isAdmin` from the user's document on every request, and
+answers anyone else (no session, anonymous, unconfirmed, member) with exactly the 404 of a route that doesn't exist,
+so they can't tell the routes are there. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`; a body that isn't valid JSON (400),
 is over 1 MB (413) or comes in an unsupported charset or encoding (415) answers `VALIDATION_FAILED` with that status.
 Better Auth's routes (`/api/auth/*`, mounted by [`mountAuthRoute`](src/auth/auth-route.ts) before the JSON parser) read
@@ -400,6 +403,8 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited)                                                                                                                                                                                                                                               | **204**                                              |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                                                                                                                                                                                                                                                                                                          | `{ samples }`                                        |
 | `GET /v1/demos`             | Active, finished demo analyses with their summary and a video URL (public)                                                                                                                                                                                                                                                                               | `{ demos }`                                          |
+| `GET /v1/admin/jobs`        | Every job, newest first, with its owner, file name, sample title and each recorded Gemini call (admins only; raw records, the admin page derives costs)                                                                                                                                                                                                  | `{ jobs }`                                           |
+| `GET /v1/admin/users`       | Every user, newest first, with their access flags; an anonymous user's email is `null` (admins only)                                                                                                                                                                                                                                                     | `{ users }`                                          |
 
 ## Ad-policy rules
 
@@ -738,6 +743,12 @@ Why the system is built this way, and what was rejected. Decisions that span the
   created on its own, and the log names the index and MongoDB's error code, never the message, which quotes the
   duplicate value. Declaring the indexes through a Better Auth plugin schema was rejected: its adapter can't create
   a TTL, and it creates indexes before each write, so a failed unique index would fail every sign-up and sign-in.
+- **Admin routes look like routes that don't exist.** A 401 or a 403 would confirm `/v1/admin/*` exists, so anyone
+  but an admin gets the unknown-route 404, byte for byte (an e2e test compares the two). The paths are in public code,
+  so this mainly gives scanners and probing users nothing to tell apart, as another user's job or preset already
+  answers 404. Admin status is read from the user's document on each request, so removing `isAdmin` takes effect at
+  once. The routes return every record, unpaginated: fine at tens of users and hundreds of jobs; a cursor comes when
+  jobs reach a few thousand.
 - **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
   Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
