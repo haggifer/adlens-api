@@ -19,11 +19,11 @@ import type { VideoReview, VideoReviewRequest } from './video-reviewer'
 // Well under the Cloud Run task timeout (15 min), so a hung call ends in a handled failure, not a killed task.
 export const GEMINI_REQUEST_TIMEOUT_MS = 10 * 60 * 1000
 
-// A full answer for ~60 rules and a 60-second transcript is a few thousand tokens; the cap bounds what a runaway
-// generation can cost per attempt. Not yet measured against a video at the 3-minute limit (MAX_DURATION_S), whose
-// transcript is longer. The lab shows it as production's cap.
+// A ceiling on a runaway generation's cost per attempt, not a budget: a reply is billed for what it generates. The
+// largest stored reply (2026-10-19, 45 calls, ads up to 3.5 minutes) was about 5,000 tokens, thinking included, so the
+// cap leaves about three times that. The lab shows it as production's cap.
 /** @public */
-export const GEMINI_MAX_OUTPUT_TOKENS = 8192
+export const GEMINI_MAX_OUTPUT_TOKENS = 16384
 
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
