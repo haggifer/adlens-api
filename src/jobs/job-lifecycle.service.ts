@@ -10,6 +10,7 @@ import type { IpCharge } from '../ip-quota/ip-rules'
 import { LivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
 import { UNSTARTED_JOB_MS } from './job-status'
+import { toStoredAnalysis } from './job.mapper'
 
 // Whether this attempt set the call mark, found it set by an earlier attempt, or found the job no longer analyzed.
 type CallMarking = 'marked' | 'repeated' | 'ended'
@@ -221,7 +222,7 @@ export class JobLifecycle {
         const done = await this.model
             .findOneAndUpdate(
                 { _id: jobId, status: JobStatus.Analyzing },
-                { $set: { status: JobStatus.Analyzed, analysis }, ...recordCall(call) },
+                { $set: { status: JobStatus.Analyzed, analysis: toStoredAnalysis(analysis) }, ...recordCall(call) },
                 { new: true },
             )
             .lean<StoredJob>()

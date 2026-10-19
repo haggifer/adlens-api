@@ -359,7 +359,7 @@ describe('JobLifecycle', () => {
             expect(await lifecycle.complete(jobId, ANALYSIS, CALL)).toBe(true)
             expect(await findJob(jobId)).toMatchObject({
                 status: JobStatus.Analyzed,
-                analysis: ANALYSIS,
+                analysis: { ...ANALYSIS, completedAt: new Date(ANALYSIS.completedAt) },
                 usage: usageOf(CALL),
                 chargedRunId: expect.any(String),
                 chargedIpRunId: expect.any(String),
