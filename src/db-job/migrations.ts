@@ -1,4 +1,6 @@
 import type { Connection } from 'mongoose'
+import { DATES_MIGRATION } from './dates-migration'
+import { LEGACY_JOB_FIELDS_MIGRATION } from './legacy-job-fields-migration'
 
 export interface Migration {
     // Dated, so the list reads in the order the migrations were written: `YYYY-MM-DD-<what>`.
@@ -16,7 +18,7 @@ const MIGRATIONS_COLLECTION = 'migrations'
 
 // Every data change older code can't have made, oldest first. Each ships with the code that reads both shapes and
 // runs after that code is live, so no running version ever meets a shape it doesn't know.
-export const MIGRATIONS: Migration[] = []
+export const MIGRATIONS: Migration[] = [DATES_MIGRATION, LEGACY_JOB_FIELDS_MIGRATION]
 
 // The migrations not yet recorded as applied, in list order; when applied, each runs, then is recorded.
 export const runMigrations = async (
