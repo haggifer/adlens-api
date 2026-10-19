@@ -9,6 +9,7 @@ type BodyRequest = IncomingMessage & { body?: unknown }
 
 // Better Auth's request bodies are a few short fields. better-call reads them with no limit of its own: only the
 // declared content-length bounds a body, and a chunked one has none at all.
+/** @public test/auth-flow.test.mjs reads it from dist/, which knip only follows once the API is built (CI runs knip first). */
 export const AUTH_BODY_LIMIT_BYTES = 64 * 1024
 
 const TOO_LARGE: ApiError = {
