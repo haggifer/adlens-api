@@ -91,11 +91,15 @@ export const ruleSchema = z
         { message: "a rule's placements must belong to its platforms" },
     )
 
-const ruleSourceSchema = z.object({ baseUrl: z.url(), label: z.string(), fetchedAt: z.string() })
+// A calendar day: YYYY-MM-DD in a ruleset file, that day's UTC midnight once parsed and stored. Rulesets published
+// before 2026-10-19 hold the text until the dates migration rewrites them.
+const calendarDaySchema = z.union([z.date(), z.iso.date().transform((day) => new Date(day))])
+
+const ruleSourceSchema = z.object({ baseUrl: z.url(), label: z.string(), fetchedAt: calendarDaySchema })
 
 export const ruleSetSchema = z
     .object({
-        meta: z.object({ rulesetId: z.string(), version: z.string(), generatedAt: z.string() }),
+        meta: z.object({ rulesetId: z.string(), version: z.string(), generatedAt: calendarDaySchema }),
         sources: z.record(z.string(), ruleSourceSchema),
         rules: z.array(ruleSchema).min(1),
     })
