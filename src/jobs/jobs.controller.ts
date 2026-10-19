@@ -95,7 +95,7 @@ export class JobsController {
         return { job }
     }
 
-    // A failed run again on the video the job already has (isJobRestartable), charged like a new one.
+    // A failed run again, as a new job on the same video, charged as a new run.
     @Post(':id/restart')
     @HttpCode(HttpStatus.ACCEPTED)
     async restart(

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { configStub } from '../testing/config-stub'
-import { StorageService } from './storage.service'
+import { SIGNED_URL_TTL_MS, StorageService } from './storage.service'
 
 const PATH = 'users/u1/jobs/j1/video'
 const CONTENT_TYPE = 'video/mp4'
@@ -73,6 +73,16 @@ describe('StorageService', () => {
 
             expect(signed.pathname).toBe(`/other/${PATH}`)
             expect(signed.searchParams.get('X-Goog-Signature')).toEqual(expect.any(String))
+        })
+
+        it('signs a replay for longer than the verification read, so a seek late in a viewing still loads', async () => {
+            const replay = await storage.createFileReadUrl({ bucket: 'bucket', path: PATH })
+            const verification = await storage.createReadUrl(PATH)
+            const expiresS = (url: string) => Number(new URL(url).searchParams.get('X-Goog-Expires'))
+
+            expect(expiresS(verification.url)).toBe(SIGNED_URL_TTL_MS / 1000)
+            expect(expiresS(replay.url)).toBeGreaterThan(expiresS(verification.url))
+            expect(replay.expiresAt.getTime()).toBeGreaterThan(verification.expiresAt.getTime())
         })
 
         it('signs every file when no public media bucket is configured', async () => {

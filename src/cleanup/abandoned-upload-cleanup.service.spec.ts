@@ -74,9 +74,43 @@ describe('AbandonedUploadCleanupService', () => {
 
             expect(result).toEqual({ deleted: 1, failed: 0 })
             expect(storage.delete).toHaveBeenCalledWith(path)
-            expect((await findJob(jobId))?.videoDeletedAt).toEqual(NOW)
+            expect(await findJob(jobId)).toMatchObject({ videoDeletedAt: NOW })
+            expect((await findJob(jobId))?.videoDeletingAt).toBeUndefined()
         },
     )
+
+    it("leaves a restarted job's video to its restart", async () => {
+        await createJob(7, { status: JobStatus.Error, restartedAs: new Types.ObjectId().toString() })
+
+        await cleanup.run(NOW)
+
+        expect(storage.delete).not.toHaveBeenCalled()
+    })
+
+    it('keeps the video of a job restarted after the cleanup found it', async () => {
+        const { jobId } = await createJob(7, { status: JobStatus.Error })
+        const find = jobs.find.bind(jobs)
+
+        // The restart claims the job between the cleanup's find and its own claim.
+        jest.spyOn(jobs, 'find').mockImplementationOnce(((...args: Parameters<typeof jobs.find>) => {
+            const query = find(...args)
+            const lean = query.lean.bind(query)
+
+            return Object.assign(query, {
+                lean: async () => {
+                    const found = await lean()
+
+                    await jobs.updateOne({ _id: jobId }, { $set: { restartedAs: new Types.ObjectId().toString() } })
+
+                    return found
+                },
+            })
+        }) as typeof jobs.find)
+
+        expect(await cleanup.run(NOW)).toEqual({ deleted: 0, failed: 0 })
+        expect(storage.delete).not.toHaveBeenCalled()
+        expect((await findJob(jobId))?.videoDeletingAt).toBeUndefined()
+    })
 
     it('has no upper age bound, so a day the cleanup missed is caught up', async () => {
         await createJob(24 * 90)
@@ -156,6 +190,14 @@ describe('AbandonedUploadCleanupService', () => {
 
         expect(await cleanup.run(NOW)).toEqual({ deleted: 1, failed: 1 })
         expect(storage.delete).toHaveBeenCalledWith(other.path)
+        // Still claimed, so no restart starts on a video that may be half gone.
+        expect(await findJob(failing.jobId)).toMatchObject({ videoDeletingAt: NOW })
         expect((await findJob(failing.jobId))?.videoDeletedAt).toBeUndefined()
+
+        storage.delete.mockResolvedValue(undefined)
+        const later = new Date(NOW.getTime() + 24 * HOUR_MS)
+
+        expect(await cleanup.run(later)).toEqual({ deleted: 1, failed: 0 })
+        expect(await findJob(failing.jobId)).toMatchObject({ videoDeletedAt: later })
     })
 })

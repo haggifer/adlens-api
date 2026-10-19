@@ -96,6 +96,14 @@ const jobDocSchema = z.object({
     usage: tokenUsageSchema.optional(),
     // When the daily cleanup deleted the job's video, which backed no results (AbandonedUploadCleanupService).
     videoDeletedAt: z.date().optional(),
+    // Set by the cleanup just before it deletes the video, and kept until videoDeletedAt replaces it: a restart never
+    // claims a job that carries it, so the video can't be deleted under a restart.
+    videoDeletingAt: z.date().optional(),
+    // The failed job this one runs again, on the same video (JobsService.createRestart).
+    restartOf: z.string().optional(),
+    // Set when this failed job was restarted: the job that runs it again. The video is then that job's, so the cleanup
+    // and a deletion leave it to that job, and lists leave this one out.
+    restartedAs: z.string().optional(),
     // Set when the job analyzes a published sample; its file then points at the sample's object, never a user upload.
     sampleId: z.string().optional(),
     // Set on a demo job: its file points at a video under demos/, which only the maintainer's script manages.

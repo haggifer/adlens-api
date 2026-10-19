@@ -2,13 +2,11 @@ import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
     type Analysis,
-    JOB_RESTART_WINDOW_MS,
     JOB_START_WINDOW_MS,
     JobErrorCode,
     type JobMedia,
     JobStatus,
     RequestErrorCode,
-    RESTARTABLE_JOB_ERRORS,
 } from 'adlens-shared'
 import { type FilterQuery, Model, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
@@ -52,11 +50,6 @@ const SWEPT = [JobStatus.Pending, JobStatus.Error]
 const HELD_CHARGES_PROJECTION = { userId: 1, chargedRunId: 1, chargedIpRunId: 1 }
 
 const newRunId = () => new Types.ObjectId().toString()
-
-// A worker only acts on the run it was started for: a restart starts a new run on the same job, and a worker of the
-// earlier one (a late Cloud Run retry, say) must not take it over. A worker without a run id (dispatched before workers
-// got one) is let through, as before.
-const ofRun = (runId: string | null): FilterQuery<JobDoc> => (runId ? { chargedRunId: runId } : {})
 
 // What makes a job abandoned, per status. Both the sweep's find and each job's final write use it.
 const staleConditions = (now: Date): FilterQuery<JobDoc>[] => {
@@ -111,39 +104,10 @@ export class JobLifecycle {
         return this.transition({ _id: jobId, userId, status: JobStatus.Pending }, { status: JobStatus.Verifying })
     }
 
-    // error → verifying, for the owner's restart of a run that failed for a reason its video isn't to blame for
-    // (isJobRestartable). Within the restart window, which ends before the start window does, so the job still has its
-    // video: the cleanup deletes it only after the start window. What the failed run left is cleared, its call mark included, so the new worker may call the model;
-    // the calls it was billed for stay on the job. null when the job isn't the caller's restartable job.
-    async claimForRestart(userId: string, jobId: string, now = new Date()): Promise<StoredJob | null> {
-        const job = await this.model
-            .findOneAndUpdate(
-                {
-                    _id: jobId,
-                    userId,
-                    status: JobStatus.Error,
-                    errorCode: { $in: RESTARTABLE_JOB_ERRORS },
-                    createdAt: { $gt: new Date(now.getTime() - JOB_RESTART_WINDOW_MS) },
-                },
-                {
-                    $set: { status: JobStatus.Verifying },
-                    $unset: { errorCode: 1, errorDetail: 1, execution: 1, modelCallStartedAt: 1 },
-                },
-                { new: true },
-            )
-            .lean<StoredJob>()
-
-        if (job) {
-            await this.live.publishJob(job)
-        }
-
-        return job
-    }
-
     // verifying → error, refunding whatever the job still holds: the run couldn't start (the upload was rejected,
-    // missing or couldn't be checked, the sample is gone, or it couldn't be charged). Never back to pending, where
-    // nothing would start it again; only its owner's restart takes it out of error. false when the job already left
-    // verification.
+    // missing or couldn't be checked, the sample is gone, or it couldn't be charged). Never back to pending: the web
+    // never starts a job twice (a restart creates a new job), so a job put back would stay pending for good. false when
+    // the job already left verification.
     async failStart(jobId: string, errorCode: JobErrorCode, detail?: string): Promise<boolean> {
         return this.settle(
             { _id: jobId, status: JobStatus.Verifying },
@@ -217,12 +181,11 @@ export class JobLifecycle {
         )
     }
 
-    // queued / analyzing → analyzing for one worker attempt. null when the job is already final or unknown, or now runs
-    // another run.
-    async startAttempt(jobId: string, runId: string | null = null): Promise<StoredJob | null> {
+    // queued / analyzing → analyzing for one worker attempt. null when the job is already final or unknown.
+    async startAttempt(jobId: string): Promise<StoredJob | null> {
         const job = await this.model
             .findOneAndUpdate(
-                { _id: jobId, status: { $in: IN_FLIGHT }, ...ofRun(runId) },
+                { _id: jobId, status: { $in: IN_FLIGHT } },
                 { $set: { status: JobStatus.Analyzing }, $inc: { attempts: 1 } },
                 { new: true },
             )
@@ -236,11 +199,10 @@ export class JobLifecycle {
     }
 
     // Marks the attempt's Gemini call as started, so no later attempt makes one again. 'repeated' when an earlier
-    // attempt already started one (it may have been billed), 'ended' when the job is no longer being analyzed for this
-    // run.
-    async markModelCall(jobId: string, runId: string | null = null, now = new Date()): Promise<CallMarking> {
+    // attempt already started one (it may have been billed), 'ended' when the job is no longer being analyzed.
+    async markModelCall(jobId: string, now = new Date()): Promise<CallMarking> {
         const marked = await this.model.updateOne(
-            { _id: jobId, status: JobStatus.Analyzing, modelCallStartedAt: { $exists: false }, ...ofRun(runId) },
+            { _id: jobId, status: JobStatus.Analyzing, modelCallStartedAt: { $exists: false } },
             { $set: { modelCallStartedAt: now } },
         )
 
@@ -248,7 +210,7 @@ export class JobLifecycle {
             return 'marked'
         }
 
-        const isAnalyzing = await this.model.exists({ _id: jobId, status: JobStatus.Analyzing, ...ofRun(runId) })
+        const isAnalyzing = await this.model.exists({ _id: jobId, status: JobStatus.Analyzing })
 
         return isAnalyzing ? 'repeated' : 'ended'
     }

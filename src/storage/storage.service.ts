@@ -27,6 +27,10 @@ interface StoredFile {
 
 export const SIGNED_URL_TTL_MS = 15 * 60 * 1000
 
+// A replay URL outlives a viewing: a seek into a part of the video the browser hasn't loaded yet fetches it with this
+// URL, and the web keeps one URL per page so the player never restarts.
+const REPLAY_URL_TTL_MS = 2 * 60 * 60 * 1000
+
 // A public object's URL never expires; this only tells a client when to ask again, as for a signed one.
 const PUBLIC_URL_REFRESH_MS = 24 * 60 * 60 * 1000
 
@@ -68,7 +72,7 @@ export class StorageService {
     }
 
     async createReadUrl(path: string): Promise<SignedReadUrl> {
-        return this.signReadUrl({ bucket: this.bucketName, path })
+        return this.signReadUrl({ bucket: this.bucketName, path }, SIGNED_URL_TTL_MS)
     }
 
     // Demo and sample videos in the public media bucket get their plain address: nothing to sign (an IAM call each
@@ -78,11 +82,11 @@ export class StorageService {
             return { url: toPublicUrl(file), expiresAt: new Date(Date.now() + PUBLIC_URL_REFRESH_MS) }
         }
 
-        return this.signReadUrl(file)
+        return this.signReadUrl(file, REPLAY_URL_TTL_MS)
     }
 
-    private async signReadUrl({ bucket, path }: StoredFile): Promise<SignedReadUrl> {
-        const expiresAt = new Date(Date.now() + SIGNED_URL_TTL_MS)
+    private async signReadUrl({ bucket, path }: StoredFile, ttlMs: number): Promise<SignedReadUrl> {
+        const expiresAt = new Date(Date.now() + ttlMs)
         const [url] = await this.storage
             .bucket(bucket)
             .file(path)
