@@ -86,6 +86,7 @@ describe('Admin API (e2e)', () => {
         expect(unknown.status).toBe(404)
         expect(res.status).toBe(unknown.status)
         expect(res.headers['content-type']).toBe(unknown.headers['content-type'])
+        expect(res.headers['cache-control']).toBe(unknown.headers['cache-control'])
         expect(res.text).toBe(unknown.text.replace(UNKNOWN_PATH, path))
     }
 
@@ -185,6 +186,7 @@ describe('Admin API (e2e)', () => {
         })
         expect(callsJob?.file).toEqual({ name: `${CALLS_JOB.toString()}.mp4` })
         expect(callsJob?.usage?.calls).toEqual([{ ...CALL, at: '2026-09-30T10:01:00.000Z' }])
+        expect(res.headers['cache-control']).toBe('no-store')
     })
 
     it('lists every user for an admin, an anonymous one without its placeholder email', async () => {
@@ -204,6 +206,7 @@ describe('Admin API (e2e)', () => {
             isAdmin: true,
         })
         expect(listed.map((user) => user.id)).toEqual(expect.arrayContaining([MEMBER.toString()]))
+        expect(res.headers['cache-control']).toBe('no-store')
     })
 
     it('reads admin status on every request, so an admin who loses it gets an unknown route next', async () => {

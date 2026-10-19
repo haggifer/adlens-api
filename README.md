@@ -748,7 +748,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
   so this mainly gives scanners and probing users nothing to tell apart, as another user's job or preset already
   answers 404. Admin status is read from the user's document on each request, so removing `isAdmin` takes effect at
   once. The routes return every record, unpaginated: fine at tens of users and hundreds of jobs; a cursor comes when
-  jobs reach a few thousand.
+  jobs reach a few thousand. An admin's answer is `Cache-Control: no-store`, so every user's email stays out of the
+  browser's disk cache; a refusal doesn't carry it, as an unknown route doesn't.
 - **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
   Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
