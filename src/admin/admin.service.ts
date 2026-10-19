@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose'
 import type { AdminJob, AdminUser } from 'adlens-shared'
-import type { Connection } from 'mongoose'
+import type { Connection, Types } from 'mongoose'
 import { JOB_COLLECTION } from '../database/job.doc'
 import { SAMPLE_COLLECTION, type StoredSample } from '../database/sample.doc'
 import { USER_COLLECTION } from '../database/user.doc'
@@ -52,11 +52,15 @@ export class AdminService {
             .toArray()
     }
 
-    private async getSampleTitles(jobs: JobRecord[]): Promise<Map<string, string>> {
-        const samples = await this.connection
+    private findSampleTitles(ids: Types.ObjectId[]): Promise<SampleTitleRecord[]> {
+        return this.connection
             .collection<SampleTitleRecord>(SAMPLE_COLLECTION)
-            .find({ _id: { $in: getSampleObjectIds(jobs) } }, { projection: SAMPLE_TITLE_PROJECTION })
+            .find({ _id: { $in: ids } }, { projection: SAMPLE_TITLE_PROJECTION })
             .toArray()
+    }
+
+    private async getSampleTitles(jobs: JobRecord[]): Promise<Map<string, string>> {
+        const samples = await this.findSampleTitles(getSampleObjectIds(jobs))
 
         return new Map(samples.map((sample) => [sample._id.toString(), sample.title]))
     }
