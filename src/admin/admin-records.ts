@@ -1,4 +1,4 @@
-import type { AdminJob, AdminUser } from 'adlens-shared'
+import type { AdminJob, AdminModelCall, AdminUser } from 'adlens-shared'
 import { Types } from 'mongoose'
 import type { ModelCall, StoredJob } from '../database/job.doc'
 import type { UserExtras } from '../database/user.doc'
@@ -72,8 +72,23 @@ export const getSampleObjectIds = (jobs: JobRecord[]): Types.ObjectId[] => {
     return [...ids].map((id) => new Types.ObjectId(id))
 }
 
+// Field by field, so a field added to the stored call reaches no client until it is listed here too.
+const toAdminCall = (call: CallRecord): AdminModelCall => ({
+    at: call.at.toISOString(),
+    model: call.model,
+    location: call.location,
+    promptTokens: call.promptTokens,
+    candidatesTokens: call.candidatesTokens,
+    thoughtsTokens: call.thoughtsTokens,
+    cachedTokens: call.cachedTokens,
+    promptTokensByModality: call.promptTokensByModality,
+    cachedTokensByModality: call.cachedTokensByModality,
+    durationMs: call.durationMs,
+    trafficType: call.trafficType,
+})
+
 const toAdminUsage = ({ calls }: NonNullable<JobRecord['usage']>): NonNullable<AdminJob['usage']> =>
-    calls ? { calls: calls.map((call) => ({ ...call, at: call.at.toISOString() })) } : {}
+    calls ? { calls: calls.map(toAdminCall) } : {}
 
 export const toAdminJob = (record: JobRecord, sampleTitles: Map<string, string>): AdminJob => ({
     id: record._id.toString(),

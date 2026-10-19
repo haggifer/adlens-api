@@ -55,6 +55,14 @@ describe('toAdminJob', () => {
         })
     })
 
+    it('returns only the listed fields of a call, whatever else the record holds', () => {
+        const callWithExtras = { ...CALL, totalTokens: 9539, finishReason: 'STOP' }
+
+        const [adminCall] = toAdminJob(job({ usage: { calls: [callWithExtras] } }), new Map()).usage?.calls ?? []
+
+        expect(Object.keys(adminCall).sort()).toEqual(Object.keys(CALL).sort())
+    })
+
     it('tells a job recorded before calls were (usage, no calls) from one that never reached Gemini (no usage)', () => {
         expect(toAdminJob(job({ usage: {} }), new Map()).usage).toEqual({})
         expect(toAdminJob(job(), new Map())).not.toHaveProperty('usage')
