@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { JobErrorCode, type JobMedia, MAX_DURATION_S, MAX_UPLOAD_BYTES, videoMimeTypeSchema } from 'adlens-shared'
+import { JobErrorCode, type JobMedia, MAX_UPLOAD_BYTES, videoMimeTypeSchema } from 'adlens-shared'
 import { describeError } from '../../common/error-message'
 import { StorageService } from '../../storage/storage.service'
 import { MediaProber, type ProbeResult, UndecodableMediaError } from './media-prober'
@@ -64,10 +64,6 @@ export class VideoVerifier {
 
         if (!Number.isFinite(probe.durationS) || probe.durationS <= 0) {
             return reject(JobErrorCode.VideoUnreadable)
-        }
-
-        if (probe.durationS > MAX_DURATION_S) {
-            return reject(JobErrorCode.VideoTooLong)
         }
 
         return {

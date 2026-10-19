@@ -8,7 +8,6 @@ import {
     JobStatus,
     LiveEvent,
     Market,
-    MAX_DURATION_S,
     Placement,
     Platform,
     type Preset,
@@ -275,18 +274,18 @@ describe('Jobs API (e2e)', () => {
         expect(dispatch).not.toHaveBeenCalled()
     })
 
-    it('rejects a video over the duration limit without charging, and deletes the upload', async () => {
+    it('rejects an unreadable video without charging, and deletes the upload', async () => {
         const jobId = await createJob()
         const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
 
-        probe = { ...probe, durationS: MAX_DURATION_S + 1 }
+        probe = { ...probe, durationS: 0 }
 
         const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(422)
         const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
         const job = await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).set(as(OWNER))
 
-        expect(res.body.errorCode).toBe(JobErrorCode.VideoTooLong)
-        expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoTooLong })
+        expect(res.body.errorCode).toBe(JobErrorCode.VideoUnreadable)
+        expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoUnreadable })
         expect(deleteObject.mock.calls).toEqual([[`users/${OWNER}/jobs/${jobId}/video`]])
         expect(after.body.quota.used).toBe(before.body.quota.used)
         expect(dispatch).not.toHaveBeenCalled()
@@ -295,12 +294,12 @@ describe('Jobs API (e2e)', () => {
     it('still answers a rejected video with its 422 when deleting the upload fails', async () => {
         const jobId = await createJob()
 
-        probe = { ...probe, durationS: MAX_DURATION_S + 1 }
+        probe = { ...probe, durationS: 0 }
         deleteObject.mockRejectedValueOnce(new Error('GCS 503'))
 
         const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(422)
 
-        expect(res.body.errorCode).toBe(JobErrorCode.VideoTooLong)
+        expect(res.body.errorCode).toBe(JobErrorCode.VideoUnreadable)
     })
 
     it.each([

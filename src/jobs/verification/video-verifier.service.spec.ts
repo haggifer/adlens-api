@@ -58,10 +58,14 @@ describe('VideoVerifier', () => {
         expect(await verify(null)).toEqual({ kind: 'upload-incomplete' })
     })
 
+    // Branch no-time-limit: lets the maintainer measure what longer videos cost.
+    it('accepts a video of any length', async () => {
+        expect(await verify(MP4, { ...PROBE, durationS: MAX_DURATION_S * 10 })).toMatchObject({ kind: 'verified' })
+    })
+
     it.each([
         ['too large', { ...MP4, sizeBytes: MAX_UPLOAD_BYTES + 1 }, PROBE, JobErrorCode.VideoTooLarge],
         ['not a supported type', { ...MP4, contentType: 'video/x-matroska' }, PROBE, JobErrorCode.UnsupportedFormat],
-        ['too long', MP4, { ...PROBE, durationS: MAX_DURATION_S + 1 }, JobErrorCode.VideoTooLong],
         ['without a duration', MP4, { ...PROBE, durationS: Number.NaN }, JobErrorCode.VideoUnreadable],
         ['of zero length', MP4, { ...PROBE, durationS: 0 }, JobErrorCode.VideoUnreadable],
     ])('rejects a video that is %s', async (_case, info, probe, errorCode) => {
