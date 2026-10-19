@@ -1,16 +1,16 @@
 import type { Analysis, Job } from 'adlens-shared'
 import type { StoredAnalysis, StoredJob } from '../database/job.doc'
 
-export const toStoredAnalysis = (analysis: Analysis): StoredAnalysis => ({
-    ...analysis,
-    completedAt: new Date(analysis.completedAt),
-})
-
 // Analyses stored before 2026-10-19 hold the time as ISO text until the dates migration rewrites them; `new Date`
 // reads both.
 const toPublicAnalysis = (analysis: StoredAnalysis): Analysis => ({
     ...analysis,
     completedAt: new Date(analysis.completedAt).toISOString(),
+})
+
+export const toStoredAnalysis = (analysis: Analysis): StoredAnalysis => ({
+    ...analysis,
+    completedAt: new Date(analysis.completedAt),
 })
 
 // The only way a stored job leaves the API: owner, storage location, execution and accounting stay server-side.
