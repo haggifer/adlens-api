@@ -3,6 +3,7 @@ import { getConnectionToken, getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
 import {
     getLiveChannel,
+    JOB_START_WINDOW_MS,
     type Job,
     JobErrorCode,
     JobStatus,
@@ -49,6 +50,7 @@ const STRANGER = new Types.ObjectId().toString()
 const SAMPLER = new Types.ObjectId().toString()
 const DELETER = new Types.ObjectId().toString()
 const PAGER = new Types.ObjectId().toString()
+const RESTARTER = new Types.ObjectId().toString()
 const FILE = { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 5_000_000 }
 const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
 
@@ -146,7 +148,7 @@ describe('Jobs API (e2e)', () => {
             .get<Connection>(getConnectionToken())
             .collection(USER_COLLECTION)
             .insertMany(
-                [OWNER, STRANGER, SAMPLER, DELETER, PAGER].map((id) => ({
+                [OWNER, STRANGER, SAMPLER, DELETER, PAGER, RESTARTER].map((id) => ({
                     _id: new Types.ObjectId(id),
                     email: `${id}@example.com`,
                     emailVerified: true,
@@ -241,7 +243,7 @@ describe('Jobs API (e2e)', () => {
         const started = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(202)
 
         expect(started.body.job).toMatchObject({ status: JobStatus.Queued, media: { durationS: 20 } })
-        expect(dispatch).toHaveBeenCalledWith(jobId, expect.any(String))
+        expect(dispatch).toHaveBeenCalledWith(jobId)
 
         const again = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(409)
         const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER)).expect(200)
@@ -250,7 +252,7 @@ describe('Jobs API (e2e)', () => {
         expect(quota.body.quota.used).toBe(1)
     })
 
-    // A missing upload leaves nothing to start again, so the job ends for good.
+    // The web never starts the same job twice: a failed start (or a restart) creates a new job, so this one ends.
     it('answers UPLOAD_INCOMPLETE and ends the job as UPLOAD_FAILED when the upload is missing', async () => {
         const jobId = await createJob()
 
@@ -341,36 +343,124 @@ describe('Jobs API (e2e)', () => {
         expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
     })
 
-    it('restarts a failed run on the video it has, charged as a new run, and refuses a second restart', async () => {
-        const jobId = await createJob()
+    describe('restarting a failed analysis', () => {
+        // A run that failed to start its worker, as the failed run a user restarts.
+        const createFailedJob = async (): Promise<string> => {
+            const created = await request(app.getHttpServer())
+                .post('/v1/jobs')
+                .set(as(RESTARTER))
+                .send({ settings: SETTINGS, file: FILE })
+                .expect(201)
+            const jobId = created.body.job.id
 
-        dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
-        await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
+            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
+            await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(RESTARTER)).expect(503)
 
-        const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
-        const restarted = await request(app.getHttpServer())
-            .post(`/v1/jobs/${jobId}/restart`)
-            .set(as(OWNER))
-            .expect(202)
-        const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
-        const again = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/restart`).set(as(OWNER)).expect(409)
+            return jobId
+        }
 
-        expect(restarted.body.job).toMatchObject({ id: jobId, status: JobStatus.Queued })
-        expect(restarted.body.job).not.toHaveProperty('errorCode')
-        expect(dispatch).toHaveBeenLastCalledWith(jobId, expect.any(String))
-        expect(after.body.quota.used).toBe(before.body.quota.used + 1)
-        expect(again.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
-    })
+        const restart = (jobId: string, userId = RESTARTER) =>
+            request(app.getHttpServer()).post(`/v1/jobs/${jobId}/restart`).set(as(userId))
 
-    it("doesn't let another user restart the job", async () => {
-        const jobId = await createJob()
+        // Each restart charges a run, so the user's window is emptied between tests; a deletion leaves a tombstone that
+        // other tests count.
+        afterEach(async () => {
+            await app
+                .get<Connection>(getConnectionToken())
+                .collection(USER_COLLECTION)
+                .updateOne({ _id: new Types.ObjectId(RESTARTER) }, { $set: { runs: [] } })
+            await app
+                .get<Model<UploadTombstoneDoc>>(getModelToken(UPLOAD_TOMBSTONE_MODEL))
+                .deleteMany({ path: { $regex: `^users/${RESTARTER}/` } })
+        })
 
-        dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
-        await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
+        const listIds = async (): Promise<string[]> => {
+            const res = await request(app.getHttpServer()).get('/v1/jobs').set(as(RESTARTER)).expect(200)
 
-        const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/restart`).set(as(STRANGER)).expect(404)
+            return res.body.jobs.map((job: { id: string }) => job.id)
+        }
 
-        expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        it('starts a new job on the same video, charged as a new run, keeping the failed one out of the list', async () => {
+            const failedId = await createFailedJob()
+            const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(RESTARTER))
+
+            const res = await restart(failedId).expect(202)
+            const failed = await request(app.getHttpServer()).get(`/v1/jobs/${failedId}`).set(as(RESTARTER)).expect(200)
+            const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(RESTARTER))
+            const ids = await listIds()
+            const stored = await app
+                .get<Model<JobDoc>>(getModelToken(JOB_MODEL))
+                .findById(res.body.job.id)
+                .lean<StoredJob>()
+
+            expect(res.body.job).toMatchObject({ status: JobStatus.Queued, file: FILE })
+            expect(res.body.job.id).not.toBe(failedId)
+            expect(dispatch).toHaveBeenLastCalledWith(res.body.job.id)
+            expect(stored?.file.path).toBe(`users/${RESTARTER}/jobs/${failedId}/video`)
+            expect(failed.body.job).toMatchObject({ status: JobStatus.Error, restartedAs: res.body.job.id })
+            expect(after.body.quota.used).toBe(before.body.quota.used + 1)
+            expect(ids).toContain(res.body.job.id)
+            expect(ids).not.toContain(failedId)
+        })
+
+        it('restarts a failed job only once', async () => {
+            const failedId = await createFailedJob()
+
+            await restart(failedId).expect(202)
+            const again = await restart(failedId).expect(409)
+
+            expect(again.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
+        })
+
+        it('refuses once the video is gone, and changes nothing', async () => {
+            const failedId = await createFailedJob()
+
+            storedObject = null
+            dispatch.mockClear()
+
+            const res = await restart(failedId).expect(409)
+            const failed = await request(app.getHttpServer()).get(`/v1/jobs/${failedId}`).set(as(RESTARTER)).expect(200)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
+            expect(failed.body.job.restartedAs).toBeUndefined()
+            expect(await listIds()).toContain(failedId)
+            expect(dispatch).not.toHaveBeenCalled()
+        })
+
+        it('refuses a run older than the start window', async () => {
+            const failedId = await createFailedJob()
+
+            await app
+                .get<Model<JobDoc>>(getModelToken(JOB_MODEL))
+                .collection.updateOne(
+                    { _id: new Types.ObjectId(failedId) },
+                    { $set: { createdAt: new Date(Date.now() - JOB_START_WINDOW_MS) } },
+                )
+
+            const res = await restart(failedId).expect(409)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
+        })
+
+        it("doesn't let another user restart the job", async () => {
+            const failedId = await createFailedJob()
+            const res = await restart(failedId, STRANGER).expect(404)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        })
+
+        it('deletes the failed run with its restart, and the video once', async () => {
+            const failedId = await createFailedJob()
+            const res = await restart(failedId).expect(202)
+
+            await app.get(JobLifecycle).fail(res.body.job.id, JobErrorCode.AnalysisFailed, 'failed')
+            deleteObject.mockClear()
+
+            await request(app.getHttpServer()).delete(`/v1/jobs/${res.body.job.id}`).set(as(RESTARTER)).expect(204)
+            await request(app.getHttpServer()).get(`/v1/jobs/${failedId}`).set(as(RESTARTER)).expect(404)
+
+            expect(deleteObject.mock.calls).toEqual([[`users/${RESTARTER}/jobs/${failedId}/video`]])
+        })
     })
 
     it("pages the user's own job list newest first", async () => {
@@ -509,7 +599,7 @@ describe('Jobs API (e2e)', () => {
             const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(SAMPLER)).expect(200)
 
             expect(res.body.job).toMatchObject({ status: JobStatus.Queued, sampleId })
-            expect(dispatch).toHaveBeenCalledWith(jobId, expect.any(String))
+            expect(dispatch).toHaveBeenCalledWith(jobId)
             expect(quota.body.quota.used).toBe(1)
         })
 
@@ -1656,7 +1746,7 @@ describe('Jobs API (e2e)', () => {
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
             expect(job).toMatchObject({ status: JobStatus.Queued, presetId: null })
-            expect(dispatch).toHaveBeenCalledWith(job.id, expect.any(String))
+            expect(dispatch).toHaveBeenCalledWith(job.id)
         })
 
         it('answers a started run as started, its preset counted, when its execution name cannot be stored', async () => {

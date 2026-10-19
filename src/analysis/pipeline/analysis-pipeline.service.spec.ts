@@ -141,7 +141,7 @@ describe('AnalysisPipeline', () => {
             call: CALL,
         })
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('analyzed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
 
         const job = await findJob(jobId)
 
@@ -168,7 +168,7 @@ describe('AnalysisPipeline', () => {
         const jobId = await queueJob()
 
         pipeline = new AnalysisPipeline(lifecycle, reviewer, withCrossPlatformRule as unknown as RulesetService)
-        await pipeline.run(jobId, { isLast: false, runId: null })
+        await pipeline.run(jobId, { isLast: false })
 
         const checks = (await findJob(jobId))?.analysis?.metadataChecks ?? []
 
@@ -181,7 +181,7 @@ describe('AnalysisPipeline', () => {
     it('offers the reviewer the selected advisories to choose from', async () => {
         const jobId = await queueJob()
 
-        await pipeline.run(jobId, { isLast: false, runId: null })
+        await pipeline.run(jobId, { isLast: false })
 
         expect(reviewer.review).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -200,7 +200,7 @@ describe('AnalysisPipeline', () => {
 
         reviewer.next = async () => ({ ...review, advisoryIds: [cryptoAdvisory.id, 'invented.advisory'] })
 
-        await pipeline.run(jobId, { isLast: false, runId: null })
+        await pipeline.run(jobId, { isLast: false })
 
         expect((await findJob(jobId))?.analysis?.advisories.map((advisory) => advisory.id)).toEqual([cryptoAdvisory.id])
     })
@@ -208,7 +208,7 @@ describe('AnalysisPipeline', () => {
     it("gives the reviewer the video's duration, so timestamps can't run past it", async () => {
         const jobId = await queueJob()
 
-        await pipeline.run(jobId, { isLast: false, runId: null })
+        await pipeline.run(jobId, { isLast: false })
 
         expect(reviewer.review).toHaveBeenCalledWith(expect.objectContaining({ durationS: 15 }))
     })
@@ -218,7 +218,7 @@ describe('AnalysisPipeline', () => {
 
         reviewer.next = () => Promise.reject(overloaded())
 
-        await expect(pipeline.run(jobId, { isLast: false, runId: null })).rejects.toBeInstanceOf(RetryableError)
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
         expect((await findJob(jobId))?.status).toBe(JobStatus.Analyzing)
         expect(await used()).toBe(1)
     })
@@ -228,7 +228,7 @@ describe('AnalysisPipeline', () => {
 
         reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
         expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
@@ -242,7 +242,7 @@ describe('AnalysisPipeline', () => {
 
         reviewer.next = () => Promise.reject(answerError())
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: usageOf(CALL) })
         expect(await used()).toBe(0)
@@ -256,7 +256,7 @@ describe('AnalysisPipeline', () => {
         await lifecycle.startAttempt(jobId)
         await lifecycle.markModelCall(jobId)
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).not.toHaveBeenCalled()
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
         expect(await used()).toBe(0)
@@ -268,7 +268,7 @@ describe('AnalysisPipeline', () => {
 
         jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(mongoBlip())
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
         expect(await findJob(jobId)).toMatchObject({
             status: JobStatus.Error,
@@ -286,7 +286,7 @@ describe('AnalysisPipeline', () => {
             throw new Error('unknown rule shape')
         })
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, usage: usageOf(CALL) })
     })
 
@@ -299,7 +299,7 @@ describe('AnalysisPipeline', () => {
             throw mongoBlip()
         })
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('skipped')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
         expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Analyzed, usage: usageOf(CALL) })
     })
 
@@ -309,7 +309,7 @@ describe('AnalysisPipeline', () => {
         jest.spyOn(lifecycle, 'complete').mockRejectedValueOnce(new Error('write failed'))
         jest.spyOn(lifecycle, 'addUsage').mockRejectedValueOnce(mongoBlip())
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect((await findJob(jobId))?.status).toBe(JobStatus.Error)
         expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
@@ -327,7 +327,7 @@ describe('AnalysisPipeline', () => {
 
         pipeline = new AnalysisPipeline(lifecycle, reviewer, expiring as unknown as RulesetService)
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('skipped')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
         expect(reviewer.review).not.toHaveBeenCalled()
         expect((await findJob(jobId))?.errorCode).toBe(JobErrorCode.AnalysisTimedOut)
     })
@@ -336,11 +336,11 @@ describe('AnalysisPipeline', () => {
         const jobId = await queueJob()
 
         reviewer.next = () => Promise.reject(overloaded())
-        await expect(pipeline.run(jobId, { isLast: false, runId: null })).rejects.toBeInstanceOf(RetryableError)
+        await expect(pipeline.run(jobId, { isLast: false })).rejects.toBeInstanceOf(RetryableError)
         expect((await findJob(jobId))?.modelCallStartedAt).toBeUndefined()
         reviewer.next = new FakeReviewer().next
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('analyzed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
         expect(reviewer.review).toHaveBeenCalledTimes(2)
     })
 
@@ -349,7 +349,7 @@ describe('AnalysisPipeline', () => {
 
         reviewer.next = () => Promise.reject(timedOut())
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('failed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
         expect(await findJob(jobId)).toMatchObject({
             status: JobStatus.Error,
@@ -364,7 +364,7 @@ describe('AnalysisPipeline', () => {
         const jobId = await queueJob()
 
         reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
-        await pipeline.run(jobId, { isLast: false, runId: null })
+        await pipeline.run(jobId, { isLast: false })
 
         expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
     })
@@ -378,7 +378,7 @@ describe('AnalysisPipeline', () => {
             return new FakeReviewer().next()
         }
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('analyzed')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('analyzed')
     })
 
     describe('refunds a run that ends without a result in full, however it failed', () => {
@@ -392,7 +392,7 @@ describe('AnalysisPipeline', () => {
 
             reviewer.next = () => Promise.reject(overloaded())
 
-            expect(await pipeline.run(jobId, { isLast: true, runId: null })).toBe('failed')
+            expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
             expect((await findJob(jobId))?.errorCode).toBe(JobErrorCode.ModelUnavailable)
             await expectRefunded()
         })
@@ -400,7 +400,7 @@ describe('AnalysisPipeline', () => {
         it('a failure before the call', async () => {
             jest.spyOn(lifecycle, 'markModelCall').mockRejectedValueOnce(new Error('mark failed'))
 
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true, runId: null })).toBe('failed')
+            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
             await expectRefunded()
         })
     })
@@ -415,7 +415,7 @@ describe('AnalysisPipeline', () => {
             return review()
         }
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('skipped')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
 
         const job = await findJob(jobId)
 
@@ -431,9 +431,9 @@ describe('AnalysisPipeline', () => {
     it('skips a job that is already final', async () => {
         const jobId = await queueJob()
 
-        await pipeline.run(jobId, { isLast: false, runId: null })
+        await pipeline.run(jobId, { isLast: false })
 
-        expect(await pipeline.run(jobId, { isLast: false, runId: null })).toBe('skipped')
+        expect(await pipeline.run(jobId, { isLast: false })).toBe('skipped')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
     })
 })
