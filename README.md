@@ -107,7 +107,8 @@ conditional update on the expected current status, so two racing callers can nev
    everything it uses is visible here and counts as used.
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
    network) exits 1 so Cloud Run retries it, unless the call may have been billed (below); a permanent failure, or any
-   failure on the last attempt, ends the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute
+   failure on the last attempt, ends the job in `error`: `MODEL_UNAVAILABLE` when Gemini itself failed (an overload,
+   rate-limit or server-error status, a timeout or an unreachable endpoint), `ANALYSIS_FAILED` otherwise. The Gemini call has a 10-minute
    timeout, well inside the 15-minute task timeout. A job is never billed twice: the worker marks the job
    (`modelCallStartedAt`, a conditional write) before calling Gemini, and an attempt that finds the mark set doesn't
    call again but fails the job as if Gemini had answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which

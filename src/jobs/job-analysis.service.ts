@@ -21,6 +21,7 @@ const REJECTION_MESSAGES: Record<JobErrorCode, string> = {
     [JobErrorCode.UnsupportedFormat]: 'The video format is not supported',
     [JobErrorCode.AnalysisFailed]: 'The analysis failed',
     [JobErrorCode.AnalysisTimedOut]: 'The analysis timed out',
+    [JobErrorCode.ModelUnavailable]: 'The AI model failed',
     [JobErrorCode.VideoCheckFailed]: 'The upload could not be checked',
     [JobErrorCode.UploadFailed]: 'The upload has not finished',
 }

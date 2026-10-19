@@ -229,7 +229,7 @@ describe('AnalysisPipeline', () => {
         reviewer.next = () => Promise.reject(new SyntaxError('Unexpected token in model output'))
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
-        expect((await findJob(jobId))?.status).toBe(JobStatus.Error)
+        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
         expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
     })
@@ -351,7 +351,10 @@ describe('AnalysisPipeline', () => {
 
         expect(await pipeline.run(jobId, { isLast: false })).toBe('failed')
         expect(reviewer.review).toHaveBeenCalledTimes(1)
-        expect(await findJob(jobId)).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
+        expect(await findJob(jobId)).toMatchObject({
+            status: JobStatus.Error,
+            errorCode: JobErrorCode.ModelUnavailable,
+        })
         expect((await findJob(jobId))?.modelCallStartedAt).toBeInstanceOf(Date)
         expect(await used()).toBe(0)
         expect(await usedByNetwork()).toBe(0)
@@ -384,10 +387,13 @@ describe('AnalysisPipeline', () => {
             expect(await usedByNetwork()).toBe(0)
         }
 
-        it('a call Vertex refused on the last attempt', async () => {
+        it('a call Vertex refused on the last attempt, which ends as the model failing', async () => {
+            const jobId = await queueJob(NETWORK)
+
             reviewer.next = () => Promise.reject(overloaded())
 
-            expect(await pipeline.run(await queueJob(NETWORK), { isLast: true })).toBe('failed')
+            expect(await pipeline.run(jobId, { isLast: true })).toBe('failed')
+            expect((await findJob(jobId))?.errorCode).toBe(JobErrorCode.ModelUnavailable)
             await expectRefunded()
         })
 
