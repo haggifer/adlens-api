@@ -449,6 +449,29 @@ describe('Jobs API (e2e)', () => {
             expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
         })
 
+        it("serves no replay of a restarted job's video, which is its restart's", async () => {
+            const failedId = await createFailedJob()
+
+            await restart(failedId).expect(202)
+            const res = await request(app.getHttpServer())
+                .get(`/v1/jobs/${failedId}/video`)
+                .set(as(RESTARTER))
+                .expect(404)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        })
+
+        it('refuses to restart a job whose deletion has claimed its video', async () => {
+            const failedId = await createFailedJob()
+
+            deleteObject.mockRejectedValueOnce(new Error('GCS 503'))
+            await request(app.getHttpServer()).delete(`/v1/jobs/${failedId}`).set(as(RESTARTER)).expect(500)
+
+            const res = await restart(failedId).expect(409)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
+        })
+
         it('deletes the failed run with its restart, and the video once', async () => {
             const failedId = await createFailedJob()
             const res = await restart(failedId).expect(202)

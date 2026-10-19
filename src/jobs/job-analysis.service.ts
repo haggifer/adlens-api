@@ -82,7 +82,12 @@ export class JobAnalysisService {
 
         const restarted = await this.jobs.createRestart(failed)
 
-        return this.start(userId, restarted._id.toString(), ipSource, freeRunUserId)
+        // Only now, so an open page of the failed job moves to its restart once the run has started, or failed.
+        try {
+            return await this.start(userId, restarted._id.toString(), ipSource, freeRunUserId)
+        } finally {
+            await this.jobs.announceRestart(failed)
+        }
     }
 
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
