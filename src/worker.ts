@@ -28,6 +28,7 @@ const run = async (): Promise<number> => {
     })
     const config = app.get<ConfigService<Env, true>>(ConfigService)
     const jobId = config.get('WORKER_JOB_ID', { infer: true })
+    const runId = config.get('WORKER_RUN_ID', { infer: true }) ?? null
     const attempt = config.get('CLOUD_RUN_TASK_ATTEMPT', { infer: true })
     const maxRetries = config.get('ANALYZE_MAX_RETRIES', { infer: true })
 
@@ -37,7 +38,7 @@ const run = async (): Promise<number> => {
             return EXIT_DONE
         }
 
-        const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast: attempt >= maxRetries })
+        const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast: attempt >= maxRetries, runId })
 
         logger.log(`job ${jobId}: ${outcome} (attempt ${attempt})`)
 

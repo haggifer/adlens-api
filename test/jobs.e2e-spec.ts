@@ -241,7 +241,7 @@ describe('Jobs API (e2e)', () => {
         const started = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(202)
 
         expect(started.body.job).toMatchObject({ status: JobStatus.Queued, media: { durationS: 20 } })
-        expect(dispatch).toHaveBeenCalledWith(jobId)
+        expect(dispatch).toHaveBeenCalledWith(jobId, expect.any(String))
 
         const again = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(409)
         const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER)).expect(200)
@@ -357,7 +357,7 @@ describe('Jobs API (e2e)', () => {
 
         expect(restarted.body.job).toMatchObject({ id: jobId, status: JobStatus.Queued })
         expect(restarted.body.job).not.toHaveProperty('errorCode')
-        expect(dispatch).toHaveBeenLastCalledWith(jobId)
+        expect(dispatch).toHaveBeenLastCalledWith(jobId, expect.any(String))
         expect(after.body.quota.used).toBe(before.body.quota.used + 1)
         expect(again.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
     })
@@ -509,7 +509,7 @@ describe('Jobs API (e2e)', () => {
             const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(SAMPLER)).expect(200)
 
             expect(res.body.job).toMatchObject({ status: JobStatus.Queued, sampleId })
-            expect(dispatch).toHaveBeenCalledWith(jobId)
+            expect(dispatch).toHaveBeenCalledWith(jobId, expect.any(String))
             expect(quota.body.quota.used).toBe(1)
         })
 
@@ -1656,7 +1656,7 @@ describe('Jobs API (e2e)', () => {
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
             expect(job).toMatchObject({ status: JobStatus.Queued, presetId: null })
-            expect(dispatch).toHaveBeenCalledWith(job.id)
+            expect(dispatch).toHaveBeenCalledWith(job.id, expect.any(String))
         })
 
         it('answers a started run as started, its preset counted, when its execution name cannot be stored', async () => {

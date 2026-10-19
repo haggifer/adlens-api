@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common'
 import {
     type Analysis,
     getLiveChannel,
+    JOB_RESTART_WINDOW_MS,
     JOB_START_WINDOW_MS,
     JobErrorCode,
     type JobMedia,
@@ -129,7 +130,7 @@ describe('JobLifecycle', () => {
 
     const callStartedAt = async (jobId: string, at: Date) => {
         await lifecycle.startAttempt(jobId)
-        await lifecycle.markModelCall(jobId, at)
+        await lifecycle.markModelCall(jobId, null, at)
     }
 
     beforeAll(async () => {
@@ -237,6 +238,22 @@ describe('JobLifecycle', () => {
             expect(await networkRuns()).toBe(1)
         })
 
+        it('keeps a worker of the earlier run off the restarted one', async () => {
+            const jobId = await queueJob()
+            const earlierRunId = (await findJob(jobId))?.chargedRunId ?? null
+
+            await lifecycle.fail(jobId, RESTARTABLE_JOB_ERRORS[0], 'overloaded')
+            await lifecycle.claimForRestart(USER, jobId)
+            await lifecycle.chargeAndQueue(jobId, USER, MEDIA)
+
+            const runId = (await findJob(jobId))?.chargedRunId ?? null
+
+            expect(await lifecycle.startAttempt(jobId, earlierRunId)).toBeNull()
+            expect(await lifecycle.startAttempt(jobId, runId)).not.toBeNull()
+            expect(await lifecycle.markModelCall(jobId, earlierRunId)).toBe('ended')
+            expect(await lifecycle.markModelCall(jobId, runId)).toBe('marked')
+        })
+
         it('lets exactly one of two concurrent restarts claim the job', async () => {
             const jobId = await failAtModelCall()
             const claims = await Promise.all([
@@ -260,12 +277,12 @@ describe('JobLifecycle', () => {
             expect((await findJob(rejected))?.status).toBe(JobStatus.Error)
         })
 
-        it('restarts a job only within the start window, while the cleanup still keeps its video', async () => {
+        it('restarts a job only within the restart window, while the cleanup still keeps its video', async () => {
             const young = await failAtModelCall()
             const old = await failAtModelCall()
 
-            await createdAt(young, new Date(NOW.getTime() - JOB_START_WINDOW_MS + 1))
-            await createdAt(old, new Date(NOW.getTime() - JOB_START_WINDOW_MS))
+            await createdAt(young, new Date(NOW.getTime() - JOB_RESTART_WINDOW_MS + 1))
+            await createdAt(old, new Date(NOW.getTime() - JOB_RESTART_WINDOW_MS))
 
             expect(await lifecycle.claimForRestart(USER, young, NOW)).not.toBeNull()
             expect(await lifecycle.claimForRestart(USER, old, NOW)).toBeNull()
@@ -626,7 +643,7 @@ describe('JobLifecycle', () => {
             jest.spyOn(jobs, 'find').mockImplementationOnce(((filter: FilterQuery<JobDoc>, projection: object) => ({
                 lean: async () => {
                     found = await findJobs(filter, projection).lean()
-                    await lifecycle.markModelCall(jobId, NOW)
+                    await lifecycle.markModelCall(jobId, null, NOW)
 
                     return found
                 },

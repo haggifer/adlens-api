@@ -9,7 +9,7 @@ import { StorageService } from '../storage/storage.service'
 import type { CleanupResult } from './types'
 
 // Deletes the videos that back no results: a video is kept only while its analysis succeeded, because every finding's
-// timestamp seeks the replay, or while its job may still be restarted, which stops at the same age. That covers failed, rejected and never started jobs (error), and a pending one the
+// timestamp seeks the replay, or while its job may still be restarted, which stops before this age. That covers failed, rejected and never started jobs (error), and a pending one the
 // expiry couldn't end. A job in progress keeps its video: the cleanup expires abandoned jobs first, so one still in
 // progress here is running. Jobs are aged from their creation, not their last update, so a job that just ended (by
 // this very run's expiry, say) loses its video now rather than a day later. Every uploaded object belongs to a job

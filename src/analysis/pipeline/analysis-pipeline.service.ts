@@ -15,6 +15,8 @@ type RunOutcome = 'analyzed' | 'failed' | 'skipped'
 
 interface RunAttempt {
     isLast: boolean
+    // The run the worker was started for; null for a worker dispatched without one.
+    runId: string | null
 }
 
 // The attempt's Gemini call: whether the job holds its mark (from the moment an attempt sets it, or finds it set by an
@@ -32,8 +34,9 @@ const toJobErrorCode = (err: unknown): JobErrorCode =>
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
 // attempt or the job holds the call mark (a retry could only refuse to call Gemini again); any other failure ends the
 // job in `error` with its charges refunded in full, even after a call that may have been billed, and the process exits
-// cleanly. A job is never billed twice: Gemini is called at most once per job, unless Vertex refused the call with an
-// HTTP error status.
+// cleanly. A run is never billed twice: Gemini is called at most once per run, unless Vertex refused the call with an
+// HTTP error status. A restart is a new run on the same job, so it may call again; the job keeps every call it was
+// billed for.
 @Injectable()
 export class AnalysisPipeline {
     private readonly logger = new Logger(AnalysisPipeline.name)
@@ -45,7 +48,7 @@ export class AnalysisPipeline {
     ) {}
 
     async run(jobId: string, attempt: RunAttempt): Promise<RunOutcome> {
-        const job = await this.lifecycle.startAttempt(jobId)
+        const job = await this.lifecycle.startAttempt(jobId, attempt.runId)
 
         if (!job) {
             this.logger.warn(`job ${jobId} is not in flight; nothing to do`)
@@ -55,7 +58,7 @@ export class AnalysisPipeline {
         const state: CallState = { isMarkKept: false, billed: null }
 
         try {
-            const { analysis, call } = await this.analyze(job, state)
+            const { analysis, call } = await this.analyze(job, attempt.runId, state)
             const isCompleted = await this.lifecycle.complete(jobId, analysis, call)
 
             if (isCompleted) {
@@ -101,7 +104,11 @@ export class AnalysisPipeline {
         }
     }
 
-    private async analyze(job: StoredJob, state: CallState): Promise<{ analysis: Analysis; call: ModelCall }> {
+    private async analyze(
+        job: StoredJob,
+        runId: string | null,
+        state: CallState,
+    ): Promise<{ analysis: Analysis; call: ModelCall }> {
         if (!job.media) {
             throw new Error('Job has no verified media')
         }
@@ -109,7 +116,7 @@ export class AnalysisPipeline {
         const jobId = job._id.toString()
         const ruleSet = await this.ruleset.current()
         const selected = selectRules(ruleSet, job.settings)
-        const marking = await this.lifecycle.markModelCall(jobId)
+        const marking = await this.lifecycle.markModelCall(jobId, runId)
 
         if (marking === 'ended') {
             throw new JobEndedError()

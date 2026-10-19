@@ -61,6 +61,7 @@ const envSchema = z.object({
     ANALYZE_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
     CLOUD_RUN_TASK_ATTEMPT: z.coerce.number().int().nonnegative().default(0),
     WORKER_JOB_ID: z.string().optional(),
+    WORKER_RUN_ID: z.string().optional(),
     // Set by Cloud Run to the serving revision (adlens-api-00029-jkl); named in Contact emails, unset locally.
     K_REVISION: z.string().optional(),
 })

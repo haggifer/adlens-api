@@ -83,7 +83,7 @@ export class JobAnalysisService {
         const jobId = claimed._id.toString()
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
-        const execution = await this.startWorker(jobId)
+        const execution = await this.startWorker(queued)
 
         if (execution) {
             await this.tryRecordExecution(jobId, execution)
@@ -164,9 +164,12 @@ export class JobAnalysisService {
         }
     }
 
-    private async startWorker(jobId: string): Promise<string | null> {
+    // chargeAndQueue queued the job under its run's id, so it is set.
+    private async startWorker(job: StoredJob): Promise<string | null> {
+        const jobId = job._id.toString()
+
         try {
-            return await this.dispatcher.dispatch(jobId)
+            return await this.dispatcher.dispatch(jobId, job.chargedRunId!)
         } catch (err) {
             this.logger.error(`dispatch failed for job ${jobId}: ${describeError(err)}`)
             await this.lifecycle.failDispatch(jobId)
