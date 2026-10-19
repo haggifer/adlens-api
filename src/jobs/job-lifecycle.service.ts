@@ -1,6 +1,13 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { type Analysis, JobErrorCode, type JobMedia, JobStatus, RequestErrorCode } from 'adlens-shared'
+import {
+    type Analysis,
+    JOB_START_WINDOW_MS,
+    JobErrorCode,
+    type JobMedia,
+    JobStatus,
+    RequestErrorCode,
+} from 'adlens-shared'
 import { type FilterQuery, Model, Types } from 'mongoose'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
@@ -9,7 +16,6 @@ import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
 import { LivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
-import { UNSTARTED_JOB_MS } from './job-status'
 
 // Whether this attempt set the call mark, found it set by an earlier attempt, or found the job no longer analyzed.
 type CallMarking = 'marked' | 'repeated' | 'ended'
@@ -51,7 +57,7 @@ const staleConditions = (now: Date): FilterQuery<JobDoc>[] => {
 
     return [
         // Aged from its creation: no step of the upload touches the job.
-        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - UNSTARTED_JOB_MS) } },
+        { status: JobStatus.Pending, createdAt: { $lt: new Date(now.getTime() - JOB_START_WINDOW_MS) } },
         { status: JobStatus.Verifying, updatedAt: { $lt: new Date(now.getTime() - VERIFY_STALE_MS) } },
         // A refused call clears the mark and restarts this clock (clearModelCall).
         { status: { $in: IN_FLIGHT }, modelCallStartedAt: { $exists: false }, queuedAt: { $lt: startingCutoff } },
@@ -100,8 +106,8 @@ export class JobLifecycle {
 
     // verifying → error, refunding whatever the job still holds: the run couldn't start (the upload was rejected,
     // missing or couldn't be checked, the sample is gone, or it couldn't be charged). Never back to pending: the web
-    // never starts a job twice, it creates a new one, so a job put back would stay pending for good. false when the
-    // job already left verification.
+    // never starts a job twice (a restart creates a new job), so a job put back would stay pending for good. false when
+    // the job already left verification.
     async failStart(jobId: string, errorCode: JobErrorCode, detail?: string): Promise<boolean> {
         return this.settle(
             { _id: jobId, status: JobStatus.Verifying },

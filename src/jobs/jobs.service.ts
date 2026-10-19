@@ -4,6 +4,7 @@ import {
     type CreateJobPayload,
     type CreateJobResponse,
     type CreateSampleJobPayload,
+    isJobRestartable,
     type Job,
     type JobListResponse,
     JobStatus,
@@ -41,6 +42,9 @@ const inProgress = () =>
     new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobInProgress, 'The analysis is still running')
 
 const notFound = () => new ApiException(HttpStatus.NOT_FOUND, RequestErrorCode.NotFound, 'Job not found')
+
+const notRestartable = () =>
+    new ApiException(HttpStatus.CONFLICT, RequestErrorCode.JobNotRestartable, 'Job cannot be restarted')
 
 @Injectable()
 export class JobsService {
@@ -99,6 +103,40 @@ export class JobsService {
         return toPublicJob(created.toObject<StoredJob>())
     }
 
+    // A new pending job on a failed job's video and settings, which the caller then starts. The failed job is kept as
+    // the record of its run, marked `restartedAs`. Refused unless isJobRestartable allows it and the video is still
+    // stored. The claim on the failed job is one conditional write that the cleanup's and a deletion's own claims
+    // exclude, so neither can delete the video under a restart. The new job is created first: a failure after it leaves
+    // a pending job that expires like any other, never a failed job pointing at a job that doesn't exist. Tabs hear of
+    // the claim from announceRestart, once the new run has started or failed.
+    async createRestart(failed: StoredJob, now = new Date()): Promise<StoredJob> {
+        const isAllowed = isJobRestartable(toPublicJob(failed), now.getTime()) && !failed.videoDeletingAt
+
+        if (!isAllowed || failed.videoDeletedAt) {
+            throw notRestartable()
+        }
+
+        const hasVideo = await this.hasVideo(failed)
+
+        if (!hasVideo) {
+            throw notRestartable()
+        }
+
+        const restart = await this.createRestartJob(failed)
+        const isClaimed = await this.claimForRestart(failed, restart._id.toString())
+
+        if (!isClaimed) {
+            await this.model.deleteOne({ _id: restart._id })
+            throw notRestartable()
+        }
+
+        return restart
+    }
+
+    async announceRestart(failed: Pick<StoredJob, '_id' | 'userId'>): Promise<void> {
+        await this.live.publishJob(failed)
+    }
+
     async recordCountedPreset(job: Pick<StoredJob, '_id' | 'userId'>, presetId: string): Promise<void> {
         await this.model.updateOne({ _id: job._id }, { $set: { presetId } })
         await this.live.publishJob(job)
@@ -124,9 +162,10 @@ export class JobsService {
         }
     }
 
-    // Deletes an analysis and, for an upload, its video. A run's quota charge stays spent. The video goes first, so a
-    // failed storage call leaves the job in place to retry; a sample's shared video is never deleted. The path decides,
-    // not the owner: an adopted job's video stays under the anonymous user's prefix it was uploaded under.
+    // Deletes an analysis, the failed runs it restarted, and, for an upload, its video. A run's quota charge stays spent.
+    // The video goes first, so a failed storage call leaves the job in place to retry; a sample's shared video is never
+    // deleted, nor a restarted job's, which its restart uses. The path decides, not the owner: an adopted job's video
+    // stays under the anonymous user's prefix it was uploaded under.
     async remove(userId: string, jobId: string): Promise<void> {
         await this.lifecycle.expireStale(userId)
 
@@ -136,10 +175,13 @@ export class JobsService {
             throw inProgress()
         }
 
-        if (!job.sampleId) {
+        if (!job.sampleId && !job.restartedAs) {
+            await this.claimVideoForDeletion(job)
             await this.recordUploadTombstone(job)
             await this.storage.delete(job.file.path)
         }
+
+        await this.removeRestarted(job)
 
         const { deletedCount } = await this.model.deleteOne({
             _id: job._id,
@@ -157,7 +199,8 @@ export class JobsService {
     async createVideoUrl(userId: string, jobId: string): Promise<JobVideoResponse> {
         const job = await this.findOwned(userId, jobId)
 
-        if (!job.media || job.videoDeletedAt) {
+        // A restarted job's video is its restart's, which the cleanup judges on its own.
+        if (!job.media || job.videoDeletedAt || job.restartedAs) {
             throw notFound()
         }
 
@@ -181,6 +224,78 @@ export class JobsService {
         return job
     }
 
+    private async hasVideo(job: StoredJob): Promise<boolean> {
+        if (job.sampleId) {
+            return this.samples.isPublishedPath(job.file.path)
+        }
+
+        const object = await this.storage.getObjectInfo(job.file.path)
+
+        return object !== null
+    }
+
+    private async claimForRestart(failed: StoredJob, restartId: string): Promise<boolean> {
+        const claimed = await this.model.updateOne(
+            {
+                _id: failed._id,
+                status: JobStatus.Error,
+                restartedAs: { $exists: false },
+                videoDeletingAt: { $exists: false },
+                videoDeletedAt: { $exists: false },
+            },
+            { $set: { restartedAs: restartId } },
+        )
+
+        return claimed.modifiedCount > 0
+    }
+
+    // Like the cleanup's claim: a restart that claimed the job first keeps its video, and one that comes after is
+    // refused. Answered as in progress, since the job's restart is running.
+    private async claimVideoForDeletion(job: StoredJob): Promise<void> {
+        const claimed = await this.model.updateOne(
+            { _id: job._id, status: { $nin: IN_PROGRESS_STATUSES }, restartedAs: { $exists: false } },
+            { $set: { videoDeletingAt: new Date() } },
+        )
+
+        if (claimed.modifiedCount === 0) {
+            throw inProgress()
+        }
+    }
+
+    // The failed job's media and counted preset come along: a sample's measured media skips verification, and a run
+    // already counted for its preset is still the same analysis, so it isn't counted again.
+    private async createRestartJob(failed: StoredJob): Promise<StoredJob> {
+        const created = await this.model.create({
+            userId: failed.userId,
+            status: JobStatus.Pending,
+            settings: failed.settings,
+            file: failed.file,
+            media: failed.media,
+            sampleId: failed.sampleId,
+            appliedPresetId: failed.appliedPresetId,
+            presetId: failed.presetId,
+            restartOf: failed._id.toString(),
+            chargedRunId: null,
+            chargedIpRunId: null,
+            hasPassedChallenge: failed.hasPassedChallenge,
+        })
+
+        return created.toObject<StoredJob>()
+    }
+
+    // The failed runs a job restarted, oldest last; each is its owner's and never in progress.
+    private async removeRestarted(job: StoredJob): Promise<void> {
+        let restartOf = job.restartOf
+
+        while (restartOf) {
+            const restarted = await this.model
+                .findOneAndDelete({ _id: restartOf, userId: job.userId })
+                .lean<StoredJob>()
+
+            restartOf = restarted?.restartOf
+        }
+    }
+
     // The upload URL signed at creation is create-only, so with the object deleted a PUT to it would store a video no
     // job references. Recorded before the delete, so no failure in between can lose it; the cleanup leaves a path
     // that a job still references.
@@ -196,7 +311,7 @@ export class JobsService {
 
     private findPage(userId: string, cursor: string | undefined, limit: number): Promise<StoredJob[]> {
         return this.model
-            .find({ userId, ...(cursor ? { _id: { $lt: cursor } } : {}) })
+            .find({ userId, restartedAs: { $exists: false }, ...(cursor ? { _id: { $lt: cursor } } : {}) })
             .sort({ _id: -1 })
             .limit(limit)
             .lean<StoredJob[]>()

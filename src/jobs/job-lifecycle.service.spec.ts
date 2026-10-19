@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common'
 import {
     type Analysis,
     getLiveChannel,
+    JOB_START_WINDOW_MS,
     JobErrorCode,
     type JobMedia,
     JobStatus,
@@ -24,7 +25,6 @@ import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { buildModelCall, usageOf } from '../testing/model-call'
 import { RecordingLivePublisher } from '../testing/recording-live-publisher'
 import { JobLifecycle } from './job-lifecycle.service'
-import { UNSTARTED_JOB_MS } from './job-status'
 
 const USER = new Types.ObjectId().toString()
 const OTHER_USER = new Types.ObjectId().toString()
@@ -634,8 +634,8 @@ describe('JobLifecycle', () => {
             const unstarted = await createJob()
             const young = await createJob()
 
-            await createdAt(unstarted, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
-            await createdAt(young, new Date(NOW.getTime() - UNSTARTED_JOB_MS))
+            await createdAt(unstarted, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
+            await createdAt(young, new Date(NOW.getTime() - JOB_START_WINDOW_MS))
 
             await lifecycle.expireStale(USER, NOW)
 
@@ -663,8 +663,8 @@ describe('JobLifecycle', () => {
             const own = await createJob()
             const othersJob = await createJob(JobStatus.Pending, OTHER_USER)
 
-            await createdAt(own, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
-            await createdAt(othersJob, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            await createdAt(own, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
+            await createdAt(othersJob, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
 
             expect(await lifecycle.expireStaleJobs(undefined, NOW)).toEqual({ expired: 2, failed: 0 })
             expect((await findJob(othersJob))?.errorCode).toBe(JobErrorCode.UploadFailed)
@@ -742,7 +742,7 @@ describe('JobLifecycle', () => {
             const unverified = await claimJob()
             const expired = await createJob()
 
-            await createdAt(expired, new Date(NOW.getTime() - UNSTARTED_JOB_MS - 1))
+            await createdAt(expired, new Date(NOW.getTime() - JOB_START_WINDOW_MS - 1))
             live.clear()
 
             await lifecycle.fail(failed, JobErrorCode.AnalysisFailed, 'boom')

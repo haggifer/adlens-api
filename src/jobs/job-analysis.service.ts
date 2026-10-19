@@ -21,6 +21,7 @@ const REJECTION_MESSAGES: Record<JobErrorCode, string> = {
     [JobErrorCode.UnsupportedFormat]: 'The video format is not supported',
     [JobErrorCode.AnalysisFailed]: 'The analysis failed',
     [JobErrorCode.AnalysisTimedOut]: 'The analysis timed out',
+    [JobErrorCode.ModelUnavailable]: 'The AI model failed',
     [JobErrorCode.VideoCheckFailed]: 'The upload could not be checked',
     [JobErrorCode.UploadFailed]: 'The upload has not finished',
 }
@@ -72,6 +73,23 @@ export class JobAnalysisService {
         return toPublicJob({ ...queued, presetId })
     }
 
+    // POST /v1/jobs/:id/restart: a new job on the failed job's video (JobsService.createRestart), started like any other.
+    // The refusals the run would meet come first, so a refused restart changes nothing.
+    async restart(userId: string, jobId: string, ipSource: IpSource, freeRunUserId: string | null): Promise<Job> {
+        const failed = await this.jobs.findOwned(userId, jobId)
+
+        await this.admission.preview(userId, ipSource, freeRunUserId)
+
+        const restarted = await this.jobs.createRestart(failed)
+
+        // Only now, so an open page of the failed job moves to its restart once the run has started, or failed.
+        try {
+            return await this.start(userId, restarted._id.toString(), ipSource, freeRunUserId)
+        } finally {
+            await this.jobs.announceRestart(failed)
+        }
+    }
+
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
         return job.sampleId ? this.verifySample(job) : this.verifyUpload(job)
     }
@@ -102,10 +120,14 @@ export class JobAnalysisService {
     }
 
     // A run counts for its preset once its worker started (a failed start refunds the run), whatever the analysis then
-    // ends as, and only when its settings still match the preset; counting never fails the run. Answers the preset id
-    // stored on the job, or null.
+    // ends as, and only when its settings still match the preset; counting never fails the run. A restart of a counted
+    // run carries its preset over and isn't counted again. Answers the preset id stored on the job, or null.
     private async countPresetUse(userId: string, job: StoredJob): Promise<string | null> {
         const presetId = job.appliedPresetId
+
+        if (job.presetId) {
+            return job.presetId
+        }
 
         if (!presetId) {
             return null

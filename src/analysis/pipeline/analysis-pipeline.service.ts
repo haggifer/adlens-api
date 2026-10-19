@@ -9,7 +9,7 @@ import { RulesetService } from '../../rules/ruleset.service'
 import { type VideoReview, VideoReviewer, type VideoReviewRequest } from '../review/video-reviewer'
 import { buildAnalysis, toReviewRequest } from './analysis-assembly'
 import { isRefusedCall, JobEndedError, ModelAnswerError, ModelCallRepeatedError } from './model-answer-error'
-import { isRetryable } from './retryable-error'
+import { isRetryable, RetryableError } from './retryable-error'
 
 type RunOutcome = 'analyzed' | 'failed' | 'skipped'
 
@@ -23,6 +23,11 @@ interface CallState {
     isMarkKept: boolean
     billed: ModelCall | null
 }
+
+// Only the model's own failures (overload, rate limits, its server errors, no answer in time) are RetryableErrors; the
+// user is told the AI failed, not the analysis.
+const toJobErrorCode = (err: unknown): JobErrorCode =>
+    err instanceof RetryableError ? JobErrorCode.ModelUnavailable : JobErrorCode.AnalysisFailed
 
 // One worker attempt at a job. A transient failure is rethrown so Cloud Run retries the task, unless this is the last
 // attempt or the job holds the call mark (a retry could only refuse to call Gemini again); any other failure ends the
@@ -81,7 +86,7 @@ export class AnalysisPipeline {
                 throw err
             }
 
-            const isFailed = await this.lifecycle.fail(jobId, JobErrorCode.AnalysisFailed, detail)
+            const isFailed = await this.lifecycle.fail(jobId, toJobErrorCode(err), detail)
 
             // Already ended, stored after all (its acknowledgement was lost) or expired by the sweep: not an error to
             // report.

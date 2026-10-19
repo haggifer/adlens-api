@@ -35,7 +35,7 @@ the API contract live in their own repos.
   does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges, and
   ends every job still `pending` 6 hours after its creation as `UPLOAD_FAILED`. Then it deletes anonymous users unused
   for a week (see Authentication), and the video of every job that backs no results: created over 6 hours ago and
-  `error` (failed, rejected, expired or never started) or still `pending`
+  `error` (failed, rejected, expired or never started, and not restarted) or still `pending`
   ([`AbandonedUploadCleanupService`](src/cleanup/abandoned-upload-cleanup.service.ts)). Jobs are aged from their
   creation, not their last update, so a job expired earlier in the same run loses its video in that run; a job still
   in progress after the expiry is running, and keeps its video. Every object's path is made from its user and job ids,
@@ -80,7 +80,7 @@ conditional update on the expected current status, so two racing callers can nev
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
    fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
-   job twice, it creates a new one. The HTTP answer still says what went wrong.
+   job twice, it creates a new one (a restart too, below). The HTTP answer still says what went wrong.
     - **claim** `pending → verifying` (409 `JOB_NOT_PENDING` for a second caller);
     - **verify** ([`VideoVerifier`](src/jobs/verification/video-verifier.service.ts)) from the stored object's own
       metadata plus ffprobe over a signed read URL (range reads, no download; the image runs Debian's ffprobe, because
@@ -97,6 +97,22 @@ conditional update on the expected current status, so two racing callers can nev
       fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
       code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
     - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
+
+    **Restart** `POST /v1/jobs/:id/restart` runs a failed analysis again on the video it already has. The admission
+    refusals come first (quota and network, as `GET /v1/admission` answers them), then the rule: the owner's job, in
+    `error`, not restarted yet and created less than 6 hours ago (`isJobRestartable` and `JOB_START_WINDOW_MS` in
+    `adlens-shared`), whose video is still stored (the object, or a published sample); otherwise 409
+    `JOB_NOT_RESTARTABLE` and nothing changes. A new pending job (`restartOf`) then gets the failed job's file, media,
+    settings and counted preset, the failed job is claimed with one conditional write (`restartedAs`; if that loses a
+    race, the new job is deleted and the answer is 409), and the new job is started like any other. Tabs hear of the
+    claim only once the new run has started or failed, so an open page of the failed job moves to its restart then. The
+    failed job stays as the record of its run: lists leave it out, its replay URL is refused, and a deletion of its
+    restart deletes it too. A restart of a run already counted for its preset isn't counted again.
+    Nothing deletes the video under a restart: the cleanup claims each video first (`videoDeletingAt`, a conditional
+    write that excludes restarted jobs), then deletes it, then marks `videoDeletedAt`; a deletion claims the same way;
+    and a restart refuses a claimed job. A restarted job's video is its restart's, which the cleanup judges by the
+    restart's own age.
+
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
@@ -107,7 +123,8 @@ conditional update on the expected current status, so two racing callers can nev
    everything it uses is visible here and counts as used.
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
    network) exits 1 so Cloud Run retries it, unless the call may have been billed (below); a permanent failure, or any
-   failure on the last attempt, ends the job in `error` with `ANALYSIS_FAILED`. The Gemini call has a 10-minute
+   failure on the last attempt, ends the job in `error`: `MODEL_UNAVAILABLE` when Gemini itself failed (an overload,
+   rate-limit or server-error status, a timeout or an unreachable endpoint), `ANALYSIS_FAILED` otherwise. The Gemini call has a 10-minute
    timeout, well inside the 15-minute task timeout. A job is never billed twice: the worker marks the job
    (`modelCallStartedAt`, a conditional write) before calling Gemini, and an attempt that finds the mark set doesn't
    call again but fails the job as if Gemini had answered. Only a call Vertex refused with an HTTP error status (a 4xx or 5xx response such as 429 or 503, which
@@ -371,7 +388,8 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `POST /v1/jobs`             | Admission check (optional challengeToken), then a pending job and its signed upload target                                                                                                                                                                                                                                                               | `{ job, upload }`                                    |
 | `POST /v1/jobs/from-sample` | Admission check, then a pending job on a published sample ad (no upload)                                                                                                                                                                                                                                                                                 | `{ job }`                                            |
 | `POST /v1/jobs/:id/analyze` | Verify → charge network and user → dispatch → once the worker started, count the run for its `presetId` when the settings still match it (counted whatever the run's outcome; never fails the start)                                                                                                                                                     | **202** `{ job }`                                    |
-| `GET /v1/jobs`              | The caller's jobs, newest first (`?limit=` ≤ 50, `?cursor=`)                                                                                                                                                                                                                                                                                             | `{ jobs, nextCursor }`                               |
+| `POST /v1/jobs/:id/restart` | A failed analysis again, as a new job on its stored video (see the run flow); 409 `JOB_NOT_RESTARTABLE` when it can't be                                                                                                                                                                                                                                 | **202** `{ job }` (the new job)                      |
+| `GET /v1/jobs`              | The caller's jobs, newest first, restarted ones left out (`?limit=` ≤ 50, `?cursor=`)                                                                                                                                                                                                                                                                    | `{ jobs, nextCursor }`                               |
 | `GET /v1/jobs/:id`          | One owned job                                                                                                                                                                                                                                                                                                                                            | `{ job }`                                            |
 | `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                                                                                                                                                                   | `{ url, expiresAt }`                                 |
 | `DELETE /v1/jobs/:id`       | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs)                                                                                                                                                                                                                                                          | **204**                                              |
