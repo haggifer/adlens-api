@@ -82,7 +82,6 @@ const getTouchedAt = (preset: StoredPreset) => Math.max(preset.lastUsedAt?.getTi
 const byMostRecentlyTouched = (a: StoredPreset, b: StoredPreset) =>
     getTouchedAt(b) - getTouchedAt(a) || a.id.localeCompare(b.id)
 
-// The presets that fit under MAX_PRESETS_AFTER_MOVE, the most recently touched ones, in their own order.
 const pickFitting = (missing: StoredPreset[], account: UserPresetsDoc | null): StoredPreset[] => {
     const room = Math.max(MAX_PRESETS_AFTER_MOVE - (account?.presets.length ?? 0), 0)
     const fittingIds = new Set(
@@ -231,7 +230,6 @@ export class PresetsService {
         return userPresets.presets.map((preset) => toPreset(preset, userPresets.defaultPresetId))
     }
 
-    // A taken name is refused unless the save asks to overwrite that preset.
     async create(userId: string, input: SavePresetPayload): Promise<{ preset: Preset; isCreated: boolean }> {
         const saved = await this.save(userId, input)
 
@@ -367,7 +365,6 @@ export class PresetsService {
         )
     }
 
-    // The anonymous default becomes the account's when the account has none, and only if that preset moved.
     private async adoptDefault(userId: string, presetId: string | null): Promise<void> {
         if (!presetId) {
             return
@@ -419,8 +416,6 @@ export class PresetsService {
         return toPreset(stored, isDefault ? stored.id : null)
     }
 
-    // The preset of the name takes the new name casing and settings, and keeps its id and usage count. Null when no
-    // preset has the name.
     private async overwriteByName(userId: string, changes: PresetChanges, isDefault?: boolean) {
         const userPresets = await this.collection.findOneAndUpdate(
             { _id: userId, 'presets.nameKey': changes.nameKey },

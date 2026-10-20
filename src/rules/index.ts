@@ -127,7 +127,6 @@ const evaluateAspectRatio = (rule: Rule, media: JobMedia): MetadataVerdict => {
         : { verdict: 'fail', detail: `It’s ${size}, outside the shapes allowed: ${min} to ${max}.` }
 }
 
-// The rule's platforms the selected ones reach; all of them when none were given.
 const narrowPlatforms = (rule: Rule, selectedPlatforms: Platform[] | undefined): RulePlatform[] => {
     if (!selectedPlatforms) {
         return rule.platform
@@ -228,8 +227,7 @@ const hasPlacementOf = (placements: Placement[], platform: Platform): boolean =>
 
 // Nothing chosen means nothing ruled out: an empty list stands for every value, and a platform chosen without any of
 // its placements stands for all of them (as the web's withPlatformPlacements reads it), so leaving a setting empty and
-// choosing all of it select the same rules and read the same in the prompt. Two runs of one ad differed only by that
-// (2026-10-08: 6 findings and 18 specs vs 2 and 1).
+// choosing all of it select the same rules and read the same in the prompt.
 export const resolveSettings = ({ platforms, placements, markets }: AnalysisSettings): AnalysisSettings => {
     const resolvedPlatforms = platforms.length ? platforms : Object.values(Platform)
 
@@ -243,9 +241,6 @@ export const resolveSettings = ({ platforms, placements, markets }: AnalysisSett
     }
 }
 
-// The rules relevant to this video: its platforms (plus cross-platform `all` rules), limited to video creatives, to the
-// markets (global rules always apply) and, for placement-specific rules, to the placements. Then split by how each one
-// is checked.
 export const selectRules = (ruleSet: RuleSet, settings: AnalysisSettings): SelectedRules => {
     const filter = toRuleFilter(resolveSettings(settings))
     const relevant = ruleSet.rules.filter((rule) => isRelevant(rule, filter))
@@ -299,7 +294,6 @@ export const evaluateMetadataRules = (
         ...citationOf(ruleSet, rule),
     }))
 
-// Like metadata checks, an advisory or a finding names only the platforms the selected ones reach.
 export const buildAdvisories = (ruleSet: RuleSet, rules: Rule[], selectedPlatforms?: Platform[]): Advisory[] =>
     rules.map((rule) => ({
         id: rule.id,

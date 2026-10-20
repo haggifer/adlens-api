@@ -32,7 +32,6 @@ const toReviewError = (err: unknown, elapsedMs: number): Error => {
         return refused
     }
 
-    // Provider overload, timeouts and network failures.
     return new RetryableError(detail, { cause: refused ?? err })
 }
 

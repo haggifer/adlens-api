@@ -7,7 +7,6 @@ const PROBE: ProbeResult = { durationS: 20, width: 1080, height: 1920, hasAudio:
 
 type ProbeOutcome = ProbeResult | Error
 
-// One outcome for every probe, or one per probe in order.
 const build = (info: ObjectInfo | null | Error, probe: ProbeOutcome | ProbeOutcome[] = PROBE) => {
     const outcomes = Array.isArray(probe) ? [...probe] : null
     const storage = {

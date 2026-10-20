@@ -30,7 +30,6 @@ const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 // An HTTP error status Vertex may answer differently on another attempt: overload, rate limits and server errors.
 export const isRetryableStatus = (status: number): boolean => RETRYABLE_STATUSES.has(status)
 
-// The video, then the prompt.
 export const buildReviewContents = ({ videoUri, mimeType, rules, advisories, settings }: VideoReviewRequest): Content =>
     createUserContent([createPartFromUri(videoUri, mimeType), buildReviewPrompt(settings, rules, advisories)])
 

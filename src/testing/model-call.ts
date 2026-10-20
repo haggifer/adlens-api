@@ -19,7 +19,6 @@ export const buildModelCall = (overrides: Partial<ModelCall> = {}): ModelCall =>
     ...overrides,
 })
 
-// What a job records after these calls: each call, and totals across them.
 export const usageOf = (...calls: ModelCall[]): TokenUsage => ({
     promptTokens: calls.reduce((sum, call) => sum + call.promptTokens, 0),
     outputTokens: calls.reduce((sum, call) => sum + call.candidatesTokens + call.thoughtsTokens, 0),

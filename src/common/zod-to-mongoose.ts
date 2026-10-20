@@ -92,9 +92,8 @@ const buildField = (schema: unknown): unknown => {
 const buildDefinition = (shape: Record<string, unknown>): Record<string, unknown> =>
     Object.fromEntries(Object.entries(shape).map(([key, value]) => [key, buildField(value)]))
 
-// Builds a Mongoose schema from a Zod object schema. Field types, required-ness (from optional/nullable),
-// defaults, and enums are derived; storage-only concerns (indexes, collection, hooks) are layered on by
-// the caller.
+// Field types, required-ness (from optional/nullable), defaults, and enums are derived; storage-only concerns (indexes,
+// collection, hooks) are layered on by the caller.
 export const zodToMongoose = (schema: z.ZodType, options?: SchemaOptions): Schema => {
     const mongooseSchema = new Schema(buildDefinition(zodDef(schema).shape ?? {}) as SchemaDefinition, options)
 

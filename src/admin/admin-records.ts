@@ -3,8 +3,6 @@ import { Types } from 'mongoose'
 import type { ModelCall, StoredJob } from '../database/job.doc'
 import type { UserExtras } from '../database/user.doc'
 
-// What the admin routes read from the `jobs` and `user` documents, and the projections that fetch exactly that.
-
 type CallRecord = Pick<
     ModelCall,
     | 'at'

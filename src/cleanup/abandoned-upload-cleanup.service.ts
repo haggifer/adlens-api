@@ -8,7 +8,6 @@ import { IN_PROGRESS_STATUSES } from '../jobs/job-status'
 import { StorageService } from '../storage/storage.service'
 import type { CleanupResult } from './types'
 
-// A video no result needs: its job ended without one, wasn't restarted, and the video isn't deleted yet.
 const UNUSED_VIDEO: FilterQuery<JobDoc> = {
     status: { $nin: [JobStatus.Analyzed, ...IN_PROGRESS_STATUSES] },
     restartedAs: { $exists: false },
