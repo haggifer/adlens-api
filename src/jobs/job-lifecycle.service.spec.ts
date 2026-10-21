@@ -24,6 +24,7 @@ import { configStub } from '../testing/config-stub'
 import { type MemoryMongo, startMemoryMongo } from '../testing/memory-mongo'
 import { buildModelCall, usageOf } from '../testing/model-call'
 import { RecordingLivePublisher } from '../testing/recording-live-publisher'
+import { EARLY_WORKER_MARGIN_MS } from './early-worker'
 import { JobLifecycle } from './job-lifecycle.service'
 
 const USER = new Types.ObjectId().toString()
@@ -126,6 +127,9 @@ describe('JobLifecycle', () => {
     const wasQueuedAt = (jobId: string, at: Date) =>
         jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { queuedAt: at } })
 
+    const workerWaitsUntil = (jobId: string, at: Date) =>
+        jobs.collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { workerWaitsUntil: at } })
+
     const callStartedAt = async (jobId: string, at: Date) => {
         await lifecycle.startAttempt(jobId)
         await lifecycle.markModelCall(jobId, at)
@@ -200,6 +204,38 @@ describe('JobLifecycle', () => {
     })
 
     describe('charging and queueing', () => {
+        it("keeps the early worker's deadline only on a job queued more than the margin before it", async () => {
+            const wellBefore = await claimJob()
+            const withinMargin = await claimJob()
+            const farDeadline = new Date(Date.now() + 2 * EARLY_WORKER_MARGIN_MS)
+            const nearDeadline = new Date(Date.now() + EARLY_WORKER_MARGIN_MS)
+
+            await workerWaitsUntil(wellBefore, farDeadline)
+            await workerWaitsUntil(withinMargin, nearDeadline)
+
+            const kept = await lifecycle.chargeAndQueue(wellBefore, USER, MEDIA, null, farDeadline)
+            const removed = await lifecycle.chargeAndQueue(withinMargin, USER, MEDIA, null, nearDeadline)
+
+            expect(kept).toMatchObject({ status: JobStatus.Queued, workerWaitsUntil: expect.any(Date) })
+            expect(removed.status).toBe(JobStatus.Queued)
+            expect(removed).not.toHaveProperty('workerWaitsUntil')
+            expect(await findJob(withinMargin)).not.toHaveProperty('workerWaitsUntil')
+        })
+
+        it("cancels the early worker's deadline only while the job is pending", async () => {
+            const deadline = new Date(Date.now() + 2 * EARLY_WORKER_MARGIN_MS)
+            const pending = await createJob()
+            const verifying = await claimJob()
+
+            await workerWaitsUntil(pending, deadline)
+            await workerWaitsUntil(verifying, deadline)
+            await lifecycle.cancelEarlyWorker(pending)
+            await lifecycle.cancelEarlyWorker(verifying)
+
+            expect(await findJob(pending)).not.toHaveProperty('workerWaitsUntil')
+            expect((await findJob(verifying))?.workerWaitsUntil).toEqual(deadline)
+        })
+
         it('charges the user and the network once, and records the measured media and both runs', async () => {
             const jobId = await queueJob(NETWORK_CHARGE)
 

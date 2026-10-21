@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
+import { EarlyWorkerWait } from './analysis/pipeline/early-worker-wait'
 import { createLogger } from './common/cloud-logger'
 import { describeErrorWithStack } from './common/error-message'
 import type { Env } from './config/env'
@@ -24,11 +25,21 @@ const run = async (): Promise<number> => {
     const jobId = config.get('WORKER_JOB_ID', { infer: true })
     const attempt = config.get('CLOUD_RUN_TASK_ATTEMPT', { infer: true })
     const maxRetries = config.get('ANALYZE_MAX_RETRIES', { infer: true })
+    const isEarly = config.get('WORKER_IS_EARLY', { infer: true })
 
     try {
         if (!jobId) {
             logger.error('WORKER_JOB_ID is not set; nothing to analyze')
             return EXIT_DONE
+        }
+
+        if (isEarly) {
+            const wait = await app.get(EarlyWorkerWait).waitForQueue(jobId)
+
+            if (wait !== 'run') {
+                logger.log(`job ${jobId}: left by the worker dispatched at its creation (${wait})`)
+                return EXIT_DONE
+            }
         }
 
         const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast: attempt >= maxRetries })

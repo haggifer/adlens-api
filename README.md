@@ -28,8 +28,8 @@ the API contract live in their own repos.
 - **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run at `api.useadlens.com`. Better Auth, Mongoose on Atlas,
   GCS signed URLs, ffprobe verification, quota, live update tokens.
 - **Worker** (`src/worker.ts` → `WorkerModule`): the same image run as an **on-demand Cloud Run Job**. The API starts
-  one execution per analysis; the worker analyzes that job once and exits. It has no HTTP layer and no dispatcher, so
-  it can never start another worker.
+  one execution per analysis (for an upload, when the job is created; see [Job lifecycle](#job-lifecycle)); the worker
+  analyzes that job once and exits. It has no HTTP layer and no dispatcher, so it can never start another worker.
 - **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
   started by Cloud Scheduler at 03:00 UTC. It first expires every user's abandoned jobs, as a read of one's own jobs
   does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges, and
@@ -92,6 +92,11 @@ conditional update on the expected current status, so two racing callers can nev
    size** (`x-goog-content-length-range`), so the stored object must match the declaration, and only creates the object
    (`x-goog-if-generation-match: 0`), so a verified video can't be replaced by a second PUT. The
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
+   The job's worker is dispatched right away (`JobAnalysisService.startEarlyWorker`), so Cloud Run provisions it
+   (about 24 s) while the browser uploads. The job is inserted first with `workerWaitsUntil`, 3 minutes ahead
+   (`EARLY_WORKER_WAIT_MS`), and the execution is told it was dispatched early (`WORKER_IS_EARLY`). A failed dispatch
+   is logged and removes the deadline while the job is still pending, and the job is created all the same. Sample jobs
+   and restarts verify in about half a second and get their worker at start.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
    fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
    job twice, it creates a new one (a restart too, below). The HTTP answer still says what went wrong.
@@ -110,7 +115,10 @@ conditional update on the expected current status, so two racing callers can nev
       unconfirmed account; the [network rules](#abuse-limits) answer with their own codes). If the user charge
       fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
       code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
-    - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
+    - **dispatch** the worker, unless the job is left to the one dispatched at its creation: the write that queues the
+      job keeps `workerWaitsUntil` only when the deadline is more than `EARLY_WORKER_MARGIN_MS` (15 s: the worker's
+      polling plus clock skew) after `queuedAt` (`isLeftToEarlyWorker`), and removes it otherwise. If the dispatch
+      fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
 
     **Restart** `POST /v1/jobs/:id/restart` runs a failed analysis again on the video it already has. The admission
     refusals come first (quota and network, as `GET /v1/admission` answers them), then the rule: the owner's job, in
@@ -127,7 +135,13 @@ conditional update on the expected current status, so two racing callers can nev
     and a restart refuses a claimed job. A restarted job's video is its restart's, which the cleanup judges by the
     restart's own age.
 
-3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
+3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)). A worker dispatched early
+   first waits ([`EarlyWorkerWait`](src/analysis/pipeline/early-worker-wait.ts)), polling the job about once a second
+   without changing it. It runs a job in flight that still has `workerWaitsUntil` (its own retry resumes the same way),
+   and exits 0 when the job ended or was deleted, has no deadline (another worker was dispatched, or none was
+   expected), or is still pending or verifying when its own clock passes the deadline. So it never runs alongside the
+   start's worker, and its waiting uses no retry; a job left to a worker that never came stays `queued` until the
+   stale sweep below fails and refunds it. Then: `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
    and how its answer is read ([`gemini-review.ts`](src/analysis/review/gemini-review.ts)) and the analysis assembly
@@ -554,6 +568,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `GEMINI_MODEL`           | `gemini-3.8-flash`                     | Model id                                                                                                                                              |
 | `GEMINI_LOCATION`        | `global`                               | Vertex serving location                                                                                                                               |
 | `WORKER_JOB_ID`          | —                                      | Worker only: set per execution by the dispatcher                                                                                                      |
+| `WORKER_IS_EARLY`        | `0`                                    | Worker only: `1` on the execution dispatched at an upload job's creation, which waits for the job to be queued                                        |
 | `CLOUD_RUN_TASK_ATTEMPT` | `0`                                    | Worker only: set by Cloud Run on each attempt                                                                                                         |
 
 ## Local development
@@ -645,6 +660,13 @@ Why the system is built this way, and what was rejected. Decisions that span the
   over 99% of the time at a few analyses a week. A job costs nothing when idle and gives per-run isolation, retries and
   a hard timeout. Cloud Tasks pushing to a scale-to-zero service would also work; worker pools with an external
   autoscaler were more moving parts for no gain at this load.
+- **An upload job's worker is dispatched at creation** (2026-10-21). Starting a run took about 31 s, 24 of them Cloud
+  Run provisioning the execution; dispatching while the browser uploads overlaps the two. The deadline is written
+  before the dispatch, so an API that dies between the two leaves at worst a job no worker took, which the stale sweep
+  fails and refunds, never two executions on one job. Whether the start leaves the job to that worker is decided once,
+  from stored values, by the write that queues it, and the worker reads that decision rather than its own clock: a
+  worker still waiting when the start dispatched another would otherwise run too, and both would claim the job.
+  Sample jobs and restarts gain nothing (their start takes half a second) and are dispatched at start.
 - **One image, three entry points.** The API (`dist/main`), the worker (`dist/worker`) and the cleanup (`dist/cleanup`)
   share code and an image but have separate composition roots, so the jobs have no HTTP layer and can't start a worker.
 - **The cleanup is a scheduled Cloud Run Job, not a cron inside the API.** The API scales to zero and may run several

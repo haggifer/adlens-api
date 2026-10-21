@@ -62,15 +62,40 @@ export class JobAnalysisService {
 
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
-        const execution = await this.startWorker(jobId)
 
-        if (execution) {
-            await this.tryRecordExecution(jobId, execution)
+        // Kept only when the worker dispatched at creation is certain to take the job (chargeAndQueue).
+        if (!queued.workerWaitsUntil) {
+            const execution = await this.startWorker(jobId)
+
+            if (execution) {
+                await this.tryRecordExecution(jobId, execution)
+            }
         }
 
         const presetId = await this.countPresetUse(userId, queued)
 
         return toPublicJob({ ...queued, presetId })
+    }
+
+    // Right after an upload job is created, so the worker's provisioning overlaps the upload. The job already holds
+    // its deadline (JobsService.create): if the API died after dispatching, the start must not dispatch a second
+    // worker, and the worst case is a job no worker took, which the stale sweep fails and refunds. A failed dispatch
+    // never fails the creation: the start then dispatches as for any other job.
+    async startEarlyWorker(jobId: string): Promise<void> {
+        let execution: string | null
+
+        try {
+            execution = await this.dispatcher.dispatch(jobId, { isEarly: true })
+        } catch (err) {
+            this.logger.error(`early dispatch failed for job ${jobId}: ${describeError(err)}`)
+            await this.tryCancelEarlyWorker(jobId)
+
+            return
+        }
+
+        if (execution) {
+            await this.tryRecordExecution(jobId, execution)
+        }
     }
 
     // POST /v1/jobs/:id/restart: a new job on the failed job's video (JobsService.createRestart), started like any other.
@@ -111,7 +136,7 @@ export class JobAnalysisService {
                 Boolean(job.hasPassedChallenge),
                 freeRunUserId,
             )
-            return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
+            return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge, job.workerWaitsUntil)
         } catch (err) {
             // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.
             await this.lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed, describeChargeFailure(err))
@@ -150,13 +175,23 @@ export class JobAnalysisService {
         }
     }
 
-    // The worker is running and the user is charged, so the run is answered as started whatever happens here: the
-    // execution name only helps find the worker's logs.
+    // The worker is running, so the request is answered as if this succeeded: the execution name only helps find the
+    // worker's logs.
     private async tryRecordExecution(jobId: string, execution: string): Promise<void> {
         try {
             await this.lifecycle.recordExecution(jobId, execution)
         } catch (err) {
             this.logger.error(`could not record execution ${execution} of job ${jobId}: ${describeError(err)}`)
+        }
+    }
+
+    // Left in place, the deadline makes the start leave the job to a worker that never came: it stays queued until the
+    // stale sweep fails and refunds it.
+    private async tryCancelEarlyWorker(jobId: string): Promise<void> {
+        try {
+            await this.lifecycle.cancelEarlyWorker(jobId)
+        } catch (err) {
+            this.logger.error(`could not cancel the early worker of job ${jobId}: ${describeError(err)}`)
         }
     }
 

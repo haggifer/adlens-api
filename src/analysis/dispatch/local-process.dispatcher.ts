@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
-import { AnalysisDispatcher, WORKER_JOB_ID_ENV } from './analysis-dispatcher'
+import { AnalysisDispatcher, type DispatchOptions, getWorkerEnv } from './analysis-dispatcher'
 
 // dist/analysis/dispatch → dist/worker.js
 const WORKER_ENTRY = join(__dirname, '..', '..', 'worker.js')
@@ -11,9 +11,14 @@ const WORKER_ENTRY = join(__dirname, '..', '..', 'worker.js')
 export class LocalProcessDispatcher extends AnalysisDispatcher {
     private readonly logger = new Logger(LocalProcessDispatcher.name)
 
-    async dispatch(jobId: string): Promise<string | null> {
+    async dispatch(jobId: string, options: DispatchOptions = {}): Promise<string | null> {
         const worker = spawn(process.execPath, [WORKER_ENTRY], {
-            env: { ...process.env, [WORKER_JOB_ID_ENV]: jobId, CLOUD_RUN_TASK_ATTEMPT: '0', ANALYZE_MAX_RETRIES: '0' },
+            env: {
+                ...process.env,
+                ...getWorkerEnv(jobId, options),
+                CLOUD_RUN_TASK_ATTEMPT: '0',
+                ANALYZE_MAX_RETRIES: '0',
+            },
             stdio: 'inherit',
         })
 

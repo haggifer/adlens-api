@@ -20,6 +20,7 @@ import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../database/upl
 import { LivePublisher } from '../live/live-publisher'
 import { SamplesService } from '../samples/samples.service'
 import { SIGNED_URL_TTL_MS, StorageService } from '../storage/storage.service'
+import { EARLY_WORKER_WAIT_MS } from './early-worker'
 import { JobLifecycle } from './job-lifecycle.service'
 import { IN_PROGRESS_STATUSES } from './job-status'
 import { toPublicJob } from './job.mapper'
@@ -74,6 +75,7 @@ export class JobsService {
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
+            workerWaitsUntil: new Date(Date.now() + EARLY_WORKER_WAIT_MS),
         })
         const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 

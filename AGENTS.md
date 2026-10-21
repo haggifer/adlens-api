@@ -97,6 +97,12 @@ npm run db               # after `npm run build`: dry run of the database job ag
 - The committed `.env` ships in the production image: only public values meant for every environment go there (it is
   where `QUOTA_LIMIT` is set). Local-only values go in `.env.local`, secrets in the bundle above.
 - `ANALYZE_MAX_RETRIES` must equal the Cloud Run Job's `--max-retries` in `infra/setup.sh`.
+- One job, one worker execution. An upload job's worker is dispatched at creation, after the job holds
+  `workerWaitsUntil` (never the other way round). Only the write that queues the job decides whether that worker keeps
+  the job (`isLeftToEarlyWorker`, from stored values): it keeps `workerWaitsUntil` exactly when the start dispatches
+  none. A worker dispatched early runs only a job in flight that still has the field; its waiting never changes the
+  job, and a wait that ends without running exits 0. Its own clock only ever makes it leave a job still pending or
+  verifying. `EARLY_WORKER_WAIT_MS`, the boot and the 10-minute Gemini request must fit the 15-minute task timeout.
 - Never delete a user's upload on a transient storage or network error; only a definite problem with the file
   deletes it.
 - A job with a `sampleId` points at a shared sample video under `samples/`: it skips upload verification, and nothing

@@ -85,6 +85,10 @@ const jobDocSchema = z.object({
     // When the verified, charged upload was queued, or a refused Gemini call was cleared: the time limit for starting the
     // call counts from here, whatever the worker writes later. Missing on jobs queued before 2026-10-08.
     queuedAt: z.date().optional(),
+    // Set on an upload job whose worker was dispatched at its creation: that worker waits for the job until then. The
+    // write that queues the job keeps it only when it leaves the job to that worker (isLeftToEarlyWorker) and removes
+    // it otherwise, so on a job in flight it means no other worker was dispatched.
+    workerWaitsUntil: z.date().optional(),
     attempts: z.number().int().nonnegative().default(0),
     // Set just before a worker attempt calls Gemini, and cleared only when Vertex refused that call with an HTTP error
     // status (never billed). An attempt that finds it set doesn't call again: the earlier call may have been billed.
