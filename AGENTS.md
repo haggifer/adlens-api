@@ -98,11 +98,13 @@ npm run db               # after `npm run build`: dry run of the database job ag
   where `QUOTA_LIMIT` is set). Local-only values go in `.env.local`, secrets in the bundle above.
 - `ANALYZE_MAX_RETRIES` must equal the Cloud Run Job's `--max-retries` in `infra/setup.sh`.
 - One job, one worker execution. An upload job's worker is dispatched at creation, after the job holds
-  `workerWaitsUntil` (never the other way round). Only the write that queues the job decides whether that worker keeps
-  the job (`isLeftToEarlyWorker`, from stored values): it keeps `workerWaitsUntil` exactly when the start dispatches
-  none. A worker dispatched early runs only a job in flight that still has the field; its waiting never changes the
-  job, and a wait that ends without running exits 0. Its own clock only ever makes it leave a job still pending or
-  verifying. `EARLY_WORKER_WAIT_MS`, the boot and the 10-minute Gemini request must fit the 15-minute task timeout.
+  `workerWaitsUntil` (never the other way round), and only while the user has no other job waited for by one. Only the
+  write that queues the job decides whether that worker keeps the job (`isLeftToEarlyWorker`, from stored values): it
+  sets `leftToEarlyWorker` exactly when the start dispatches none. A worker dispatched early runs only a job in flight
+  with that flag, never on the deadline's presence alone (an API without the flag leaves it in place and dispatches);
+  its waiting never changes the job, and a wait that ends without running exits 0. Its own clock only ever makes it
+  leave a job still pending or verifying. `EARLY_WORKER_WAIT_MS`, the boot and the 10-minute Gemini request must fit
+  the 15-minute task timeout. The early dispatch is capped (`EARLY_DISPATCH_TIMEOUT_MS`) and never fails a create.
 - Never delete a user's upload on a transient storage or network error; only a definite problem with the file
   deletes it.
 - A job with a `sampleId` points at a shared sample video under `samples/`: it skips upload verification, and nothing

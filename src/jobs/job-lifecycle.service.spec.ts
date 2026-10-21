@@ -204,22 +204,22 @@ describe('JobLifecycle', () => {
     })
 
     describe('charging and queueing', () => {
-        it("keeps the early worker's deadline only on a job queued more than the margin before it", async () => {
+        it('leaves to the early worker only a job queued more than the margin before its deadline', async () => {
             const wellBefore = await claimJob()
             const withinMargin = await claimJob()
-            const farDeadline = new Date(Date.now() + 2 * EARLY_WORKER_MARGIN_MS)
-            const nearDeadline = new Date(Date.now() + EARLY_WORKER_MARGIN_MS)
+            const withoutDeadline = await claimJob()
 
-            await workerWaitsUntil(wellBefore, farDeadline)
-            await workerWaitsUntil(withinMargin, nearDeadline)
+            await workerWaitsUntil(wellBefore, new Date(Date.now() + 2 * EARLY_WORKER_MARGIN_MS))
+            await workerWaitsUntil(withinMargin, new Date(Date.now() + EARLY_WORKER_MARGIN_MS))
 
-            const kept = await lifecycle.chargeAndQueue(wellBefore, USER, MEDIA, null, farDeadline)
-            const removed = await lifecycle.chargeAndQueue(withinMargin, USER, MEDIA, null, nearDeadline)
+            const left = await lifecycle.chargeAndQueue(wellBefore, USER, MEDIA)
+            const notLeft = await lifecycle.chargeAndQueue(withinMargin, USER, MEDIA)
+            const withoutWorker = await lifecycle.chargeAndQueue(withoutDeadline, USER, MEDIA)
 
-            expect(kept).toMatchObject({ status: JobStatus.Queued, workerWaitsUntil: expect.any(Date) })
-            expect(removed.status).toBe(JobStatus.Queued)
-            expect(removed).not.toHaveProperty('workerWaitsUntil')
-            expect(await findJob(withinMargin)).not.toHaveProperty('workerWaitsUntil')
+            expect(left).toMatchObject({ status: JobStatus.Queued, leftToEarlyWorker: true })
+            expect(notLeft.status).toBe(JobStatus.Queued)
+            expect(notLeft).not.toHaveProperty('leftToEarlyWorker')
+            expect(withoutWorker).not.toHaveProperty('leftToEarlyWorker')
         })
 
         it("cancels the early worker's deadline only while the job is pending", async () => {

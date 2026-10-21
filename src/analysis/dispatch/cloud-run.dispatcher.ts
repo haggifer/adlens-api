@@ -11,18 +11,18 @@ export class CloudRunDispatcher extends AnalysisDispatcher {
         super()
     }
 
-    // The client's stubs and its first access token; the gRPC channel still connects on the first runJob.
+    // A read of the job itself sets up the client's stubs, its first access token and the gRPC channel, which the first
+    // runJob, usually an upload's early dispatch on its short timeout, would otherwise pay.
     override async warmUp(): Promise<void> {
-        await this.client.initialize()
-        await this.client.auth.getAccessToken()
+        await this.client.getJob({ name: this.jobName })
     }
 
     async dispatch(jobId: string, options: DispatchOptions = {}): Promise<string | null> {
         const env = Object.entries(getWorkerEnv(jobId, options)).map(([name, value]) => ({ name, value }))
-        const [operation] = await this.client.runJob({
-            name: this.jobName,
-            overrides: { containerOverrides: [{ env }] },
-        })
+        const [operation] = await this.client.runJob(
+            { name: this.jobName, overrides: { containerOverrides: [{ env }] } },
+            options.timeoutMs ? { timeout: options.timeoutMs } : undefined,
+        )
         const metadata = operation.metadata as { name?: string } | undefined
 
         return metadata?.name ?? null

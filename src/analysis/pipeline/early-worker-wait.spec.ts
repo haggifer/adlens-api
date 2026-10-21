@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { JobErrorCode, type JobMedia, JobStatus, Market, Platform, VideoMimeType } from 'adlens-shared'
 import { type Model, Types } from 'mongoose'
 import { JOB_MODEL, type JobDoc, JobSchema, type StoredJob } from '../../database/job.doc'
@@ -34,15 +35,21 @@ describe('checkEarlyWorker', () => {
         expect(checkEarlyWorker({ status: JobStatus.Verifying, workerWaitsUntil: deadline }, deadline)).toBe('expired')
     })
 
-    it('runs a job in flight that still holds the deadline, whatever the clock says', () => {
+    it('runs a job in flight that its queueing left to it, whatever the clock says', () => {
         const late = new Date(deadline.getTime() + 1000)
+        const left = { workerWaitsUntil: deadline, leftToEarlyWorker: true }
 
-        expect(checkEarlyWorker({ status: JobStatus.Queued, workerWaitsUntil: deadline }, late)).toBe('run')
-        expect(checkEarlyWorker({ status: JobStatus.Analyzing, workerWaitsUntil: deadline }, late)).toBe('run')
+        expect(checkEarlyWorker({ status: JobStatus.Queued, ...left }, late)).toBe('run')
+        expect(checkEarlyWorker({ status: JobStatus.Analyzing, ...left }, late)).toBe('run')
     })
 
-    it('leaves a job without the deadline, an ended job and a deleted one', () => {
+    it('leaves a job in flight not left to it, even with a deadline (as an API without the flag queues it)', () => {
+        expect(checkEarlyWorker({ status: JobStatus.Queued, workerWaitsUntil: deadline }, NOW)).toBe('not-left')
+        expect(checkEarlyWorker({ status: JobStatus.Analyzing, workerWaitsUntil: deadline }, NOW)).toBe('not-left')
         expect(checkEarlyWorker({ status: JobStatus.Queued }, NOW)).toBe('not-left')
+    })
+
+    it('leaves a pending job without a deadline, an ended job and a deleted one', () => {
         expect(checkEarlyWorker({ status: JobStatus.Pending }, NOW)).toBe('not-left')
         expect(checkEarlyWorker({ status: JobStatus.Error, workerWaitsUntil: deadline }, NOW)).toBe('ended')
         expect(checkEarlyWorker({ status: JobStatus.Analyzed, workerWaitsUntil: deadline }, NOW)).toBe('ended')
@@ -72,12 +79,17 @@ describe('EarlyWorkerWait', () => {
         return job._id.toString()
     }
 
-    // As the start does it: the claimed job's deadline decides whether its queueing keeps it.
     const startJob = async (jobId: string) => {
-        const claimed = await lifecycle.claimForVerification(USER, jobId)
-
-        await lifecycle.chargeAndQueue(jobId, USER, MEDIA, null, claimed?.workerWaitsUntil)
+        await lifecycle.claimForVerification(USER, jobId)
+        await lifecycle.chargeAndQueue(jobId, USER, MEDIA)
     }
+
+    // What an API without the leftToEarlyWorker flag writes when it queues the job, before dispatching its own worker.
+    const queueWithoutFlag = (jobId: string) =>
+        jobs.collection.updateOne(
+            { _id: new Types.ObjectId(jobId) },
+            { $set: { status: JobStatus.Queued, media: MEDIA, queuedAt: new Date() } },
+        )
 
     const findJob = (jobId: string) => jobs.findById(jobId).lean<StoredJob>()
 
@@ -101,6 +113,7 @@ describe('EarlyWorkerWait', () => {
     })
 
     afterEach(async () => {
+        jest.restoreAllMocks()
         await Promise.all([jobs.deleteMany({}), users().deleteMany({})])
     })
 
@@ -117,24 +130,63 @@ describe('EarlyWorkerWait', () => {
         expect(await waiting).toBe('run')
     })
 
-    it('leaves a job queued within the margin of its deadline to the worker the start dispatched, untouched', async () => {
+    it('leaves a job queued within the margin of its deadline while it waits, untouched', async () => {
         const jobId = await createJob(inMs(EARLY_WORKER_MARGIN_MS))
+        const waiting = wait.waitForQueue(jobId, POLL_MS)
 
         await startJob(jobId)
 
-        const before = await findJob(jobId)
+        const queued = await findJob(jobId)
 
-        expect(await wait.waitForQueue(jobId, POLL_MS)).toBe('not-left')
-        expect(await findJob(jobId)).toEqual(before)
+        expect(await waiting).toBe('not-left')
+        expect(await findJob(jobId)).toEqual(queued)
     })
 
-    it('resumes a job it already took on a retry', async () => {
+    it('leaves a job an API without the flag queued, untouched', async () => {
+        const jobId = await createJob(inMs(2 * EARLY_WORKER_MARGIN_MS))
+        const waiting = wait.waitForQueue(jobId, POLL_MS)
+
+        await queueWithoutFlag(jobId)
+
+        const queued = await findJob(jobId)
+
+        expect(await waiting).toBe('not-left')
+        expect(await findJob(jobId)).toEqual(queued)
+    })
+
+    it('resumes a job it already took on a retry, even after a refused Gemini call moved queuedAt', async () => {
         const jobId = await createJob(inMs(2 * EARLY_WORKER_MARGIN_MS))
 
         await startJob(jobId)
         await lifecycle.startAttempt(jobId)
+        await lifecycle.clearModelCall(jobId, inMs(10 * EARLY_WORKER_MARGIN_MS))
 
         expect(await wait.waitForQueue(jobId, POLL_MS)).toBe('run')
+    })
+
+    it('keeps waiting through a failed read, without using a retry', async () => {
+        const jobId = await createJob(inMs(2 * EARLY_WORKER_MARGIN_MS))
+
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+        jest.spyOn(lifecycle, 'findWorkerWait').mockRejectedValueOnce(new Error('connection reset'))
+
+        const waiting = wait.waitForQueue(jobId, POLL_MS)
+
+        await startJob(jobId)
+
+        expect(await waiting).toBe('run')
+    })
+
+    it('gives up reading once the deadline has passed', async () => {
+        const jobId = await createJob(inMs(5 * POLL_MS))
+        const read = lifecycle.findWorkerWait.bind(lifecycle)
+
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+        jest.spyOn(lifecycle, 'findWorkerWait')
+            .mockImplementationOnce(read)
+            .mockRejectedValue(new Error('connection reset'))
+
+        await expect(wait.waitForQueue(jobId, POLL_MS)).rejects.toThrow('connection reset')
     })
 
     it('leaves a job whose deadline passes while it is pending, untouched', async () => {

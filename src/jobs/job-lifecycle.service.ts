@@ -24,6 +24,8 @@ type CallMarking = 'marked' | 'repeated' | 'ended'
 
 type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
 
+export type WorkerWait = Pick<StoredJob, 'status' | 'workerWaitsUntil' | 'leftToEarlyWorker'>
+
 interface ExpirySweepResult {
     expired: number
     failed: number
@@ -119,15 +121,13 @@ export class JobLifecycle {
 
     // verifying → queued, after charging the network (unless the caller is an admin) and then the user. The run ids are
     // recorded on the job before either charge, so no charge exists that no job holds: whatever fails or crashes after
-    // that, the refund finds it, and refunding a run that was never charged changes nothing. The queued job keeps
-    // workerWaitsUntil (the claimed job's) only when it is left to the worker dispatched at its creation; otherwise it
-    // loses it and the caller dispatches a worker.
+    // that, the refund finds it, and refunding a run that was never charged changes nothing. The queued job is marked
+    // leftToEarlyWorker when the worker dispatched at its creation takes it; otherwise the caller dispatches one.
     async chargeAndQueue(
         jobId: string,
         userId: string,
         media: JobMedia,
         ipCharge: IpCharge | null = null,
-        workerWaitsUntil?: Date,
     ): Promise<StoredJob> {
         const runId = newRunId()
         const ipRunId = newRunId()
@@ -152,11 +152,12 @@ export class JobLifecycle {
 
             await this.quota.consume(userId, jobId, new Date(), runId)
 
+            const waited = await this.findWorkerWait(jobId)
             const queuedAt = new Date()
+            const isLeft = isLeftToEarlyWorker(waited?.workerWaitsUntil, queuedAt)
             const queued = await this.transition(
                 { _id: jobId, status: JobStatus.Verifying, chargedRunId: runId },
-                { status: JobStatus.Queued, media, queuedAt },
-                isLeftToEarlyWorker(workerWaitsUntil, queuedAt) ? {} : { workerWaitsUntil: 1 },
+                { status: JobStatus.Queued, media, queuedAt, ...(isLeft ? { leftToEarlyWorker: true } : {}) },
             )
 
             if (!queued) {
@@ -181,10 +182,8 @@ export class JobLifecycle {
         await this.model.updateOne({ _id: jobId, status: JobStatus.Pending }, { $unset: { workerWaitsUntil: 1 } })
     }
 
-    findWorkerWait(jobId: string): Promise<Pick<StoredJob, 'status' | 'workerWaitsUntil'> | null> {
-        return this.model
-            .findById(jobId, { status: 1, workerWaitsUntil: 1 })
-            .lean<Pick<StoredJob, 'status' | 'workerWaitsUntil'>>()
+    findWorkerWait(jobId: string): Promise<WorkerWait | null> {
+        return this.model.findById(jobId, { status: 1, workerWaitsUntil: 1, leftToEarlyWorker: 1 }).lean<WorkerWait>()
     }
 
     // queued → error with the charges refunded, when the worker couldn't be started. Like any failed start, never back
@@ -386,13 +385,8 @@ export class JobLifecycle {
         }
     }
 
-    private async transition(
-        filter: FilterQuery<JobDoc>,
-        set: Partial<JobDoc>,
-        unset: Partial<Record<keyof JobDoc, 1>> = {},
-    ): Promise<StoredJob | null> {
-        const update = Object.keys(unset).length > 0 ? { $set: set, $unset: unset } : { $set: set }
-        const job = await this.model.findOneAndUpdate(filter, update, { new: true }).lean<StoredJob>()
+    private async transition(filter: FilterQuery<JobDoc>, set: Partial<JobDoc>): Promise<StoredJob | null> {
+        const job = await this.model.findOneAndUpdate(filter, { $set: set }, { new: true }).lean<StoredJob>()
 
         if (job) {
             await this.live.publishJob(job)

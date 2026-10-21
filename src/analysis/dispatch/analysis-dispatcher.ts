@@ -3,6 +3,7 @@ import type { Env } from '../../config/env'
 export interface DispatchOptions {
     // Dispatched at the job's creation, before its upload: the worker waits for the job to be queued.
     isEarly?: boolean
+    timeoutMs?: number
 }
 
 // Tied to the env schema so the names can't drift.

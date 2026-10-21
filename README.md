@@ -28,8 +28,10 @@ the API contract live in their own repos.
 - **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run at `api.useadlens.com`. Better Auth, Mongoose on Atlas,
   GCS signed URLs, ffprobe verification, quota, live update tokens.
 - **Worker** (`src/worker.ts` → `WorkerModule`): the same image run as an **on-demand Cloud Run Job**. The API starts
-  one execution per analysis (for an upload, when the job is created; see [Job lifecycle](#job-lifecycle)); the worker
-  analyzes that job once and exits. It has no HTTP layer and no dispatcher, so it can never start another worker.
+  one execution per upload job when it is created (one per user at a time; it exits without running when the start
+  dispatches its own) and one per start that isn't left to it, such as a sample's or a restart's (see
+  [Job lifecycle](#job-lifecycle)). The worker analyzes its job at most once and exits. It has no HTTP layer and no
+  dispatcher, so it can never start another worker.
 - **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
   started by Cloud Scheduler at 03:00 UTC. It first expires every user's abandoned jobs, as a read of one's own jobs
   does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges, and
@@ -92,11 +94,13 @@ conditional update on the expected current status, so two racing callers can nev
    size** (`x-goog-content-length-range`), so the stored object must match the declaration, and only creates the object
    (`x-goog-if-generation-match: 0`), so a verified video can't be replaced by a second PUT. The
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
-   The job's worker is dispatched right away (`JobAnalysisService.startEarlyWorker`), so Cloud Run provisions it
-   (about 24 s) while the browser uploads. The job is inserted first with `workerWaitsUntil`, 3 minutes ahead
-   (`EARLY_WORKER_WAIT_MS`), and the execution is told it was dispatched early (`WORKER_IS_EARLY`). A failed dispatch
-   is logged and removes the deadline while the job is still pending, and the job is created all the same. Sample jobs
-   and restarts verify in about half a second and get their worker at start.
+   The job's worker is dispatched alongside the signing (`JobAnalysisService.createUpload`), so Cloud Run provisions
+   it (about 24 s) while the browser uploads. The job is inserted first with `workerWaitsUntil`, 3 minutes ahead
+   (`EARLY_WORKER_WAIT_MS`), and the execution is told it was dispatched early (`WORKER_IS_EARLY`). A dispatch that
+   fails or takes longer than `EARLY_DISPATCH_TIMEOUT_MS` (4 s) is logged and removes the deadline while the job is
+   still pending, so an execution it may have created leaves, and the job is created all the same. A user whose other
+   job is still pending or verifying with a live deadline gets no early worker: creating jobs is free, and every early
+   worker is a billed execution. Sample jobs and restarts verify in about half a second and get their worker at start.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
    fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
    job twice, it creates a new one (a restart too, below). The HTTP answer still says what went wrong.
@@ -116,9 +120,9 @@ conditional update on the expected current status, so two racing callers can nev
       fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
       code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
     - **dispatch** the worker, unless the job is left to the one dispatched at its creation: the write that queues the
-      job keeps `workerWaitsUntil` only when the deadline is more than `EARLY_WORKER_MARGIN_MS` (15 s: the worker's
-      polling plus clock skew) after `queuedAt` (`isLeftToEarlyWorker`), and removes it otherwise. If the dispatch
-      fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
+      job sets `leftToEarlyWorker` when the deadline is more than `EARLY_WORKER_MARGIN_MS` (15 s: the worker's
+      polling plus clock skew) after `queuedAt` (`isLeftToEarlyWorker`). If the dispatch fails, the job ends as
+      `ANALYSIS_FAILED` and the charge is refunded (503).
 
     **Restart** `POST /v1/jobs/:id/restart` runs a failed analysis again on the video it already has. The admission
     refusals come first (quota and network, as `GET /v1/admission` answers them), then the rule: the owner's job, in
@@ -137,9 +141,10 @@ conditional update on the expected current status, so two racing callers can nev
 
 3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)). A worker dispatched early
    first waits ([`EarlyWorkerWait`](src/analysis/pipeline/early-worker-wait.ts)), polling the job about once a second
-   without changing it. It runs a job in flight that still has `workerWaitsUntil` (its own retry resumes the same way),
-   and exits 0 when the job ended or was deleted, has no deadline (another worker was dispatched, or none was
-   expected), or is still pending or verifying when its own clock passes the deadline. So it never runs alongside the
+   without changing it (a failed read is retried until the deadline). It runs a job in flight marked
+   `leftToEarlyWorker` (its own retry resumes the same way), and exits 0 when the job ended or was deleted, is in flight
+   without the flag (another worker was dispatched, also by an API that predates the flag), is pending without a
+   deadline, or is still pending or verifying when its own clock passes the deadline. So it never runs alongside the
    start's worker, and its waiting uses no retry; a job left to a worker that never came stays `queued` until the
    stale sweep below fails and refunds it. Then: `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
@@ -231,6 +236,10 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
   (`chargedRunId`, `chargedIpRunId`) before charging and clears them once both are refunded, so each is refunded at
   most once and never lost.
+- **Early workers**: creating an upload job checks nothing that is spent, yet dispatches a billed worker execution
+  that waits up to 3 minutes for the run to start. So a user gets one at a time: while one of their jobs is still
+  pending or verifying with a live `workerWaitsUntil`, a new job gets no early worker and its start dispatches one as
+  before ([Job lifecycle](#job-lifecycle)). Two creates racing past that check can each get one.
 - **Failed analyses**: a run that ends without a result is never counted. Every failure refunds both runs, the
   user's and the network's, in full: a failure before the Gemini call, a call Vertex refused with an HTTP error
   status, a stuck worker, and a call that may have been billed alike. Once Gemini has answered, the call is billed
@@ -664,16 +673,22 @@ Why the system is built this way, and what was rejected. Decisions that span the
   Run provisioning the execution; dispatching while the browser uploads overlaps the two. The deadline is written
   before the dispatch, so an API that dies between the two leaves at worst a job no worker took, which the stale sweep
   fails and refunds, never two executions on one job. Whether the start leaves the job to that worker is decided once,
-  from stored values, by the write that queues it, and the worker reads that decision rather than its own clock: a
-  worker still waiting when the start dispatched another would otherwise run too, and both would claim the job.
-  Sample jobs and restarts gain nothing (their start takes half a second) and are dispatched at start.
+  from stored values, by the write that queues it, and recorded as a flag the worker needs before it runs anything: a
+  worker still waiting when the start dispatched another would otherwise run too, and an API rolled back to a version
+  without the flag still dispatches its own, which the early worker then leaves. What it costs: an execution (up to 3
+  minutes of polling) for every upload never started, bounded to one at a time per user; the dispatch on the create
+  request, alongside the signing and capped at 4 s; and a job whose early worker never comes waits for the 5-minute
+  sweep, which fails and refunds it. A new worker image must be deployed before the API that dispatches early (CI does
+  so); an older worker ignores `WORKER_IS_EARLY`, so its job sits queued until the sweep refunds it. Sample jobs and
+  restarts gain nothing (their start takes half a second) and are dispatched at start.
 - **The API pays its first analysis's one-time costs at start** (2026-10-21). A fresh instance's first start paid
   about 1.2 to 2 s once: the first ffprobe run, the Cloud Run client's setup and token, and the first IAM signBlob.
   `warmUpFirstAnalysis` (`src/api-warm-up.ts`) runs them in parallel before the server listens, waits at most 3 s and
-  only logs a failure, and the service deploys with startup CPU boost (`--cpu-boost`), so the start-up work runs on
-  extra CPU instead of slowing the request that woke the instance. The upload URL signed at creation already warms the
-  signer on that instance, but an analyze often lands on another one. The gRPC channel still connects on the first
-  dispatch.
+  only logs a failure, and the service deploys with startup CPU boost (`--cpu-boost`). The request that woke the
+  instance waits for the warm-up, sped up by the boost. The Cloud Run client is warmed with a read of the analysis job
+  (`getJob`), which also connects its gRPC channel before the first early dispatch, with its 4-second cap, needs it.
+  The upload URL signed at creation already warms the signer on that instance, but an analyze often lands on another
+  one.
 - **One image, three entry points.** The API (`dist/main`), the worker (`dist/worker`) and the cleanup (`dist/cleanup`)
   share code and an image but have separate composition roots, so the jobs have no HTTP layer and can't start a worker.
 - **The cleanup is a scheduled Cloud Run Job, not a cron inside the API.** The API scales to zero and may run several

@@ -2,8 +2,7 @@ import 'reflect-metadata'
 import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
-import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
-import { EarlyWorkerWait } from './analysis/pipeline/early-worker-wait'
+import { runWorkerAttempt } from './analysis/pipeline/worker-attempt'
 import { createLogger } from './common/cloud-logger'
 import { describeErrorWithStack } from './common/error-message'
 import type { Env } from './config/env'
@@ -33,16 +32,7 @@ const run = async (): Promise<number> => {
             return EXIT_DONE
         }
 
-        if (isEarly) {
-            const wait = await app.get(EarlyWorkerWait).waitForQueue(jobId)
-
-            if (wait !== 'run') {
-                logger.log(`job ${jobId}: left by the worker dispatched at its creation (${wait})`)
-                return EXIT_DONE
-            }
-        }
-
-        const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast: attempt >= maxRetries })
+        const outcome = await runWorkerAttempt(app, jobId, { isEarly, isLast: attempt >= maxRetries })
 
         logger.log(`job ${jobId}: ${outcome} (attempt ${attempt})`)
 

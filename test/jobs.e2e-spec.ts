@@ -36,7 +36,7 @@ import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../src/database
 import { USER_COLLECTION } from '../src/database/user.doc'
 import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
 import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
-import { EARLY_WORKER_MARGIN_MS, EARLY_WORKER_WAIT_MS } from '../src/jobs/early-worker'
+import { EARLY_DISPATCH_TIMEOUT_MS, EARLY_WORKER_MARGIN_MS, EARLY_WORKER_WAIT_MS } from '../src/jobs/early-worker'
 import { JobLifecycle } from '../src/jobs/job-lifecycle.service'
 import { UPLOAD_URL_MARGIN_MS } from '../src/jobs/jobs.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
@@ -93,7 +93,8 @@ describe('Jobs API (e2e)', () => {
         app.get<Model<JobDoc>>(getModelToken(JOB_MODEL)).findById(jobId).lean<StoredJob>()
 
     // An upload job's worker is dispatched when the job is created; the start then dispatches none.
-    const earlyDispatchOnly = (jobId: string) => [[jobId, { isEarly: true }]]
+    const EARLY_DISPATCH = { isEarly: true, timeoutMs: EARLY_DISPATCH_TIMEOUT_MS }
+    const earlyDispatchOnly = (jobId: string) => [[jobId, EARLY_DISPATCH]]
 
     // The early worker's dispatch and then the start's: a job whose early dispatch failed gets its worker at start.
     const failNextDispatches = (count: number) => {
@@ -171,7 +172,12 @@ describe('Jobs API (e2e)', () => {
             )
     })
 
-    beforeEach(() => {
+    beforeEach(async () => {
+        // A user gets one early worker at a time, and no worker of an earlier test is still waiting.
+        await app
+            .get<Model<JobDoc>>(getModelToken(JOB_MODEL))
+            .collection.updateMany({}, { $unset: { workerWaitsUntil: 1 } })
+
         storedObject = { sizeBytes: FILE.size, contentType: FILE.contentType }
         probe = { durationS: 20, width: 1080, height: 1920, hasAudio: true }
         probeFailure = null
@@ -268,10 +274,13 @@ describe('Jobs API (e2e)', () => {
     })
 
     describe('the worker dispatched when an upload job is created', () => {
+        // A network of its own, so these runs leave the default network's limits to the other tests.
+        const runner = { ...as(EARLY_RUNNER), 'x-forwarded-for': '203.0.113.200' }
+
         const createRunnerJob = async (): Promise<string> => {
             const res = await request(app.getHttpServer())
                 .post('/v1/jobs')
-                .set(as(EARLY_RUNNER))
+                .set(runner)
                 .send({ settings: SETTINGS, file: FILE })
                 .expect(201)
 
@@ -279,7 +288,7 @@ describe('Jobs API (e2e)', () => {
         }
 
         const analyze = (jobId: string) =>
-            request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(EARLY_RUNNER)).expect(202)
+            request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(runner).expect(202)
 
         // As if the job had been created earlier: its deadline is set at creation.
         const setWorkerWaitsUntil = (jobId: string, at: Date) =>
@@ -325,7 +334,7 @@ describe('Jobs API (e2e)', () => {
 
             expect(created).toMatchObject({ status: JobStatus.Pending })
             expect(created).not.toHaveProperty('workerWaitsUntil')
-            expect(dispatch.mock.calls).toEqual([[jobId, { isEarly: true }], [jobId]])
+            expect(dispatch.mock.calls).toEqual([...earlyDispatchOnly(jobId), [jobId]])
         })
 
         it('is left the job when it is queued more than the margin before the deadline', async () => {
@@ -335,17 +344,34 @@ describe('Jobs API (e2e)', () => {
             await analyze(jobId)
 
             expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
-            expect((await findStored(jobId))?.workerWaitsUntil).toEqual(expect.any(Date))
+            expect((await findStored(jobId))?.leftToEarlyWorker).toBe(true)
         })
 
-        it('is not left a job queued within the margin: the start dispatches its own and removes the deadline', async () => {
+        it('is not left a job queued within the margin: the start dispatches its own', async () => {
             const jobId = await createRunnerJob()
 
             await setWorkerWaitsUntil(jobId, new Date(Date.now() + EARLY_WORKER_MARGIN_MS))
             await analyze(jobId)
 
             expect(dispatch.mock.calls).toEqual([...earlyDispatchOnly(jobId), [jobId]])
-            expect(await findStored(jobId)).not.toHaveProperty('workerWaitsUntil')
+            expect(await findStored(jobId)).not.toHaveProperty('leftToEarlyWorker')
+        })
+
+        it('is dispatched for one upload of a user at a time', async () => {
+            const waitedFor = await createRunnerJob()
+            const second = await createRunnerJob()
+
+            expect(await findStored(second)).not.toHaveProperty('workerWaitsUntil')
+
+            await analyze(second)
+            await analyze(waitedFor)
+            const third = await createRunnerJob()
+
+            expect(dispatch.mock.calls).toEqual([
+                ...earlyDispatchOnly(waitedFor),
+                [second],
+                ...earlyDispatchOnly(third),
+            ])
         })
     })
 
@@ -1868,7 +1894,7 @@ describe('Jobs API (e2e)', () => {
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
             expect(job).toMatchObject({ status: JobStatus.Queued, presetId: null })
-            expect(dispatch).toHaveBeenCalledWith(job.id, { isEarly: true })
+            expect(dispatch).toHaveBeenCalledWith(job.id, EARLY_DISPATCH)
         })
 
         it('answers a started run as started, its preset counted, when its execution name cannot be stored', async () => {

@@ -1,10 +1,9 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { JobStatus } from 'adlens-shared'
 import { setTimeout as sleep } from 'node:timers/promises'
-import type { StoredJob } from '../../database/job.doc'
-import { JobLifecycle } from '../../jobs/job-lifecycle.service'
-
-type WaitedJob = Pick<StoredJob, 'status' | 'workerWaitsUntil'>
+import { describeError } from '../../common/error-message'
+import { EARLY_WORKER_WAIT_MS } from '../../jobs/early-worker'
+import { JobLifecycle, type WorkerWait } from '../../jobs/job-lifecycle.service'
 
 type EarlyWorkerState = 'run' | 'waiting' | 'ended' | 'not-left' | 'expired'
 
@@ -15,35 +14,62 @@ const POLL_MS = 1000
 const FINAL_STATUSES = [JobStatus.Analyzed, JobStatus.Error]
 const IN_FLIGHT_STATUSES = [JobStatus.Queued, JobStatus.Analyzing]
 
-// On a job in flight, workerWaitsUntil survives only when its queueing left the job to this worker, so this worker
-// never runs alongside one the start dispatched; a retry of this worker finds it on the job it took and resumes.
-// Missing on a job still pending, the dispatch at creation looked failed, and the start will dispatch its own worker.
-export const checkEarlyWorker = (job: WaitedJob | null, now: Date): EarlyWorkerState => {
+// Only the write that queued the job decides whether it is this worker's (leftToEarlyWorker), so this worker never runs
+// alongside one the start dispatched; a retry of this worker finds the flag on the job it took and resumes. A pending
+// job without a deadline had its dispatch at creation look failed, and the start will dispatch its own worker.
+export const checkEarlyWorker = (job: WorkerWait | null, now: Date): EarlyWorkerState => {
     if (!job || FINAL_STATUSES.includes(job.status)) {
         return 'ended'
+    }
+
+    if (IN_FLIGHT_STATUSES.includes(job.status)) {
+        return job.leftToEarlyWorker ? 'run' : 'not-left'
     }
 
     if (!job.workerWaitsUntil) {
         return 'not-left'
     }
 
-    if (IN_FLIGHT_STATUSES.includes(job.status)) {
-        return 'run'
-    }
-
     return now >= job.workerWaitsUntil ? 'expired' : 'waiting'
 }
 
 // The worker dispatched at an upload job's creation waits here, without changing the job, until the job is queued.
-// Waiting ends with the process exiting cleanly, never in a failure, so it uses none of Cloud Run's retries.
+// Waiting ends with the process exiting cleanly, so it uses none of Cloud Run's retries: a read that fails is retried
+// until the deadline, and only one still failing after it is left to Cloud Run.
 @Injectable()
 export class EarlyWorkerWait {
+    private readonly logger = new Logger(EarlyWorkerWait.name)
+
     constructor(private readonly lifecycle: JobLifecycle) {}
 
     async waitForQueue(jobId: string, pollMs = POLL_MS): Promise<EarlyWorkerOutcome> {
+        // Until the job is read: its deadline can't be later, since the job was created before this worker started.
+        let deadline = new Date(Date.now() + EARLY_WORKER_WAIT_MS)
+        let isFailing = false
+
         for (;;) {
-            const job = await this.lifecycle.findWorkerWait(jobId)
-            const state = checkEarlyWorker(job, new Date())
+            let state: EarlyWorkerState
+
+            try {
+                const job = await this.lifecycle.findWorkerWait(jobId)
+
+                deadline = job?.workerWaitsUntil ?? deadline
+                state = checkEarlyWorker(job, new Date())
+                isFailing = false
+            } catch (err) {
+                if (Date.now() >= deadline.getTime()) {
+                    throw err
+                }
+
+                if (!isFailing) {
+                    this.logger.warn(
+                        `could not read job ${jobId} while waiting for it, retrying: ${describeError(err)}`,
+                    )
+                }
+
+                isFailing = true
+                state = 'waiting'
+            }
 
             if (state !== 'waiting') {
                 return state

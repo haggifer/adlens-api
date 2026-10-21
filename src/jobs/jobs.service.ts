@@ -2,7 +2,6 @@ import { HttpStatus, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
     type CreateJobPayload,
-    type CreateJobResponse,
     type CreateSampleJobPayload,
     isJobRestartable,
     type Job,
@@ -10,6 +9,7 @@ import {
     JobStatus,
     type JobVideoResponse,
     RequestErrorCode,
+    type UploadTarget,
 } from 'adlens-shared'
 import { isValidObjectId, Model, Types } from 'mongoose'
 import { z } from 'zod'
@@ -58,28 +58,44 @@ export class JobsService {
         private readonly live: LivePublisher,
     ) {}
 
-    async create(
+    // A pending upload job; with an early worker, it holds that worker's deadline before anything dispatches it.
+    async createUpload(
         userId: string,
         { settings, file, presetId }: CreateJobPayload,
         hasPassedChallenge: boolean,
-    ): Promise<CreateJobResponse> {
+        hasEarlyWorker: boolean,
+    ): Promise<StoredJob> {
         const id = new Types.ObjectId()
-        const path = jobVideoPath(userId, id.toString())
         const created = await this.model.create({
             _id: id,
             userId,
             status: JobStatus.Pending,
             settings,
-            file: { ...file, bucket: this.storage.bucketName, path },
+            file: { ...file, bucket: this.storage.bucketName, path: jobVideoPath(userId, id.toString()) },
             appliedPresetId: presetId ?? null,
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
-            workerWaitsUntil: new Date(Date.now() + EARLY_WORKER_WAIT_MS),
+            ...(hasEarlyWorker ? { workerWaitsUntil: new Date(Date.now() + EARLY_WORKER_WAIT_MS) } : {}),
         })
-        const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 
-        return { job: toPublicJob(created.toObject<StoredJob>()), upload }
+        return created.toObject<StoredJob>()
+    }
+
+    signUpload({ file }: StoredJob): Promise<UploadTarget> {
+        return this.storage.createUploadTarget(file.path, file.contentType, file.size)
+    }
+
+    // Whether one of the user's jobs is still waited for by the worker dispatched at its creation. Every create would
+    // otherwise start a billed execution, and creating jobs costs nothing.
+    async hasWaitingEarlyWorker(userId: string, now = new Date()): Promise<boolean> {
+        const waiting = await this.model.exists({
+            userId,
+            status: { $in: [JobStatus.Pending, JobStatus.Verifying] },
+            workerWaitsUntil: { $gt: now },
+        })
+
+        return waiting !== null
     }
 
     // A pending job on a published sample: its video is already stored and measured, so nothing is uploaded.

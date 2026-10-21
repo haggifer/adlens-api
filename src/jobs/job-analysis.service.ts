@@ -1,5 +1,13 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
-import { type ApiError, type Job, JobErrorCode, type JobMedia, RequestErrorCode } from 'adlens-shared'
+import {
+    type ApiError,
+    type CreateJobPayload,
+    type CreateJobResponse,
+    type Job,
+    JobErrorCode,
+    type JobMedia,
+    RequestErrorCode,
+} from 'adlens-shared'
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
@@ -9,6 +17,7 @@ import { PresetsService } from '../presets/presets.service'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
 import { AnalysisAdmission } from './analysis-admission.service'
+import { EARLY_DISPATCH_TIMEOUT_MS } from './early-worker'
 import { JobLifecycle } from './job-lifecycle.service'
 import { toPublicJob } from './job.mapper'
 import { JobsService } from './jobs.service'
@@ -63,8 +72,7 @@ export class JobAnalysisService {
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
 
-        // Kept only when the worker dispatched at creation is certain to take the job (chargeAndQueue).
-        if (!queued.workerWaitsUntil) {
+        if (!queued.leftToEarlyWorker) {
             const execution = await this.startWorker(jobId)
 
             if (execution) {
@@ -77,15 +85,33 @@ export class JobAnalysisService {
         return toPublicJob({ ...queued, presetId })
     }
 
-    // Right after an upload job is created, so the worker's provisioning overlaps the upload. The job already holds
-    // its deadline (JobsService.create): if the API died after dispatching, the start must not dispatch a second
-    // worker, and the worst case is a job no worker took, which the stale sweep fails and refunds. A failed dispatch
-    // never fails the creation: the start then dispatches as for any other job.
-    async startEarlyWorker(jobId: string): Promise<void> {
+    // POST /v1/jobs: a pending upload job and its signed upload, with its worker dispatched alongside the signing so
+    // Cloud Run provisions it while the browser uploads. One such worker per user at a time.
+    async createUpload(
+        userId: string,
+        input: CreateJobPayload,
+        hasPassedChallenge: boolean,
+    ): Promise<CreateJobResponse> {
+        const hasWaitingWorker = await this.jobs.hasWaitingEarlyWorker(userId)
+        const job = await this.jobs.createUpload(userId, input, hasPassedChallenge, !hasWaitingWorker)
+
+        const [upload] = await Promise.all([
+            this.jobs.signUpload(job),
+            job.workerWaitsUntil ? this.startEarlyWorker(job._id.toString()) : null,
+        ])
+
+        return { job: toPublicJob(job), upload }
+    }
+
+    // The job already holds its deadline: if the API died after dispatching, the start must not dispatch a second
+    // worker, and the worst case is a job no worker took, which the stale sweep fails and refunds. A failed or slow
+    // dispatch never fails the creation: the deadline is cancelled, so an execution it may still have created leaves,
+    // and the start dispatches as for any other job.
+    private async startEarlyWorker(jobId: string): Promise<void> {
         let execution: string | null
 
         try {
-            execution = await this.dispatcher.dispatch(jobId, { isEarly: true })
+            execution = await this.dispatcher.dispatch(jobId, { isEarly: true, timeoutMs: EARLY_DISPATCH_TIMEOUT_MS })
         } catch (err) {
             this.logger.error(`early dispatch failed for job ${jobId}: ${describeError(err)}`)
             await this.tryCancelEarlyWorker(jobId)
@@ -136,7 +162,7 @@ export class JobAnalysisService {
                 Boolean(job.hasPassedChallenge),
                 freeRunUserId,
             )
-            return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge, job.workerWaitsUntil)
+            return await this.lifecycle.chargeAndQueue(jobId, userId, media, ipCharge)
         } catch (err) {
             // No JobErrorCode names a refusal (the request's own code tells the user why); the detail keeps it.
             await this.lifecycle.failStart(jobId, JobErrorCode.AnalysisFailed, describeChargeFailure(err))

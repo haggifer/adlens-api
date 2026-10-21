@@ -73,6 +73,8 @@ describe('warmUpFirstAnalysis', () => {
 
         await expect(warmUpFirstAnalysis(fakeApp(steps) as never, 10)).resolves.toBeUndefined()
 
+        expect(steps.dispatcher).toHaveBeenCalledTimes(1)
+        expect(steps.signing).toHaveBeenCalledTimes(1)
         expect(warn).toHaveBeenCalledTimes(1)
     })
 })
