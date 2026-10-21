@@ -11,6 +11,12 @@ export class CloudRunDispatcher extends AnalysisDispatcher {
         super()
     }
 
+    // The client's stubs and its first access token; the gRPC channel still connects on the first runJob.
+    override async warmUp(): Promise<void> {
+        await this.client.initialize()
+        await this.client.auth.getAccessToken()
+    }
+
     async dispatch(jobId: string, options: DispatchOptions = {}): Promise<string | null> {
         const env = Object.entries(getWorkerEnv(jobId, options)).map(([name, value]) => ({ name, value }))
         const [operation] = await this.client.runJob({

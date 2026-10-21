@@ -667,6 +667,13 @@ Why the system is built this way, and what was rejected. Decisions that span the
   from stored values, by the write that queues it, and the worker reads that decision rather than its own clock: a
   worker still waiting when the start dispatched another would otherwise run too, and both would claim the job.
   Sample jobs and restarts gain nothing (their start takes half a second) and are dispatched at start.
+- **The API pays its first analysis's one-time costs at start** (2026-10-21). A fresh instance's first start paid
+  about 1.2 to 2 s once: the first ffprobe run, the Cloud Run client's setup and token, and the first IAM signBlob.
+  `warmUpFirstAnalysis` (`src/api-warm-up.ts`) runs them in parallel before the server listens, waits at most 3 s and
+  only logs a failure, and the service deploys with startup CPU boost (`--cpu-boost`), so the start-up work runs on
+  extra CPU instead of slowing the request that woke the instance. The upload URL signed at creation already warms the
+  signer on that instance, but an analyze often lands on another one. The gRPC channel still connects on the first
+  dispatch.
 - **One image, three entry points.** The API (`dist/main`), the worker (`dist/worker`) and the cleanup (`dist/cleanup`)
   share code and an image but have separate composition roots, so the jobs have no HTTP layer and can't start a worker.
 - **The cleanup is a scheduled Cloud Run Job, not a cron inside the API.** The API scales to zero and may run several

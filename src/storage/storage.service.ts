@@ -37,6 +37,9 @@ const PUBLIC_URL_REFRESH_MS = 24 * 60 * 60 * 1000
 const toPublicUrl = ({ bucket, path }: StoredFile) =>
     `https://storage.googleapis.com/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`
 
+// Nothing is stored here: a URL signed for it is never handed out.
+const WARM_UP_PATH = 'warm-up'
+
 const isNotFound = (err: unknown): boolean => (err as { code?: unknown })?.code === 404
 
 // The one GCS bucket for uploads. Authenticated via ADC; locally, user ADC can't sign V4 URLs, so an optional
@@ -83,6 +86,12 @@ export class StorageService {
         }
 
         return this.signReadUrl(file, REPLAY_URL_TTL_MS)
+    }
+
+    // Without a key file the first signature fetches a token and calls IAM signBlob, about a second the instance pays at
+    // start instead of in a user's first analysis.
+    async warmUpSigning(): Promise<void> {
+        await this.signReadUrl({ bucket: this.bucketName, path: WARM_UP_PATH }, SIGNED_URL_TTL_MS)
     }
 
     private async signReadUrl({ bucket, path }: StoredFile, ttlMs: number): Promise<SignedReadUrl> {

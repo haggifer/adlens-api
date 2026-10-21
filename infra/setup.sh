@@ -459,7 +459,7 @@ echo "== deploy API (served at $API_URL through a Cloud Run domain mapping) =="
 gcloud run deploy "$API_SVC" --image="$IMAGE_REF" --region="$REGION" --service-account="$RUNTIME_SA" \
     --allow-unauthenticated \
     --min-instances=0 --max-instances=3 --concurrency=80 --timeout=300 \
-    --cpu=1 --memory=512Mi --cpu-throttling \
+    --cpu=1 --memory=512Mi --cpu-throttling --cpu-boost \
     --set-secrets="$SECRETS_PATH=$SECRETS_BUNDLE:latest" \
     --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,STORAGE_BUCKET=$BUCKET,PUBLIC_MEDIA_BUCKET=$PUBLIC_MEDIA_BUCKET,WEB_ORIGIN=$WEB_ORIGIN,BETTER_AUTH_URL=$API_URL,COOKIE_DOMAIN=$COOKIE_DOMAIN,GEMINI_LOCATION=global,GCP_REGION=$REGION,ANALYZE_JOB_NAME=$ANALYZE_JOB,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID,SECRETS_FILE=$SECRETS_PATH,LOG_FORMAT=json"
 

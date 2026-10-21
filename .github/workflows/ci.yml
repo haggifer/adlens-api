@@ -71,8 +71,9 @@ jobs:
               run: gcloud run jobs update adlens-analyze --region "$REGION" --image "$IMAGE_REF"
             - name: Deploy the cleanup job
               run: gcloud run jobs update adlens-cleanup --region "$REGION" --image "$IMAGE_REF"
+            # Startup CPU boost: the API warms up the first analysis's costs before it listens (main.ts).
             - name: Deploy the API
-              run: gcloud run services update adlens-api --region "$REGION" --image "$IMAGE_REF"
+              run: gcloud run services update adlens-api --region "$REGION" --image "$IMAGE_REF" --cpu-boost
             - name: Check the API is healthy
               run: curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors https://api.useadlens.com/health
             # Last, once the code that reads both the old and the new shapes is live everywhere: the pending migrations,

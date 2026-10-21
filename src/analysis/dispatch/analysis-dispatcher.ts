@@ -17,4 +17,7 @@ export const getWorkerEnv = (jobId: string, { isEarly = false }: DispatchOptions
 // Starts the worker for a job. Resolves with the runtime's execution name when there is one.
 export abstract class AnalysisDispatcher {
     abstract dispatch(jobId: string, options?: DispatchOptions): Promise<string | null>
+
+    // Pays the first dispatch's one-time costs while the API starts; nothing to pay for a local process.
+    async warmUp(): Promise<void> {}
 }
