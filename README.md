@@ -1,5 +1,10 @@
 # adlens-api
 
+> Part of **[AdLens](https://github.com/haggifer/adlens)**, AI policy checks for video ads · [Live](https://www.useadlens.com)
+
+[![CI](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml/badge.svg?branch=init-setup)](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
+
 Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against an
 ad-policy ruleset of several hundred rules with one Gemini pass, and you get cited, timestamped findings, with each
 step announced to the browser as it happens. This repo holds the HTTP API and the analysis worker; the web client and
@@ -150,10 +155,10 @@ conditional update on the expected current status, so two racing callers can nev
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
    and how its answer is read ([`gemini-review.ts`](src/analysis/review/gemini-review.ts)) and the analysis assembly
-   ([`analysis-assembly.ts`](src/analysis/pipeline/analysis-assembly.ts)) need neither Nest nor the database, so the
-   [lab](https://github.com/haggifer/adlens-lab) runs the same code with its overrides on top. The lab imports this
-   source only through [`src/lab.ts`](src/lab.ts), a barrel listed as a knip entry and left out of the build, so
-   everything it uses is visible here and counts as used.
+   ([`analysis-assembly.ts`](src/analysis/pipeline/analysis-assembly.ts)) need neither Nest nor the database, so an
+   evaluation tool outside this repo runs the same code with its own overrides on top. It imports this source only
+   through [`src/lab.ts`](src/lab.ts), a barrel listed as a knip entry and left out of the build, so everything it
+   uses is visible here and counts as used.
 4. **Fail well**: the worker knows its attempt (`CLOUD_RUN_TASK_ATTEMPT`). A transient failure (provider overload,
    network) exits 1 so Cloud Run retries it, unless the call may have been billed (below); a permanent failure, or any
    failure on the last attempt, ends the job in `error`: `MODEL_UNAVAILABLE` when Gemini itself failed (an overload,
@@ -527,7 +532,7 @@ pipeline and is billed like any run, outside every quota. Set `"isActive": false
 
 ```
 src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup), db.ts (database job) and lab.ts
-            (adlens-lab's only import surface), one Nest module per feature: jobs,
+            (the evaluation tool's only import surface), one Nest module per feature: jobs,
             analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
             live, database, db-job, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
@@ -834,6 +839,5 @@ Why the system is built this way, and what was rejected. Decisions that span the
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md): free to read, run and learn from, not for commercial use. The analysis
-lab ([adlens-lab](https://github.com/haggifer/adlens-lab)) and the contract package
-([adlens-shared](https://github.com/haggifer/adlens-shared)) are MIT.
+[PolyForm Noncommercial 1.0.0](LICENSE.md): free to read, run and learn from, not for commercial use. The contract
+package ([adlens-shared](https://github.com/haggifer/adlens-shared)) is MIT.
