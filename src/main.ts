@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { NestExpressApplication } from '@nestjs/platform-express'
 import helmet from 'helmet'
+import { warmUpFirstAnalysis } from './api-warm-up'
 import { AppModule } from './app.module'
 import { mountAuthRoute } from './auth/auth-route'
 import { AUTH, type AuthInstance } from './auth/auth.instance'
@@ -29,6 +30,7 @@ const bootstrap = async () => {
     mountAuthRoute(app.getHttpAdapter().getInstance(), auth)
     app.useBodyParser('json', { limit: '1mb' })
 
+    await warmUpFirstAnalysis(app)
     await app.listen(config.get('PORT', { infer: true }))
 }
 

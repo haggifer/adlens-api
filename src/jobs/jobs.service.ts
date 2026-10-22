@@ -2,7 +2,6 @@ import { HttpStatus, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
     type CreateJobPayload,
-    type CreateJobResponse,
     type CreateSampleJobPayload,
     isJobRestartable,
     type Job,
@@ -10,6 +9,7 @@ import {
     JobStatus,
     type JobVideoResponse,
     RequestErrorCode,
+    type UploadTarget,
 } from 'adlens-shared'
 import { isValidObjectId, Model, Types } from 'mongoose'
 import { z } from 'zod'
@@ -20,6 +20,7 @@ import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../database/upl
 import { LivePublisher } from '../live/live-publisher'
 import { SamplesService } from '../samples/samples.service'
 import { SIGNED_URL_TTL_MS, StorageService } from '../storage/storage.service'
+import { EARLY_WORKER_WAIT_MS } from './early-worker'
 import { JobLifecycle } from './job-lifecycle.service'
 import { IN_PROGRESS_STATUSES } from './job-status'
 import { toPublicJob } from './job.mapper'
@@ -57,27 +58,44 @@ export class JobsService {
         private readonly live: LivePublisher,
     ) {}
 
-    async create(
+    // A pending upload job; with an early worker, it holds that worker's deadline before anything dispatches it.
+    async createUpload(
         userId: string,
         { settings, file, presetId }: CreateJobPayload,
         hasPassedChallenge: boolean,
-    ): Promise<CreateJobResponse> {
+        hasEarlyWorker: boolean,
+    ): Promise<StoredJob> {
         const id = new Types.ObjectId()
-        const path = jobVideoPath(userId, id.toString())
         const created = await this.model.create({
             _id: id,
             userId,
             status: JobStatus.Pending,
             settings,
-            file: { ...file, bucket: this.storage.bucketName, path },
+            file: { ...file, bucket: this.storage.bucketName, path: jobVideoPath(userId, id.toString()) },
             appliedPresetId: presetId ?? null,
             chargedRunId: null,
             chargedIpRunId: null,
             hasPassedChallenge,
+            ...(hasEarlyWorker ? { workerWaitsUntil: new Date(Date.now() + EARLY_WORKER_WAIT_MS) } : {}),
         })
-        const upload = await this.storage.createUploadTarget(path, file.contentType, file.size)
 
-        return { job: toPublicJob(created.toObject<StoredJob>()), upload }
+        return created.toObject<StoredJob>()
+    }
+
+    signUpload({ file }: StoredJob): Promise<UploadTarget> {
+        return this.storage.createUploadTarget(file.path, file.contentType, file.size)
+    }
+
+    // Whether one of the user's jobs is still waited for by the worker dispatched at its creation. Every create would
+    // otherwise start a billed execution, and creating jobs costs nothing.
+    async hasWaitingEarlyWorker(userId: string, now = new Date()): Promise<boolean> {
+        const waiting = await this.model.exists({
+            userId,
+            status: { $in: [JobStatus.Pending, JobStatus.Verifying] },
+            workerWaitsUntil: { $gt: now },
+        })
+
+        return waiting !== null
     }
 
     // A pending job on a published sample: its video is already stored and measured, so nothing is uploaded.
@@ -105,8 +123,10 @@ export class JobsService {
 
     // A new pending job on a failed job's video and settings, which the caller then starts. The failed job is kept as
     // the record of its run, marked `restartedAs`. Refused unless isJobRestartable allows it and the video is still
-    // stored. The claim on the failed job is one conditional write that the cleanup's own claim excludes, so the cleanup
-    // can't delete the video under a restart.
+    // stored. The claim on the failed job is one conditional write that the cleanup's and a deletion's own claims
+    // exclude, so neither can delete the video under a restart. The new job is created first: a failure after it leaves
+    // a pending job that expires like any other, never a failed job pointing at a job that doesn't exist. Tabs hear of
+    // the claim from announceRestart, once the new run has started or failed.
     async createRestart(failed: StoredJob, now = new Date()): Promise<StoredJob> {
         const isAllowed = isJobRestartable(toPublicJob(failed), now.getTime()) && !failed.videoDeletingAt
 
@@ -120,19 +140,19 @@ export class JobsService {
             throw notRestartable()
         }
 
-        const id = new Types.ObjectId()
-        const isClaimed = await this.claimForRestart(failed, id.toString())
+        const restart = await this.createRestartJob(failed)
+        const isClaimed = await this.claimForRestart(failed, restart._id.toString())
 
         if (!isClaimed) {
+            await this.model.deleteOne({ _id: restart._id })
             throw notRestartable()
         }
 
-        try {
-            return await this.createRestartJob(failed, id)
-        } catch (err) {
-            await this.model.updateOne({ _id: failed._id, restartedAs: id.toString() }, { $unset: { restartedAs: 1 } })
-            throw err
-        }
+        return restart
+    }
+
+    async announceRestart(failed: Pick<StoredJob, '_id' | 'userId'>): Promise<void> {
+        await this.live.publishJob(failed)
     }
 
     async recordCountedPreset(job: Pick<StoredJob, '_id' | 'userId'>, presetId: string): Promise<void> {
@@ -174,6 +194,7 @@ export class JobsService {
         }
 
         if (!job.sampleId && !job.restartedAs) {
+            await this.claimVideoForDeletion(job)
             await this.recordUploadTombstone(job)
             await this.storage.delete(job.file.path)
         }
@@ -196,7 +217,8 @@ export class JobsService {
     async createVideoUrl(userId: string, jobId: string): Promise<JobVideoResponse> {
         const job = await this.findOwned(userId, jobId)
 
-        if (!job.media || job.videoDeletedAt) {
+        // A restarted job's video is its restart's, which the cleanup judges on its own.
+        if (!job.media || job.videoDeletedAt || job.restartedAs) {
             throw notFound()
         }
 
@@ -242,18 +264,26 @@ export class JobsService {
             { $set: { restartedAs: restartId } },
         )
 
-        if (claimed.modifiedCount > 0) {
-            await this.live.publishJob(failed)
-        }
-
         return claimed.modifiedCount > 0
+    }
+
+    // Like the cleanup's claim: a restart that claimed the job first keeps its video, and one that comes after is
+    // refused. Answered as in progress, since the job's restart is running.
+    private async claimVideoForDeletion(job: StoredJob): Promise<void> {
+        const claimed = await this.model.updateOne(
+            { _id: job._id, status: { $nin: IN_PROGRESS_STATUSES }, restartedAs: { $exists: false } },
+            { $set: { videoDeletingAt: new Date() } },
+        )
+
+        if (claimed.modifiedCount === 0) {
+            throw inProgress()
+        }
     }
 
     // The failed job's media and counted preset come along: a sample's measured media skips verification, and a run
     // already counted for its preset is still the same analysis, so it isn't counted again.
-    private async createRestartJob(failed: StoredJob, id: Types.ObjectId): Promise<StoredJob> {
+    private async createRestartJob(failed: StoredJob): Promise<StoredJob> {
         const created = await this.model.create({
-            _id: id,
             userId: failed.userId,
             status: JobStatus.Pending,
             settings: failed.settings,

@@ -19,7 +19,7 @@ const toSiteverifyBody = (secret: string, token: string, remoteIp: string | null
 export const challengeFailed = () =>
     new ApiException(HttpStatus.FORBIDDEN, RequestErrorCode.ChallengeFailed, 'The challenge did not pass')
 
-// Tells people from bots. An abstract class so tests and the e2e suite replace it without reaching Cloudflare.
+// An abstract class so tests and the e2e suite replace it without reaching Cloudflare.
 export abstract class ChallengeVerifier {
     abstract verify(token: string, remoteIp: string | null): Promise<boolean>
 }

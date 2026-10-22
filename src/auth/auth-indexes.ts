@@ -1,6 +1,4 @@
-import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
-import { InjectConnection } from '@nestjs/mongoose'
-import { type Connection, mongo } from 'mongoose'
+import type { Connection, mongo } from 'mongoose'
 import { USER_COLLECTION } from '../database/user.doc'
 
 interface AuthIndex {
@@ -9,6 +7,7 @@ interface AuthIndex {
 }
 
 interface AuthIndexFailure {
+    collection: string
     name: string
     reason: string
 }
@@ -34,8 +33,8 @@ export const AUTH_INDEXES: AuthIndex[] = [
     },
 ]
 
-// Only the error's name and code: a duplicate-key message quotes the duplicate value, which here is an email address.
-const describeFailure = (err: unknown): string => {
+// Only the error's name and code: a duplicate-key message quotes the duplicate value, which can be an email address.
+export const describeIndexFailure = (err: unknown): string => {
     const { name, codeName, code } = (err ?? {}) as { name?: unknown; codeName?: unknown; code?: unknown }
     const parts = [name, codeName, code].filter((part) => part !== undefined)
 
@@ -43,8 +42,7 @@ const describeFailure = (err: unknown): string => {
 }
 
 // All indexes at once, each on its own, so one the data can't satisfy (duplicate emails, say) never takes the
-// others with it and a cold start isn't paying for eight round trips in sequence. Creating an index that already
-// exists with the same name and options is a no-op.
+// others with it. Creating an index that already exists with the same name and options is a no-op.
 export const ensureAuthIndexes = async (connection: Connection): Promise<AuthIndexFailure[]> => {
     const results = await Promise.allSettled(
         AUTH_INDEXES.map(({ collection, index }) => connection.collection(collection).createIndexes([index])),
@@ -52,25 +50,13 @@ export const ensureAuthIndexes = async (connection: Connection): Promise<AuthInd
 
     return results.flatMap((result, i) =>
         result.status === 'rejected'
-            ? [{ name: AUTH_INDEXES[i].index.name, reason: describeFailure(result.reason) }]
+            ? [
+                  {
+                      collection: AUTH_INDEXES[i].collection,
+                      name: AUTH_INDEXES[i].index.name,
+                      reason: describeIndexFailure(result.reason),
+                  },
+              ]
             : [],
     )
-}
-
-// Runs on every API start (the worker never reads these collections through Better Auth). A failure is logged, not
-// fatal: without an index the API works as before, only slower and keeping expired rows, while a failed start would
-// stop every new Cloud Run instance until the data was fixed.
-@Injectable()
-export class AuthIndexes implements OnApplicationBootstrap {
-    private readonly logger = new Logger(AuthIndexes.name)
-
-    constructor(@InjectConnection() private readonly connection: Connection) {}
-
-    async onApplicationBootstrap(): Promise<void> {
-        const failures = await ensureAuthIndexes(this.connection)
-
-        for (const { name, reason } of failures) {
-            this.logger.error(`could not create the Better Auth index ${name}: ${reason}`)
-        }
-    }
 }

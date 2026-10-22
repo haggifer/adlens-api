@@ -14,7 +14,6 @@ const splitAddress = (email: string): { local: string; domain: string } => {
     return { local: normalized.slice(0, at), domain: normalized.slice(at + 1) }
 }
 
-// The mailbox part of a local part: without its +tag, and for Gmail without dots.
 const toMailbox = (local: string, isGmail: boolean): string => {
     const untagged = local.split('+')[0]
 

@@ -193,7 +193,6 @@ describe('AnalysisPipeline', () => {
         )
     })
 
-    // Every ad used to list every advisory, e.g. an alcohol-targeting reminder on a condom ad.
     it('keeps only the advisories the model found relevant to this ad, ignoring ids it invents', async () => {
         const jobId = await queueJob()
         const review = await reviewer.next()

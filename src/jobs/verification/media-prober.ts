@@ -80,6 +80,21 @@ export const parseProbeOutput = (stdout: string): ProbeResult => {
 // (the header / moov atom), so the video is never copied into the instance.
 @Injectable()
 export class MediaProber {
+    // The first run of the binary on a fresh instance is slow (loading it and its libraries); the instance pays it at
+    // start instead of in a user's first analysis.
+    warmUp(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const proc = spawn(ffprobeStatic.path, ['-version'], {
+                timeout: PROBE_TIMEOUT_MS,
+                env: { PATH: process.env.PATH },
+                stdio: 'ignore',
+            })
+
+            proc.on('error', reject)
+            proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffprobe exited with ${code}`))))
+        })
+    }
+
     probe(input: string, protocols = REMOTE_PROTOCOLS): Promise<ProbeResult> {
         return new Promise((resolve, reject) => {
             const proc = spawn(

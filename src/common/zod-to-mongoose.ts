@@ -26,6 +26,10 @@ const SCALAR_TYPES: Record<string, unknown> = {
     date: Date,
 }
 
+// Which Zod schema built each Mongoose schema, so the database job derives every collection's validator from the same
+// source as its model.
+const ZOD_SCHEMAS = new WeakMap<Schema, z.ZodType>()
+
 const zodDef = (schema: unknown): ZodDef => (schema as { _zod: { def: ZodDef } })._zod.def
 
 const unwrap = (schema: unknown): UnwrappedField => {
@@ -88,8 +92,14 @@ const buildField = (schema: unknown): unknown => {
 const buildDefinition = (shape: Record<string, unknown>): Record<string, unknown> =>
     Object.fromEntries(Object.entries(shape).map(([key, value]) => [key, buildField(value)]))
 
-// Builds a Mongoose schema from a Zod object schema. Field types, required-ness (from optional/nullable),
-// defaults, and enums are derived; storage-only concerns (indexes, collection, hooks) are layered on by
-// the caller.
-export const zodToMongoose = (schema: z.ZodType, options?: SchemaOptions): Schema =>
-    new Schema(buildDefinition(zodDef(schema).shape ?? {}) as SchemaDefinition, options)
+// Field types, required-ness (from optional/nullable), defaults, and enums are derived; storage-only concerns (indexes,
+// collection, hooks) are layered on by the caller.
+export const zodToMongoose = (schema: z.ZodType, options?: SchemaOptions): Schema => {
+    const mongooseSchema = new Schema(buildDefinition(zodDef(schema).shape ?? {}) as SchemaDefinition, options)
+
+    ZOD_SCHEMAS.set(mongooseSchema, schema)
+
+    return mongooseSchema
+}
+
+export const getZodSchema = (schema: Schema): z.ZodType | undefined => ZOD_SCHEMAS.get(schema)

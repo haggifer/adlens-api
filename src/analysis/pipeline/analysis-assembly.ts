@@ -10,7 +10,6 @@ import {
 import type { RuleSet } from '../../rules/schema'
 import type { VideoReview, VideoReviewRequest } from '../review/video-reviewer'
 
-// The video a review watches.
 export interface ReviewVideo {
     videoUri: string
     mimeType: string

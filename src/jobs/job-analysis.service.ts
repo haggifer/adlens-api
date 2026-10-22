@@ -1,5 +1,13 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
-import { type ApiError, type Job, JobErrorCode, type JobMedia, RequestErrorCode } from 'adlens-shared'
+import {
+    type ApiError,
+    type CreateJobPayload,
+    type CreateJobResponse,
+    type Job,
+    JobErrorCode,
+    type JobMedia,
+    RequestErrorCode,
+} from 'adlens-shared'
 import { AnalysisDispatcher } from '../analysis/dispatch/analysis-dispatcher'
 import { ApiException } from '../common/api-exception'
 import { describeError } from '../common/error-message'
@@ -9,6 +17,7 @@ import { PresetsService } from '../presets/presets.service'
 import { SamplesService } from '../samples/samples.service'
 import { StorageService } from '../storage/storage.service'
 import { AnalysisAdmission } from './analysis-admission.service'
+import { EARLY_DISPATCH_TIMEOUT_MS } from './early-worker'
 import { JobLifecycle } from './job-lifecycle.service'
 import { toPublicJob } from './job.mapper'
 import { JobsService } from './jobs.service'
@@ -62,15 +71,57 @@ export class JobAnalysisService {
 
         const media = await this.verifyVideo(claimed)
         const queued = await this.queueRun(userId, claimed, media, ipSource, freeRunUserId)
-        const execution = await this.startWorker(jobId)
 
-        if (execution) {
-            await this.tryRecordExecution(jobId, execution)
+        if (!queued.leftToEarlyWorker) {
+            const execution = await this.startWorker(jobId)
+
+            if (execution) {
+                await this.tryRecordExecution(jobId, execution)
+            }
         }
 
         const presetId = await this.countPresetUse(userId, queued)
 
         return toPublicJob({ ...queued, presetId })
+    }
+
+    // POST /v1/jobs: a pending upload job and its signed upload, with its worker dispatched alongside the signing so
+    // Cloud Run provisions it while the browser uploads. One such worker per user at a time.
+    async createUpload(
+        userId: string,
+        input: CreateJobPayload,
+        hasPassedChallenge: boolean,
+    ): Promise<CreateJobResponse> {
+        const hasWaitingWorker = await this.jobs.hasWaitingEarlyWorker(userId)
+        const job = await this.jobs.createUpload(userId, input, hasPassedChallenge, !hasWaitingWorker)
+
+        const [upload] = await Promise.all([
+            this.jobs.signUpload(job),
+            job.workerWaitsUntil ? this.startEarlyWorker(job._id.toString()) : null,
+        ])
+
+        return { job: toPublicJob(job), upload }
+    }
+
+    // The job already holds its deadline: if the API died after dispatching, the start must not dispatch a second
+    // worker, and the worst case is a job no worker took, which the stale sweep fails and refunds. A failed or slow
+    // dispatch never fails the creation: the deadline is cancelled, so an execution it may still have created leaves,
+    // and the start dispatches as for any other job.
+    private async startEarlyWorker(jobId: string): Promise<void> {
+        let execution: string | null
+
+        try {
+            execution = await this.dispatcher.dispatch(jobId, { isEarly: true, timeoutMs: EARLY_DISPATCH_TIMEOUT_MS })
+        } catch (err) {
+            this.logger.error(`early dispatch failed for job ${jobId}: ${describeError(err)}`)
+            await this.tryCancelEarlyWorker(jobId)
+
+            return
+        }
+
+        if (execution) {
+            await this.tryRecordExecution(jobId, execution)
+        }
     }
 
     // POST /v1/jobs/:id/restart: a new job on the failed job's video (JobsService.createRestart), started like any other.
@@ -82,7 +133,12 @@ export class JobAnalysisService {
 
         const restarted = await this.jobs.createRestart(failed)
 
-        return this.start(userId, restarted._id.toString(), ipSource, freeRunUserId)
+        // Only now, so an open page of the failed job moves to its restart once the run has started, or failed.
+        try {
+            return await this.start(userId, restarted._id.toString(), ipSource, freeRunUserId)
+        } finally {
+            await this.jobs.announceRestart(failed)
+        }
     }
 
     private verifyVideo(job: StoredJob): Promise<JobMedia> {
@@ -145,13 +201,23 @@ export class JobAnalysisService {
         }
     }
 
-    // The worker is running and the user is charged, so the run is answered as started whatever happens here: the
-    // execution name only helps find the worker's logs.
+    // The worker is running, so the request is answered as if this succeeded: the execution name only helps find the
+    // worker's logs.
     private async tryRecordExecution(jobId: string, execution: string): Promise<void> {
         try {
             await this.lifecycle.recordExecution(jobId, execution)
         } catch (err) {
             this.logger.error(`could not record execution ${execution} of job ${jobId}: ${describeError(err)}`)
+        }
+    }
+
+    // Left in place, the deadline makes the start leave the job to a worker that never came: it stays queued until the
+    // stale sweep fails and refunds it.
+    private async tryCancelEarlyWorker(jobId: string): Promise<void> {
+        try {
+            await this.lifecycle.cancelEarlyWorker(jobId)
+        } catch (err) {
+            this.logger.error(`could not cancel the early worker of job ${jobId}: ${describeError(err)}`)
         }
     }
 

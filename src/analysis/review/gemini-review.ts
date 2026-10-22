@@ -19,17 +19,17 @@ import type { VideoReview, VideoReviewRequest } from './video-reviewer'
 // Well under the Cloud Run task timeout (15 min), so a hung call ends in a handled failure, not a killed task.
 export const GEMINI_REQUEST_TIMEOUT_MS = 10 * 60 * 1000
 
-// A full answer for ~60 rules and a 60-second transcript is a few thousand tokens; the cap bounds what a runaway
-// generation can cost per attempt. The lab shows it as production's cap.
+// A ceiling on a runaway generation's cost per attempt, not a budget: a reply is billed for what it generates. The
+// largest stored reply (2026-10-19, 45 calls, ads up to 3.5 minutes) was about 5,000 tokens, thinking included, so the
+// cap leaves about three times that. The lab shows it as production's cap.
 /** @public */
-export const GEMINI_MAX_OUTPUT_TOKENS = 8192
+export const GEMINI_MAX_OUTPUT_TOKENS = 16384
 
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
 // An HTTP error status Vertex may answer differently on another attempt: overload, rate limits and server errors.
 export const isRetryableStatus = (status: number): boolean => RETRYABLE_STATUSES.has(status)
 
-// The video, then the prompt.
 export const buildReviewContents = ({ videoUri, mimeType, rules, advisories, settings }: VideoReviewRequest): Content =>
     createUserContent([createPartFromUri(videoUri, mimeType), buildReviewPrompt(settings, rules, advisories)])
 

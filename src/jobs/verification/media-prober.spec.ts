@@ -24,14 +24,12 @@ const SIGNED_URL =
     'https://storage.googleapis.com/test-bucket/users/u1/jobs/j1/video?X-Goog-Algorithm=GOOG4-RSA-SHA256' +
     '&X-Goog-Credential=api%40project.iam.gserviceaccount.com&X-Goog-Signature=0123abcd'
 
-// The comma-separated list ffprobe got after a flag, or none when the flag is missing.
 const flagValues = (args: readonly string[], flag: string): string[] => {
     const index = args.indexOf(flag)
 
     return index === -1 ? [] : args[index + 1].split(',')
 }
 
-// An ffprobe run that writes this to stderr and exits with this code.
 const ffprobeExiting = (code: number, stderr: string) => {
     jest.mocked(spawn).mockImplementationOnce(() => {
         const proc = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() })

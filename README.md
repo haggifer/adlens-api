@@ -2,7 +2,7 @@
 
 > Part of **[AdLens](https://github.com/haggifer/adlens)**, AI policy checks for video ads · [Live](https://www.useadlens.com)
 
-[![CI](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml/badge.svg?branch=init-setup)](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml)
+[![CI](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 
 Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against an
@@ -33,8 +33,10 @@ the API contract live in their own repos.
 - **API** (`src/main.ts` → `AppModule`): NestJS 11 on Cloud Run at `api.useadlens.com`. Better Auth, Mongoose on Atlas,
   GCS signed URLs, ffprobe verification, quota, live update tokens.
 - **Worker** (`src/worker.ts` → `WorkerModule`): the same image run as an **on-demand Cloud Run Job**. The API starts
-  one execution per analysis; the worker analyzes that job once and exits. It has no HTTP layer and no dispatcher, so
-  it can never start another worker.
+  one execution per upload job when it is created (one per user at a time; it exits without running when the start
+  dispatches its own) and one per start that isn't left to it, such as a sample's or a restart's (see
+  [Job lifecycle](#job-lifecycle)). The worker analyzes its job at most once and exits. It has no HTTP layer and no
+  dispatcher, so it can never start another worker.
 - **Cleanup** (`src/cleanup.ts` → `CleanupModule`): the same image run daily as the `adlens-cleanup` Cloud Run Job,
   started by Cloud Scheduler at 03:00 UTC. It first expires every user's abandoned jobs, as a read of one's own jobs
   does (see the job lifecycle), so a job whose owner never comes back doesn't stay in flight holding its charges, and
@@ -53,6 +55,20 @@ the API contract live in their own repos.
   ([`UploadTombstoneCleanupService`](src/cleanup/upload-tombstone-cleanup.service.ts)).
   Last, it retries the refunds that ended jobs still owe (see Quota), including any the expiry couldn't make. A step
   that fails for one job or user logs it and goes on; any failure makes the execution exit 1.
+- **Database job** (`src/db.ts` → `DbJobModule`): the same image run as the `adlens-db` Cloud Run Job by the deploy,
+  after the API is healthy. In order:
+    - the data migrations not yet recorded in `migrations` ([`src/db-job/migrations.ts`](src/db-job/migrations.ts));
+    - every index the models and [`AUTH_INDEXES`](src/auth/auth-indexes.ts) declare and the database lacks
+      ([`syncIndexes`](src/db-job/index-sync.ts)). An index that nothing declares is only reported: it can still serve
+      queries nobody declared it for, so the maintainer hides it, watches, then drops it;
+    - each model's collection validator, a `$jsonSchema` generated from the Zod schema the model is built from
+      ([`syncValidators`](src/db-job/validators.ts)), in `moderate`/`warn` mode, and a count of the documents it
+      refuses. A collection's action becomes `error` once its count has stayed 0.
+
+    Without `--apply` it changes nothing and logs what it would do, so `npm run build && npm run db` against
+    `.env.local` (which points at production) is a safe dry run. A failed migration or index exits 1; refused
+    documents are only reported.
+
 - **Logs**: on Cloud Run (`LOG_FORMAT=json`) every process writes one JSON object per line through
   [`CloudLogger`](src/common/cloud-logger.ts): `severity` (so Logs Explorer can filter and alert on errors), `message`,
   `context` (the Nest class that logged it) and `stack_trace` (which Error Reporting groups). Better Auth's own messages
@@ -83,6 +99,13 @@ conditional update on the expected current status, so two racing callers can nev
    size** (`x-goog-content-length-range`), so the stored object must match the declaration, and only creates the object
    (`x-goog-if-generation-match: 0`), so a verified video can't be replaced by a second PUT. The
    [admission check](#abuse-limits) runs first, read-only, so nobody uploads a video only to be refused at analyze.
+   The job's worker is dispatched alongside the signing (`JobAnalysisService.createUpload`), so Cloud Run provisions
+   it (about 24 s) while the browser uploads. The job is inserted first with `workerWaitsUntil`, 3 minutes ahead
+   (`EARLY_WORKER_WAIT_MS`), and the execution is told it was dispatched early (`WORKER_IS_EARLY`). A dispatch that
+   fails or takes longer than `EARLY_DISPATCH_TIMEOUT_MS` (4 s) is logged and removes the deadline while the job is
+   still pending, so an execution it may have created leaves, and the job is created all the same. A user whose other
+   job is still pending or verifying with a live deadline gets no early worker: creating jobs is free, and every early
+   worker is a billed execution. Sample jobs and restarts verify in about half a second and get their worker at start.
 2. **Start** `POST /v1/jobs/:id/analyze` ([`JobAnalysisService`](src/jobs/job-analysis.service.ts)). A step that
    fails ends the job in `error`, with any charge refunded, and never puts it back to `pending`: the web never starts a
    job twice, it creates a new one (a restart too, below). The HTTP answer still says what went wrong.
@@ -101,21 +124,34 @@ conditional update on the expected current status, so two racing callers can nev
       unconfirmed account; the [network rules](#abuse-limits) answer with their own codes). If the user charge
       fails, the network run is given back. A refused or failed charge ends the job as `ANALYSIS_FAILED` (no job error
       code names a refusal; the answer's own code tells the user why, and the job's server-side `errorDetail` keeps it);
-    - **dispatch** the worker. If that fails, the job ends as `ANALYSIS_FAILED` and the charge is refunded (503).
+    - **dispatch** the worker, unless the job is left to the one dispatched at its creation: the write that queues the
+      job sets `leftToEarlyWorker` when the deadline is more than `EARLY_WORKER_MARGIN_MS` (15 s: the worker's
+      polling plus clock skew) after `queuedAt` (`isLeftToEarlyWorker`). If the dispatch fails, the job ends as
+      `ANALYSIS_FAILED` and the charge is refunded (503).
 
     **Restart** `POST /v1/jobs/:id/restart` runs a failed analysis again on the video it already has. The admission
     refusals come first (quota and network, as `GET /v1/admission` answers them), then the rule: the owner's job, in
     `error`, not restarted yet and created less than 6 hours ago (`isJobRestartable` and `JOB_START_WINDOW_MS` in
     `adlens-shared`), whose video is still stored (the object, or a published sample); otherwise 409
-    `JOB_NOT_RESTARTABLE` and nothing changes. The failed job is then claimed with one conditional write
-    (`restartedAs`), and a new pending job (`restartOf`) gets its file, media, settings and counted preset, and is
-    started like any other. The failed job stays as the record of its run: lists leave it out, and a deletion of its
+    `JOB_NOT_RESTARTABLE` and nothing changes. A new pending job (`restartOf`) then gets the failed job's file, media,
+    settings and counted preset, the failed job is claimed with one conditional write (`restartedAs`; if that loses a
+    race, the new job is deleted and the answer is 409), and the new job is started like any other. Tabs hear of the
+    claim only once the new run has started or failed, so an open page of the failed job moves to its restart then. The
+    failed job stays as the record of its run: lists leave it out, its replay URL is refused, and a deletion of its
     restart deletes it too. A restart of a run already counted for its preset isn't counted again.
-    The cleanup can't delete the video under a restart: it claims each video first (`videoDeletingAt`, a conditional
-    write that excludes restarted jobs), then deletes it, then marks `videoDeletedAt`, and a restart refuses a claimed
-    job. A restarted job's video is its restart's, which the cleanup judges by the restart's own age.
+    Nothing deletes the video under a restart: the cleanup claims each video first (`videoDeletingAt`, a conditional
+    write that excludes restarted jobs), then deletes it, then marks `videoDeletedAt`; a deletion claims the same way;
+    and a restart refuses a claimed job. A restarted job's video is its restart's, which the cleanup judges by the
+    restart's own age.
 
-3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)): `queued → analyzing`,
+3. **Analyze** ([`AnalysisPipeline`](src/analysis/pipeline/analysis-pipeline.service.ts)). A worker dispatched early
+   first waits ([`EarlyWorkerWait`](src/analysis/pipeline/early-worker-wait.ts)), polling the job about once a second
+   without changing it (a failed read is retried until the deadline). It runs a job in flight marked
+   `leftToEarlyWorker` (its own retry resumes the same way), and exits 0 when the job ended or was deleted, is in flight
+   without the flag (another worker was dispatched, also by an API that predates the flag), is pending without a
+   deadline, or is still pending or verifying when its own clock passes the deadline. So it never runs alongside the
+   start's worker, and its waiting uses no retry; a job left to a worker that never came stays `queued` until the
+   stale sweep below fails and refunds it. Then: `queued → analyzing`,
    select the rules for the chosen platforms and markets, check the metadata rules in code, run one Gemini pass through
    the [`VideoReviewer`](src/analysis/review/video-reviewer.ts) port, then `analyzing → analyzed`. The Gemini request
    and how its answer is read ([`gemini-review.ts`](src/analysis/review/gemini-review.ts)) and the analysis assembly
@@ -205,6 +241,10 @@ email (`EMAIL_CONFIRMATION_REQUIRED`) where an anonymous user is asked to sign u
   the user cap and the network rules read-only; analyze charges the network, then the user. The job records both runs
   (`chargedRunId`, `chargedIpRunId`) before charging and clears them once both are refunded, so each is refunded at
   most once and never lost.
+- **Early workers**: creating an upload job checks nothing that is spent, yet dispatches a billed worker execution
+  that waits up to 3 minutes for the run to start. So a user gets one at a time: while one of their jobs is still
+  pending or verifying with a live `workerWaitsUntil`, a new job gets no early worker and its start dispatches one as
+  before ([Job lifecycle](#job-lifecycle)). Two creates racing past that check can each get one.
 - **Failed analyses**: a run that ends without a result is never counted. Every failure refunds both runs, the
   user's and the network's, in full: a failure before the Gemini call, a call Vertex refused with an HTTP error
   status, a stuck worker, and a call that may have been billed alike. Once Gemini has answered, the call is billed
@@ -361,22 +401,24 @@ answering is a plain reply; its text isn't stored.
   `production`.
 - **Sessions don't store the address.** Better Auth records it on every session; a
   `databaseHooks.session.create.before` hook sets `ipAddress` to null and keeps the user agent.
-- **Better Auth's collections are indexed at startup.** Its Mongo adapter only creates indexes a plugin schema
-  declares, and none does, so `user`, `session`, `account` and `verification` would have only `_id` and every session
-  check would scan `session`. [`AuthIndexes`](src/auth/auth-indexes.ts) creates, on every API start, the indexes
-  behind the adapter's lookups: `session.token` (unique), `session.userId`, `user.email` (unique), `account.userId`,
+- **Better Auth's collections are indexed by the database job.** Its Mongo adapter only creates indexes a plugin
+  schema declares, and none does, so `user`, `session`, `account` and `verification` would have only `_id` and every
+  session check would scan `session`. [`AUTH_INDEXES`](src/auth/auth-indexes.ts) lists, and the database job creates
+  after every deploy, the indexes behind the adapter's lookups: `session.token` (unique), `session.userId`, `user.email` (unique), `account.userId`,
   `account.{providerId, accountId}` (social sign-in) and `verification.identifier`, plus TTL indexes on
   `session.expiresAt` and `verification.expiresAt`, because Better Auth deletes an expired session only when its
-  cookie comes back. They use Better Auth's own index names (`<table>_<fields>_<idx|uidx>`, `_ttl` for the TTLs). The
-  worker doesn't create them: it never reads these collections through Better Auth.
-- **Only the API builds the app's own indexes.** Mongoose creates a schema's indexes when its model starts; the worker
-  and the cleanup set `autoIndex` off (`worker.ts`, `cleanup.ts`), so a worker cold start sends no `createIndex` calls
-  and a new index on a large collection is built by the API, on the deploy that adds it.
+  cookie comes back. They use Better Auth's own index names (`<table>_<fields>_<idx|uidx>`, `_ttl` for the TTLs).
+- **No process changes the database's structure on start.** `DatabaseModule` turns Mongoose's `autoIndex` and
+  `autoCreate` off for the API, the worker and the cleanup, so a cold start sends no `createIndex` calls and no
+  instance is the one that builds a new index on a large collection; the database job does it once per deploy.
 
 ## API
 
 Every `/v1/*` route except `GET /v1/samples`, `GET /v1/demos` and `POST /v1/contact` (and `/uploads`) requires a session; [`SessionGuard`](src/auth/session.guard.ts) resolves the user from the Better Auth
-session cookie (never from the body) and every query is scoped by it. Errors share one shape,
+session cookie (never from the body) and every query is scoped by it. The `/v1/admin/*` routes take
+[`AdminGuard`](src/admin/admin.guard.ts) instead: it reads `isAdmin` from the user's document on every request, and
+answers anyone else (no session, anonymous, unconfirmed, member) with exactly the 404 of a route that doesn't exist,
+so they can't tell the routes are there. Errors share one shape,
 `{ statusCode, errorCode, message, issues? }`, with `errorCode` from `adlens-shared`; a body that isn't valid JSON (400),
 is over 1 MB (413) or comes in an unsupported charset or encoding (415) answers `VALIDATION_FAILED` with that status.
 Better Auth's routes (`/api/auth/*`, mounted by [`mountAuthRoute`](src/auth/auth-route.ts) before the JSON parser) read
@@ -393,7 +435,7 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `POST /v1/jobs/:id/restart` | A failed analysis again, as a new job on its stored video (see the run flow); 409 `JOB_NOT_RESTARTABLE` when it can't be                                                                                                                                                                                                                                 | **202** `{ job }` (the new job)                      |
 | `GET /v1/jobs`              | The caller's jobs, newest first, restarted ones left out (`?limit=` ≤ 50, `?cursor=`)                                                                                                                                                                                                                                                                    | `{ jobs, nextCursor }`                               |
 | `GET /v1/jobs/:id`          | One owned job                                                                                                                                                                                                                                                                                                                                            | `{ job }`                                            |
-| `GET /v1/jobs/:id/video`    | A 15-minute signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                                                                                                                                                                   | `{ url, expiresAt }`                                 |
+| `GET /v1/jobs/:id/video`    | A 2-hour signed URL for replaying the verified upload (404 `NOT_FOUND` once the cleanup deleted it)                                                                                                                                                                                                                                                      | `{ url, expiresAt }`                                 |
 | `DELETE /v1/jobs/:id`       | Delete a finished or unstarted job and its uploaded video (409 `JOB_IN_PROGRESS` while it runs)                                                                                                                                                                                                                                                          | **204**                                              |
 | `GET /v1/me/quota`          | The caller's quota window                                                                                                                                                                                                                                                                                                                                | `{ quota }`                                          |
 | `GET /v1/live/token`        | A signed Ably token request that may only subscribe to the caller's channel (`user:<id>`); `null` when live updates are off                                                                                                                                                                                                                              | `{ tokenRequest }`                                   |
@@ -407,6 +449,8 @@ reading when `content-length` says so, and a chunked body that grows past it has
 | `POST /v1/contact`          | Email a Contact form message to the team (public, Turnstile-checked or with an upload draft, rate-limited)                                                                                                                                                                                                                                               | **204**                                              |
 | `GET /v1/samples`           | Published sample ads with preview URLs (public)                                                                                                                                                                                                                                                                                                          | `{ samples }`                                        |
 | `GET /v1/demos`             | Active, finished demo analyses with their summary and a video URL (public)                                                                                                                                                                                                                                                                               | `{ demos }`                                          |
+| `GET /v1/admin/jobs`        | Every job, newest first, with its owner, file name, sample title and each recorded Gemini call (admins only; raw records, the admin page derives costs)                                                                                                                                                                                                  | `{ jobs }`                                           |
+| `GET /v1/admin/users`       | Every user, newest first, with their access flags; an anonymous user's email is `null` (admins only)                                                                                                                                                                                                                                                     | `{ users }`                                          |
 
 ## Ad-policy rules
 
@@ -487,10 +531,10 @@ pipeline and is billed like any run, outside every quota. Set `"isActive": false
 ## Layout
 
 ```
-src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup) and lab.ts (the evaluation tool's only
-            import surface), one Nest module per feature: jobs,
+src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup), db.ts (database job) and lab.ts
+            (the evaluation tool's only import surface), one Nest module per feature: jobs,
             analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
-            live, database, config; shared helpers in common/, test helpers in testing/
+            live, database, db-job, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
 infra/      gcloud setup script, bucket CORS policy and lifecycle rule, image repository cleanup policy
 ```
@@ -538,6 +582,7 @@ config before validation — see `SECRETS_FILE` below and [`infra/setup.sh`](inf
 | `GEMINI_MODEL`           | `gemini-3.8-flash`                     | Model id                                                                                                                                              |
 | `GEMINI_LOCATION`        | `global`                               | Vertex serving location                                                                                                                               |
 | `WORKER_JOB_ID`          | —                                      | Worker only: set per execution by the dispatcher                                                                                                      |
+| `WORKER_IS_EARLY`        | `0`                                    | Worker only: `1` on the execution dispatched at an upload job's creation, which waits for the job to be queued                                        |
 | `CLOUD_RUN_TASK_ATTEMPT` | `0`                                    | Worker only: set by Cloud Run on each attempt                                                                                                         |
 
 ## Local development
@@ -562,13 +607,13 @@ key; 2x0000000000000000000000000000000AA always fails.
 ## Tests
 
 ```bash
-npm test          # unit: quota, network quota, Contact limits, job lifecycle, pipeline, verification, client IP, Better Auth indexes (real MongoDB via mongodb-memory-server)
+npm test          # unit: quota, network quota, Contact limits, job lifecycle, pipeline, verification, client IP, indexes and migrations (real MongoDB via mongodb-memory-server)
 npm run test:e2e  # Supertest against the Nest app with fake storage, prober, dispatcher and auth
 npm run test:auth # after a build: sign-up, verification, reset, deletion, anonymous linking and rate limits against the real Better Auth
 ```
 
 `npm run knip` (also in CI) reports unused files, exports and dependencies, which ESLint can't see across files. Its
-config (`knip.json`) lists the three entry points (`main.ts`, `worker.ts`, `cleanup.ts`); add any new one there. It
+config (`knip.json`) lists the four entry points (`main.ts`, `worker.ts`, `cleanup.ts`, `db.ts`); add any new one there. It
 also lists the e2e and auth-flow tests itself, with Knip's Node.js plugin off: that plugin takes every `test-*` file
 for a `node --test` entry, so the unused exports of a helper like `src/testing/test-ruleset.ts` went unreported.
 
@@ -577,17 +622,19 @@ The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, b
 
 ## Deployment
 
-Every push to `init-setup` that passes CI deploys to production
+Every push to `main` that passes CI deploys to production
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The `deploy` job signs in to Google Cloud with Workload
 Identity Federation: GitHub's OIDC token is exchanged for a short-lived credential, no service account key exists, and
-only this repository's pushes to `init-setup` are accepted. It builds one image, pushes it to Artifact Registry, rolls
-the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, and ends with a health check.
+only this repository's pushes to `main` are accepted. It builds one image, pushes it to Artifact Registry, rolls
+the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, checks the API's health,
+and ends by running the `adlens-db` job on that image (see Architecture). That job runs last because a migration ships
+with code that reads both the old and the new shape: the data changes only once every running process can read it.
 
 [`infra/setup.sh`](infra/setup.sh) (plain gcloud, see [Design decisions](#design-decisions)) creates
 everything the workflow relies on: the APIs, the bucket, its CORS policy from [`infra/cors.json`](infra/cors.json) and its lifecycle rule from
 [`infra/lifecycle.json`](infra/lifecycle.json) (Contact form attachments are deleted after 30 days),
 the runtime and deploy service accounts, the Workload Identity provider, the `API_SECRETS` bundle, the image
-repository and the Cloud Scheduler job that starts `adlens-cleanup` daily. It also owns the runtime config (env vars,
+repository, the `adlens-db` job and the Cloud Scheduler job that starts `adlens-cleanup` daily. It also owns the runtime config (env vars,
 secrets, the analysis job's 2 retries and 15-minute timeout, the cleanup job's schedule), which CI
 leaves untouched, and can deploy the current checkout by hand. The API is served at `https://api.useadlens.com`
 through a Cloud Run domain mapping.
@@ -627,6 +674,26 @@ Why the system is built this way, and what was rejected. Decisions that span the
   over 99% of the time at a few analyses a week. A job costs nothing when idle and gives per-run isolation, retries and
   a hard timeout. Cloud Tasks pushing to a scale-to-zero service would also work; worker pools with an external
   autoscaler were more moving parts for no gain at this load.
+- **An upload job's worker is dispatched at creation** (2026-10-21). Starting a run took about 31 s, 24 of them Cloud
+  Run provisioning the execution; dispatching while the browser uploads overlaps the two. The deadline is written
+  before the dispatch, so an API that dies between the two leaves at worst a job no worker took, which the stale sweep
+  fails and refunds, never two executions on one job. Whether the start leaves the job to that worker is decided once,
+  from stored values, by the write that queues it, and recorded as a flag the worker needs before it runs anything: a
+  worker still waiting when the start dispatched another would otherwise run too, and an API rolled back to a version
+  without the flag still dispatches its own, which the early worker then leaves. What it costs: an execution (up to 3
+  minutes of polling) for every upload never started, bounded to one at a time per user; the dispatch on the create
+  request, alongside the signing and capped at 4 s; and a job whose early worker never comes waits for the 5-minute
+  sweep, which fails and refunds it. A new worker image must be deployed before the API that dispatches early (CI does
+  so); an older worker ignores `WORKER_IS_EARLY`, so its job sits queued until the sweep refunds it. Sample jobs and
+  restarts gain nothing (their start takes half a second) and are dispatched at start.
+- **The API pays its first analysis's one-time costs at start** (2026-10-21). A fresh instance's first start paid
+  about 1.2 to 2 s once: the first ffprobe run, the Cloud Run client's setup and token, and the first IAM signBlob.
+  `warmUpFirstAnalysis` (`src/api-warm-up.ts`) runs them in parallel before the server listens, waits at most 3 s and
+  only logs a failure, and the service deploys with startup CPU boost (`--cpu-boost`). The request that woke the
+  instance waits for the warm-up, sped up by the boost. The Cloud Run client is warmed with a read of the analysis job
+  (`getJob`), which also connects its gRPC channel before the first early dispatch, with its 4-second cap, needs it.
+  The upload URL signed at creation already warms the signer on that instance, but an analyze often lands on another
+  one.
 - **One image, three entry points.** The API (`dist/main`), the worker (`dist/worker`) and the cleanup (`dist/cleanup`)
   share code and an image but have separate composition roots, so the jobs have no HTTP layer and can't start a worker.
 - **The cleanup is a scheduled Cloud Run Job, not a cron inside the API.** The API scales to zero and may run several
@@ -725,8 +792,8 @@ Why the system is built this way, and what was rejected. Decisions that span the
   anonymous user and the account and kept for good (`freeRunId`), and any analysis marks the browser: before that, a
   run before sign-up and one before confirmation made two, and the allowance came back after a week.
 - **Demo and sample videos live in a public bucket.** They're public content, so `GET /v1/demos` and `GET /v1/samples`
-  answer their plain address in `PUBLIC_MEDIA_BUCKET` instead of a 15-minute signed URL: no IAM `signBlob` call per
-  video per request, no player failing after 15 minutes on the page, and a stable URL browsers can cache. It's a
+  answer their plain address in `PUBLIC_MEDIA_BUCKET` instead of a signed URL (2 hours): no IAM `signBlob` call per
+  video per request, no player failing after the URL expires on the page, and a stable URL browsers can cache. It's a
   separate bucket because GCS refuses a public grant limited to a prefix ("Conditions are not allowed on public
   resources", tested 2026-10-09) and the uploads bucket holds every user's video. Anyone may read an object by its
   address (`allUsers` has `roles/storage.legacyObjectReader`), but not list the bucket, so a demo or sample that isn't
@@ -739,18 +806,28 @@ Why the system is built this way, and what was rejected. Decisions that span the
   anonymous plugin deletes a linked anonymous user through the internal adapter, which skips it. That delete only logs
   a failure, so a linked anonymous user can survive and be purged later by the cleanup: a purge keeps every object
   under the user's prefix that another user's job still references.
-- **A Better Auth index that can't be built is logged, not fatal.** Without it the API works as it did before, only
-  slower and keeping expired rows; failing the start would stop every new instance, and Cloud Run starts one on every
-  cold start, so one bad row (a duplicate email) would take the API down until the data was fixed. Each index is
-  created on its own, and the log names the index and MongoDB's error code, never the message, which quotes the
-  duplicate value. Declaring the indexes through a Better Auth plugin schema was rejected: its adapter can't create
-  a TTL, and it creates indexes before each write, so a failed unique index would fail every sign-up and sign-in.
+- **Indexes and migrations run in a job after the deploy, not on start.** Building indexes on every start
+  (Mongoose's default) loads the production database on each cold start, lets whichever process starts first build a
+  new index, and never removes one: two legacy `jobs` indexes had drifted in that way. A job run once per deploy is
+  the one place indexes are created, and its log is where drift shows. An index that can't be built (a duplicate
+  email under a unique index, say) fails that run and the deploy's last step, never an API start: without it the API
+  works as before, only slower. Each Better Auth index is created on its own, and the log names the index and
+  MongoDB's error code, never the message, which quotes the duplicate value. Declaring Better Auth's indexes through a
+  plugin schema was rejected: its adapter can't create a TTL, and it creates indexes before each write, so a failed
+  unique index would fail every sign-up and sign-in.
+- **Admin routes look like routes that don't exist.** A 401 or a 403 would confirm `/v1/admin/*` exists, so anyone
+  but an admin gets the unknown-route 404, byte for byte (an e2e test compares the two). The paths are in public code,
+  so this mainly gives scanners and probing users nothing to tell apart, as another user's job or preset already
+  answers 404. Admin status is read from the user's document on each request, so removing `isAdmin` takes effect at
+  once. The routes return every record, unpaginated: fine at tens of users and hundreds of jobs; a cursor comes when
+  jobs reach a few thousand. An admin's answer is `Cache-Control: no-store`, so every user's email stays out of the
+  browser's disk cache; a refusal doesn't carry it, as an unknown route doesn't.
 - **Same-site session cookies instead of bearer tokens.** The web app and the API share `useadlens.com`, so Better
   Auth's httpOnly cookie is first-party for both and no token sits in JavaScript-readable storage. `*.vercel.app` and
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
   keep its sending reputation separate.
 - **Keyless deploys, one image per commit.** GitHub Actions authenticates through Workload Identity Federation, limited
-  to this repository's `init-setup` branch by numeric ids, so no long-lived key exists. Both jobs and the API are
+  to this repository's `main` branch by numeric ids, so no long-lived key exists. Both jobs and the API are
   rolled to the same digest, the jobs first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
 - **Infrastructure as a gcloud script.** The infrastructure is a handful of set-once resources, so an idempotent,
   committed script is enough; Terraform or Pulumi would be the step up if it grows.

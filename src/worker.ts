@@ -2,8 +2,7 @@ import 'reflect-metadata'
 import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
-import mongoose from 'mongoose'
-import { AnalysisPipeline } from './analysis/pipeline/analysis-pipeline.service'
+import { runWorkerAttempt } from './analysis/pipeline/worker-attempt'
 import { createLogger } from './common/cloud-logger'
 import { describeErrorWithStack } from './common/error-message'
 import type { Env } from './config/env'
@@ -18,11 +17,6 @@ const EXIT_RETRY = 1
 // job, exits 0 because the job document already records it.
 const run = async (): Promise<number> => {
     const logger = new Logger('Worker')
-
-    // The API builds the indexes on its start; a worker cold start shouldn't send a dozen createIndex calls, or be the
-    // process that builds a new index on a large collection.
-    mongoose.set('autoIndex', false)
-
     const app = await NestFactory.createApplicationContext(WorkerModule, {
         logger: createLogger(readLogFormat(process.env)),
     })
@@ -30,6 +24,7 @@ const run = async (): Promise<number> => {
     const jobId = config.get('WORKER_JOB_ID', { infer: true })
     const attempt = config.get('CLOUD_RUN_TASK_ATTEMPT', { infer: true })
     const maxRetries = config.get('ANALYZE_MAX_RETRIES', { infer: true })
+    const isEarly = config.get('WORKER_IS_EARLY', { infer: true })
 
     try {
         if (!jobId) {
@@ -37,7 +32,7 @@ const run = async (): Promise<number> => {
             return EXIT_DONE
         }
 
-        const outcome = await app.get(AnalysisPipeline).run(jobId, { isLast: attempt >= maxRetries })
+        const outcome = await runWorkerAttempt(app, jobId, { isEarly, isLast: attempt >= maxRetries })
 
         logger.log(`job ${jobId}: ${outcome} (attempt ${attempt})`)
 

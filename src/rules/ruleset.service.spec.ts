@@ -47,6 +47,15 @@ describe('RulesetService', () => {
         expect((await new RulesetService(model).current()).meta.version).toBe('9.0.0-second')
     })
 
+    it('serves a ruleset stored with its days as text, as published before the dates migration', async () => {
+        const day = BUNDLED.meta.generatedAt
+        const legacy = { ...BUNDLED, meta: { ...BUNDLED.meta, generatedAt: day.toISOString().slice(0, 10) } }
+
+        await model.collection.insertOne({ version: legacy.meta.version, ruleset: legacy, publishedAt: new Date() })
+
+        expect((await new RulesetService(model).current()).meta.generatedAt).toEqual(day)
+    })
+
     it('fails clearly when nothing is published, and tries again on the next call', async () => {
         const service = new RulesetService(model)
 

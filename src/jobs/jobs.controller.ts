@@ -60,7 +60,7 @@ export class JobsController {
         const freeRunUserId = readFreeRunUserId(req)
         const { hasPassedChallenge } = await this.admission.admit(userId, ipSource, input.challengeToken, freeRunUserId)
 
-        return this.jobs.create(userId, input, hasPassedChallenge)
+        return this.analysis.createUpload(userId, input, hasPassedChallenge)
     }
 
     @Post('from-sample')

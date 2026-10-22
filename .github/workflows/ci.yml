@@ -2,7 +2,7 @@ name: CI
 
 on:
     push:
-        branches: [init-setup, main]
+        branches: [main]
     pull_request:
 
 permissions:
@@ -25,12 +25,13 @@ jobs:
             - run: npm run test:e2e
             - run: npm run test:auth
 
-    # Production deploy of a verified push to init-setup. Authenticates to Google Cloud through Workload Identity
+    # Production deploy of a verified push to main. Authenticates to Google Cloud through Workload Identity
     # Federation (GitHub's OIDC token, no stored key; the provider only accepts this repo on this branch), builds one
-    # image and rolls both jobs and the API to its digest. Env and secrets stay as infra/setup.sh set them.
+    # image, rolls both jobs and the API to its digest, then runs the database job on it. Env and secrets stay as
+    # infra/setup.sh set them.
     deploy:
         needs: verify
-        if: github.event_name == 'push' && github.ref == 'refs/heads/init-setup'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -46,18 +47,18 @@ jobs:
             IMAGE: europe-west1-docker.pkg.dev/adlens-ca57f/adlens/api
         steps:
             - uses: actions/checkout@v5
-            - uses: google-github-actions/auth@v3
+            - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
               with:
                   workload_identity_provider: projects/629217115736/locations/global/workloadIdentityPools/github/providers/adlens-api
                   service_account: adlens-deploy@adlens-ca57f.iam.gserviceaccount.com
-            - uses: google-github-actions/setup-gcloud@v3
+            - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
             - run: gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
-            - uses: docker/setup-buildx-action@v3
+            - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
             # The layer cache keeps unchanged layers (the dependency install) byte-identical between builds, so the
             # registry stores them once instead of once per push.
             - name: Build and push the image
               id: build
-              uses: docker/build-push-action@v6
+              uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
               with:
                   context: .
                   push: true
@@ -70,7 +71,14 @@ jobs:
               run: gcloud run jobs update adlens-analyze --region "$REGION" --image "$IMAGE_REF"
             - name: Deploy the cleanup job
               run: gcloud run jobs update adlens-cleanup --region "$REGION" --image "$IMAGE_REF"
+            # Startup CPU boost: the API warms up the first analysis's costs before it listens (main.ts).
             - name: Deploy the API
-              run: gcloud run services update adlens-api --region "$REGION" --image "$IMAGE_REF"
+              run: gcloud run services update adlens-api --region "$REGION" --image "$IMAGE_REF" --cpu-boost
             - name: Check the API is healthy
               run: curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors https://api.useadlens.com/health
+            # Last, once the code that reads both the old and the new shapes is live everywhere: the pending migrations,
+            # every declared index, then the validators (src/db.ts). A failed execution fails this step.
+            - name: Update the database
+              run: |
+                  gcloud run jobs update adlens-db --region "$REGION" --image "$IMAGE_REF"
+                  gcloud run jobs execute adlens-db --region "$REGION" --wait

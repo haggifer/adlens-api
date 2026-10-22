@@ -20,7 +20,7 @@ import { type Connection, type Model, Types } from 'mongoose'
 import type { IncomingHttpHeaders } from 'node:http'
 import request from 'supertest'
 import { AccountDataService } from '../src/account/account-data.service'
-import { AnalysisDispatcher } from '../src/analysis/dispatch/analysis-dispatcher'
+import { AnalysisDispatcher, type DispatchOptions } from '../src/analysis/dispatch/analysis-dispatcher'
 import { AppModule } from '../src/app.module'
 import { AUTH } from '../src/auth/auth.instance'
 import { AuthService } from '../src/auth/auth.service'
@@ -36,6 +36,7 @@ import { UPLOAD_TOMBSTONE_MODEL, type UploadTombstoneDoc } from '../src/database
 import { USER_COLLECTION } from '../src/database/user.doc'
 import { ClientNetworkResolver } from '../src/ip-quota/client-network.resolver'
 import { IpQuotaService } from '../src/ip-quota/ip-quota.service'
+import { EARLY_DISPATCH_TIMEOUT_MS, EARLY_WORKER_MARGIN_MS, EARLY_WORKER_WAIT_MS } from '../src/jobs/early-worker'
 import { JobLifecycle } from '../src/jobs/job-lifecycle.service'
 import { UPLOAD_URL_MARGIN_MS } from '../src/jobs/jobs.service'
 import { MediaProber, type ProbeResult } from '../src/jobs/verification/media-prober'
@@ -51,6 +52,7 @@ const SAMPLER = new Types.ObjectId().toString()
 const DELETER = new Types.ObjectId().toString()
 const PAGER = new Types.ObjectId().toString()
 const RESTARTER = new Types.ObjectId().toString()
+const EARLY_RUNNER = new Types.ObjectId().toString()
 const FILE = { name: 'ad.mp4', contentType: VideoMimeType.Mp4, size: 5_000_000 }
 const SETTINGS = { platforms: ['Meta'], placements: ['meta_reels'], markets: ['EU'] }
 
@@ -61,7 +63,7 @@ describe('Jobs API (e2e)', () => {
     let probe: ProbeResult
     // An Error: ffprobe can't reach the video.
     let probeFailure: Error | null
-    const dispatch = jest.fn(async () => 'executions/exec-1')
+    const dispatch = jest.fn(async (_jobId: string, _options?: DispatchOptions) => 'executions/exec-1')
     const live = new RecordingLivePublisher()
     const deleteObject = jest.fn(async (_path: string) => undefined)
     const createUploadTarget = jest.fn(async (_path: string, contentType: string, _size: number) => ({
@@ -85,6 +87,20 @@ describe('Jobs API (e2e)', () => {
             .expect(201)
 
         return res.body.job.id
+    }
+
+    const findStored = (jobId: string) =>
+        app.get<Model<JobDoc>>(getModelToken(JOB_MODEL)).findById(jobId).lean<StoredJob>()
+
+    // An upload job's worker is dispatched when the job is created; the start then dispatches none.
+    const EARLY_DISPATCH = { isEarly: true, timeoutMs: EARLY_DISPATCH_TIMEOUT_MS }
+    const earlyDispatchOnly = (jobId: string) => [[jobId, EARLY_DISPATCH]]
+
+    // The early worker's dispatch and then the start's: a job whose early dispatch failed gets its worker at start.
+    const failNextDispatches = (count: number) => {
+        for (let i = 0; i < count; i++) {
+            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
+        }
     }
 
     beforeAll(async () => {
@@ -148,7 +164,7 @@ describe('Jobs API (e2e)', () => {
             .get<Connection>(getConnectionToken())
             .collection(USER_COLLECTION)
             .insertMany(
-                [OWNER, STRANGER, SAMPLER, DELETER, PAGER, RESTARTER].map((id) => ({
+                [OWNER, STRANGER, SAMPLER, DELETER, PAGER, RESTARTER, EARLY_RUNNER].map((id) => ({
                     _id: new Types.ObjectId(id),
                     email: `${id}@example.com`,
                     emailVerified: true,
@@ -156,7 +172,12 @@ describe('Jobs API (e2e)', () => {
             )
     })
 
-    beforeEach(() => {
+    beforeEach(async () => {
+        // A user gets one early worker at a time, and no worker of an earlier test is still waiting.
+        await app
+            .get<Model<JobDoc>>(getModelToken(JOB_MODEL))
+            .collection.updateMany({}, { $unset: { workerWaitsUntil: 1 } })
+
         storedObject = { sizeBytes: FILE.size, contentType: FILE.contentType }
         probe = { durationS: 20, width: 1080, height: 1920, hasAudio: true }
         probeFailure = null
@@ -243,13 +264,115 @@ describe('Jobs API (e2e)', () => {
         const started = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(202)
 
         expect(started.body.job).toMatchObject({ status: JobStatus.Queued, media: { durationS: 20 } })
-        expect(dispatch).toHaveBeenCalledWith(jobId)
+        expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
 
         const again = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(409)
         const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER)).expect(200)
 
         expect(again.body.errorCode).toBe(RequestErrorCode.JobNotPending)
         expect(quota.body.quota.used).toBe(1)
+    })
+
+    describe('the worker dispatched when an upload job is created', () => {
+        // A network of its own, so these runs leave the default network's limits to the other tests.
+        const runner = { ...as(EARLY_RUNNER), 'x-forwarded-for': '203.0.113.200' }
+
+        const createRunnerJob = async (): Promise<string> => {
+            const res = await request(app.getHttpServer())
+                .post('/v1/jobs')
+                .set(runner)
+                .send({ settings: SETTINGS, file: FILE })
+                .expect(201)
+
+            return res.body.job.id
+        }
+
+        const analyze = (jobId: string) =>
+            request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(runner).expect(202)
+
+        // As if the job had been created earlier: its deadline is set at creation.
+        const setWorkerWaitsUntil = (jobId: string, at: Date) =>
+            app
+                .get<Model<JobDoc>>(getModelToken(JOB_MODEL))
+                .collection.updateOne({ _id: new Types.ObjectId(jobId) }, { $set: { workerWaitsUntil: at } })
+
+        // Each start charges a run, so the user's window is emptied between tests.
+        afterEach(async () => {
+            await app
+                .get<Connection>(getConnectionToken())
+                .collection(USER_COLLECTION)
+                .updateOne({ _id: new Types.ObjectId(EARLY_RUNNER) }, { $set: { runs: [] } })
+        })
+
+        it('is dispatched once, after the job holds its deadline, and its execution is recorded', async () => {
+            let atDispatch: StoredJob | null = null
+
+            dispatch.mockImplementationOnce(async (id: string) => {
+                atDispatch = await findStored(id)
+
+                return 'executions/early'
+            })
+
+            const jobId = await createRunnerJob()
+            const stored = await findStored(jobId)
+
+            expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
+            expect(atDispatch).toMatchObject({ status: JobStatus.Pending, workerWaitsUntil: expect.any(Date) })
+            expect(stored?.execution).toBe('executions/early')
+            expect(stored!.workerWaitsUntil!.getTime() - stored!.createdAt.getTime()).toBeGreaterThanOrEqual(
+                EARLY_WORKER_WAIT_MS - 1000,
+            )
+        })
+
+        it('still creates the job when it cannot be dispatched, and the start then dispatches one', async () => {
+            failNextDispatches(1)
+
+            const jobId = await createRunnerJob()
+            const created = await findStored(jobId)
+
+            await analyze(jobId)
+
+            expect(created).toMatchObject({ status: JobStatus.Pending })
+            expect(created).not.toHaveProperty('workerWaitsUntil')
+            expect(dispatch.mock.calls).toEqual([...earlyDispatchOnly(jobId), [jobId]])
+        })
+
+        it('is left the job when it is queued more than the margin before the deadline', async () => {
+            const jobId = await createRunnerJob()
+
+            await setWorkerWaitsUntil(jobId, new Date(Date.now() + 2 * EARLY_WORKER_MARGIN_MS))
+            await analyze(jobId)
+
+            expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
+            expect((await findStored(jobId))?.leftToEarlyWorker).toBe(true)
+        })
+
+        it('is not left a job queued within the margin: the start dispatches its own', async () => {
+            const jobId = await createRunnerJob()
+
+            await setWorkerWaitsUntil(jobId, new Date(Date.now() + EARLY_WORKER_MARGIN_MS))
+            await analyze(jobId)
+
+            expect(dispatch.mock.calls).toEqual([...earlyDispatchOnly(jobId), [jobId]])
+            expect(await findStored(jobId)).not.toHaveProperty('leftToEarlyWorker')
+        })
+
+        it('is dispatched for one upload of a user at a time', async () => {
+            const waitedFor = await createRunnerJob()
+            const second = await createRunnerJob()
+
+            expect(await findStored(second)).not.toHaveProperty('workerWaitsUntil')
+
+            await analyze(second)
+            await analyze(waitedFor)
+            const third = await createRunnerJob()
+
+            expect(dispatch.mock.calls).toEqual([
+                ...earlyDispatchOnly(waitedFor),
+                [second],
+                ...earlyDispatchOnly(third),
+            ])
+        })
     })
 
     // The web never starts the same job twice: a failed start (or a restart) creates a new job, so this one ends.
@@ -264,7 +387,7 @@ describe('Jobs API (e2e)', () => {
         expect(res.body.errorCode).toBe(RequestErrorCode.UploadIncomplete)
         expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.UploadFailed })
         expect(deleteObject).not.toHaveBeenCalled()
-        expect(dispatch).not.toHaveBeenCalled()
+        expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
     })
 
     it("doesn't let another user start the job", async () => {
@@ -274,7 +397,7 @@ describe('Jobs API (e2e)', () => {
 
         expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
         expect(job.body.job.status).toBe(JobStatus.Pending)
-        expect(dispatch).not.toHaveBeenCalled()
+        expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
     })
 
     it('rejects a video over the duration limit without charging, and deletes the upload', async () => {
@@ -291,7 +414,7 @@ describe('Jobs API (e2e)', () => {
         expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoTooLong })
         expect(deleteObject.mock.calls).toEqual([[`users/${OWNER}/jobs/${jobId}/video`]])
         expect(after.body.quota.used).toBe(before.body.quota.used)
-        expect(dispatch).not.toHaveBeenCalled()
+        expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
     })
 
     it('still answers a rejected video with its 422 when deleting the upload fails', async () => {
@@ -324,15 +447,15 @@ describe('Jobs API (e2e)', () => {
             expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.VideoCheckFailed })
             expect(after.body.quota.used).toBe(before.body.quota.used)
             expect(deleteObject).not.toHaveBeenCalled()
-            expect(dispatch).not.toHaveBeenCalled()
+            expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(jobId))
         },
     )
 
     it('ends the job as ANALYSIS_FAILED, refunded, when the worker cannot be started', async () => {
+        failNextDispatches(2)
+
         const jobId = await createJob()
         const before = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
-
-        dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
 
         const res = await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(OWNER)).expect(503)
         const after = await request(app.getHttpServer()).get('/v1/me/quota').set(as(OWNER))
@@ -346,6 +469,8 @@ describe('Jobs API (e2e)', () => {
     describe('restarting a failed analysis', () => {
         // A run that failed to start its worker, as the failed run a user restarts.
         const createFailedJob = async (): Promise<string> => {
+            failNextDispatches(2)
+
             const created = await request(app.getHttpServer())
                 .post('/v1/jobs')
                 .set(as(RESTARTER))
@@ -353,7 +478,6 @@ describe('Jobs API (e2e)', () => {
                 .expect(201)
             const jobId = created.body.job.id
 
-            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
             await request(app.getHttpServer()).post(`/v1/jobs/${jobId}/analyze`).set(as(RESTARTER)).expect(503)
 
             return jobId
@@ -447,6 +571,29 @@ describe('Jobs API (e2e)', () => {
             const res = await restart(failedId, STRANGER).expect(404)
 
             expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        })
+
+        it("serves no replay of a restarted job's video, which is its restart's", async () => {
+            const failedId = await createFailedJob()
+
+            await restart(failedId).expect(202)
+            const res = await request(app.getHttpServer())
+                .get(`/v1/jobs/${failedId}/video`)
+                .set(as(RESTARTER))
+                .expect(404)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.NotFound)
+        })
+
+        it('refuses to restart a job whose deletion has claimed its video', async () => {
+            const failedId = await createFailedJob()
+
+            deleteObject.mockRejectedValueOnce(new Error('GCS 503'))
+            await request(app.getHttpServer()).delete(`/v1/jobs/${failedId}`).set(as(RESTARTER)).expect(500)
+
+            const res = await restart(failedId).expect(409)
+
+            expect(res.body.errorCode).toBe(RequestErrorCode.JobNotRestartable)
         })
 
         it('deletes the failed run with its restart, and the video once', async () => {
@@ -599,7 +746,7 @@ describe('Jobs API (e2e)', () => {
             const quota = await request(app.getHttpServer()).get('/v1/me/quota').set(as(SAMPLER)).expect(200)
 
             expect(res.body.job).toMatchObject({ status: JobStatus.Queued, sampleId })
-            expect(dispatch).toHaveBeenCalledWith(jobId)
+            expect(dispatch.mock.calls).toEqual([[jobId]])
             expect(quota.body.quota.used).toBe(1)
         })
 
@@ -670,7 +817,7 @@ describe('Jobs API (e2e)', () => {
             findings: [],
             metadataChecks: [],
             advisories: [],
-            completedAt: '2026-10-07T10:00:00.000Z',
+            completedAt: new Date('2026-10-07T10:00:00.000Z'),
         }
         let jobs: Model<JobDoc>
 
@@ -1565,13 +1712,14 @@ describe('Jobs API (e2e)', () => {
             expect(res.body.errorCode).toBe(RequestErrorCode.QuotaExceeded)
             expect(job.body.job).toMatchObject({ status: JobStatus.Error, errorCode: JobErrorCode.AnalysisFailed })
             expect(await usage('203.0.113.16')).toEqual({ total: 0, anonymous: 0 })
-            expect(dispatch).not.toHaveBeenCalled()
+            expect(dispatch.mock.calls).toEqual(earlyDispatchOnly(created.body.job.id))
         })
 
         it('gives the network run back when the worker cannot be started', async () => {
+            failNextDispatches(2)
+
             const created = await createFrom(MEMBER, '203.0.113.7').expect(201)
 
-            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
             await analyzeFrom(MEMBER, '203.0.113.7', created.body.job.id).expect(503)
 
             expect(await usage('203.0.113.7')).toEqual({ total: 0, anonymous: 0 })
@@ -1746,7 +1894,7 @@ describe('Jobs API (e2e)', () => {
             const job = await runUpload({ settings: PRESET_SETTINGS, presetId: preset.id })
 
             expect(job).toMatchObject({ status: JobStatus.Queued, presetId: null })
-            expect(dispatch).toHaveBeenCalledWith(job.id)
+            expect(dispatch).toHaveBeenCalledWith(job.id, EARLY_DISPATCH)
         })
 
         it('answers a started run as started, its preset counted, when its execution name cannot be stored', async () => {
@@ -1764,13 +1912,14 @@ describe('Jobs API (e2e)', () => {
 
         it('counts nothing for a run whose worker could not be started', async () => {
             const preset = await createPreset('Meta EU and US')
+
+            failNextDispatches(2)
+
             const created = await send('post', '/v1/jobs')
                 .send({ file: FILE, settings: PRESET_SETTINGS, presetId: preset.id })
                 .expect(201)
 
             expect(created.body.job.presetId).toBeNull()
-
-            dispatch.mockRejectedValueOnce(new Error('Cloud Run unavailable'))
 
             await send('post', `/v1/jobs/${created.body.job.id}/analyze`).expect(503)
             const read = await send('get', `/v1/jobs/${created.body.job.id}`).expect(200)

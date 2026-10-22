@@ -16,11 +16,15 @@ import { IpQuotaService } from '../ip-quota/ip-quota.service'
 import type { IpCharge } from '../ip-quota/ip-rules'
 import { LivePublisher } from '../live/live-publisher'
 import { QuotaService } from '../quota/quota.service'
+import { isLeftToEarlyWorker } from './early-worker'
+import { toStoredAnalysis } from './job.mapper'
 
 // Whether this attempt set the call mark, found it set by an earlier attempt, or found the job no longer analyzed.
 type CallMarking = 'marked' | 'repeated' | 'ended'
 
 type HeldCharges = Pick<StoredJob, '_id' | 'userId' | 'chargedRunId' | 'chargedIpRunId'>
+
+export type WorkerWait = Pick<StoredJob, 'status' | 'workerWaitsUntil' | 'leftToEarlyWorker'>
 
 interface ExpirySweepResult {
     expired: number
@@ -117,7 +121,8 @@ export class JobLifecycle {
 
     // verifying → queued, after charging the network (unless the caller is an admin) and then the user. The run ids are
     // recorded on the job before either charge, so no charge exists that no job holds: whatever fails or crashes after
-    // that, the refund finds it, and refunding a run that was never charged changes nothing.
+    // that, the refund finds it, and refunding a run that was never charged changes nothing. The queued job is marked
+    // leftToEarlyWorker when the worker dispatched at its creation takes it; otherwise the caller dispatches one.
     async chargeAndQueue(
         jobId: string,
         userId: string,
@@ -147,9 +152,12 @@ export class JobLifecycle {
 
             await this.quota.consume(userId, jobId, new Date(), runId)
 
+            const waited = await this.findWorkerWait(jobId)
+            const queuedAt = new Date()
+            const isLeft = isLeftToEarlyWorker(waited?.workerWaitsUntil, queuedAt)
             const queued = await this.transition(
                 { _id: jobId, status: JobStatus.Verifying, chargedRunId: runId },
-                { status: JobStatus.Queued, media, queuedAt: new Date() },
+                { status: JobStatus.Queued, media, queuedAt, ...(isLeft ? { leftToEarlyWorker: true } : {}) },
             )
 
             if (!queued) {
@@ -166,6 +174,16 @@ export class JobLifecycle {
 
     async recordExecution(jobId: string, execution: string): Promise<void> {
         await this.model.updateOne({ _id: jobId }, { $set: { execution } })
+    }
+
+    // The worker meant to be dispatched at creation couldn't be started: the job gets one when it is started, like
+    // any other. Only while pending, so a start already under way keeps the decision its queueing takes.
+    async cancelEarlyWorker(jobId: string): Promise<void> {
+        await this.model.updateOne({ _id: jobId, status: JobStatus.Pending }, { $unset: { workerWaitsUntil: 1 } })
+    }
+
+    findWorkerWait(jobId: string): Promise<WorkerWait | null> {
+        return this.model.findById(jobId, { status: 1, workerWaitsUntil: 1, leftToEarlyWorker: 1 }).lean<WorkerWait>()
     }
 
     // queued → error with the charges refunded, when the worker couldn't be started. Like any failed start, never back
@@ -227,7 +245,7 @@ export class JobLifecycle {
         const done = await this.model
             .findOneAndUpdate(
                 { _id: jobId, status: JobStatus.Analyzing },
-                { $set: { status: JobStatus.Analyzed, analysis }, ...recordCall(call) },
+                { $set: { status: JobStatus.Analyzed, analysis: toStoredAnalysis(analysis) }, ...recordCall(call) },
                 { new: true },
             )
             .lean<StoredJob>()

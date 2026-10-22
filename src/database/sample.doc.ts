@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { zodToMongoose } from '../common/zod-to-mongoose'
 
 export const SAMPLE_MODEL = 'Sample'
+export const SAMPLE_COLLECTION = 'samples'
 
 // A sample ad anyone can try, published by the maintainer, who uploads the video and measures it once, so jobs that
 // analyze a sample skip upload verification.
@@ -25,6 +26,6 @@ export interface StoredSample extends SampleDoc {
     _id: Types.ObjectId
 }
 
-export const SampleSchema = zodToMongoose(sampleDocSchema, { timestamps: true, collection: 'samples' })
+export const SampleSchema = zodToMongoose(sampleDocSchema, { timestamps: true, collection: SAMPLE_COLLECTION })
 SampleSchema.index({ slug: 1 }, { unique: true })
 SampleSchema.index({ isPublished: 1, order: 1 })

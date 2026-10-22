@@ -1,7 +1,6 @@
 import type { FinishReason, GenerateContentResponseUsageMetadata, ModalityTokenCount } from '@google/genai'
 import type { ModelCall } from '../../database/job.doc'
 
-// When and where a call was made, and how long it took.
 export interface ModelCallContext {
     model: string
     location: string
@@ -14,7 +13,6 @@ const byModality = (details: ModalityTokenCount[] | undefined): Record<string, n
         (details ?? []).flatMap(({ modality, tokenCount }) => (modality ? [[modality, tokenCount ?? 0]] : [])),
     )
 
-// A billed call as the job records it, from the response's usage metadata.
 export const toModelCall = (
     usage: GenerateContentResponseUsageMetadata | undefined,
     finishReason: FinishReason | undefined,

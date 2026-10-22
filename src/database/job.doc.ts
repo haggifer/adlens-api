@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { zodToMongoose } from '../common/zod-to-mongoose'
 
 export const JOB_MODEL = 'Job'
+export const JOB_COLLECTION = 'jobs'
 
 const tokenCountSchema = z.number().int().nonnegative()
 
@@ -51,6 +52,9 @@ const tokenUsageSchema = z.object({
     calls: z.array(modelCallSchema).optional(),
 })
 
+// The public analysis with its completion time as a date (job.mapper.ts converts between the two).
+const storedAnalysisSchema = analysisSchema.extend({ completedAt: z.date() })
+
 // Every demo job has this owner, which matches no user, so a demo shows up in nobody's History and no account can
 // delete it; only the maintainer's script creates and changes demos.
 export const DEMO_OWNER = 'demo'
@@ -74,13 +78,19 @@ const jobDocSchema = z.object({
     settings: analysisSettingsSchema,
     file: z.object({ ...uploadFileSchema.shape, bucket: z.string(), path: z.string() }),
     media: jobMediaSchema.optional(),
-    analysis: analysisSchema.optional(),
+    analysis: storedAnalysisSchema.optional(),
     errorCode: jobErrorCodeSchema.optional(),
     errorDetail: z.string().optional(),
     execution: z.string().optional(),
     // When the verified, charged upload was queued, or a refused Gemini call was cleared: the time limit for starting the
     // call counts from here, whatever the worker writes later. Missing on jobs queued before 2026-10-08.
     queuedAt: z.date().optional(),
+    // Set on an upload job whose worker was dispatched at its creation: that worker waits for the job until then.
+    workerWaitsUntil: z.date().optional(),
+    // Set by the write that queues the job when it leaves the job to the worker dispatched at its creation
+    // (isLeftToEarlyWorker): the start then dispatches none, and only with it does that worker run the job. An API
+    // that predates the field never sets it and always dispatches, so the early worker then leaves.
+    leftToEarlyWorker: z.boolean().optional(),
     attempts: z.number().int().nonnegative().default(0),
     // Set just before a worker attempt calls Gemini, and cleared only when Vertex refused that call with an HTTP error
     // status (never billed). An attempt that finds it set doesn't call again: the earlier call may have been billed.
@@ -116,6 +126,7 @@ const jobDocSchema = z.object({
 
 export type JobDoc = z.infer<typeof jobDocSchema>
 export type JobDemo = z.infer<typeof demoSchema>
+export type StoredAnalysis = z.infer<typeof storedAnalysisSchema>
 export type TokenUsage = z.infer<typeof tokenUsageSchema>
 export type ModelCall = z.infer<typeof modelCallSchema>
 
@@ -125,7 +136,7 @@ export interface StoredJob extends JobDoc {
     updatedAt: Date
 }
 
-export const JobSchema = zodToMongoose(jobDocSchema, { timestamps: true, collection: 'jobs' })
+export const JobSchema = zodToMongoose(jobDocSchema, { timestamps: true, collection: JOB_COLLECTION })
 JobSchema.index({ userId: 1, _id: -1 })
 JobSchema.index({ status: 1, updatedAt: 1 })
 // The demo page's query; sparse, since all but a few jobs have no demo.

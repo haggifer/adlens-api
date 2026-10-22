@@ -19,7 +19,6 @@ export interface VideoReview {
     findings: ModelFinding[]
     // The advisories the model found relevant; ids outside the request's are ignored.
     advisoryIds: string[]
-    // The billed call behind this review.
     call: ModelCall
 }
 
