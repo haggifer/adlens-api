@@ -2,7 +2,7 @@
 
 > Part of **[AdLens](https://github.com/haggifer/adlens)**, AI policy checks for video ads · [Live](https://www.useadlens.com)
 
-[![CI](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml/badge.svg?branch=init-setup)](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml)
+[![CI](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/haggifer/adlens-api/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 
 Backend for **AdLens**, AI video-ad diagnostics. You upload a short video ad; it is verified, analyzed against an
@@ -622,10 +622,10 @@ The unit tests run the Mongo-dependent logic against a real in-memory MongoDB, b
 
 ## Deployment
 
-Every push to `init-setup` that passes CI deploys to production
+Every push to `main` that passes CI deploys to production
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The `deploy` job signs in to Google Cloud with Workload
 Identity Federation: GitHub's OIDC token is exchanged for a short-lived credential, no service account key exists, and
-only this repository's pushes to `init-setup` are accepted. It builds one image, pushes it to Artifact Registry, rolls
+only this repository's pushes to `main` are accepted. It builds one image, pushes it to Artifact Registry, rolls
 the `adlens-analyze` and `adlens-cleanup` jobs and then the `adlens-api` service to that digest, checks the API's health,
 and ends by running the `adlens-db` job on that image (see Architecture). That job runs last because a migration ships
 with code that reads both the old and the new shape: the data changes only once every running process can read it.
@@ -827,7 +827,7 @@ Why the system is built this way, and what was rejected. Decisions that span the
   `*.run.app` are on the Public Suffix List, so this needs an own domain. Emails are sent from the `mail.` subdomain to
   keep its sending reputation separate.
 - **Keyless deploys, one image per commit.** GitHub Actions authenticates through Workload Identity Federation, limited
-  to this repository's `init-setup` branch by numeric ids, so no long-lived key exists. Both jobs and the API are
+  to this repository's `main` branch by numeric ids, so no long-lived key exists. Both jobs and the API are
   rolled to the same digest, the jobs first. CI only swaps the image; runtime config stays in `infra/setup.sh`.
 - **Infrastructure as a gcloud script.** The infrastructure is a handful of set-once resources, so an idempotent,
   committed script is enough; Terraform or Pulumi would be the step up if it grows.

@@ -9,7 +9,7 @@
 # third (adlens-db) runs after every deploy: the pending data migrations, every declared index, then the collections'
 # validators.
 #
-# Day-to-day deploys don't use this script: every push to init-setup that passes CI is built into one image, rolled
+# Day-to-day deploys don't use this script: every push to main that passes CI is built into one image, rolled
 # out to the jobs and the API, and followed by a run of adlens-db, by .github/workflows/ci.yml. This script creates everything that workflow relies on and
 # owns the runtime config (env vars, secrets, limits); it also deploys the current checkout the same way CI does.
 #
@@ -64,7 +64,7 @@ COOKIE_DOMAIN=useadlens.com
 # GitHub numeric ids (not names) so a renamed or re-created repo can't inherit deploy access.
 GITHUB_OWNER_ID=70646891
 GITHUB_REPO_ID=1306464238
-DEPLOY_BRANCH=init-setup
+DEPLOY_BRANCH=main
 # OAuth client IDs are public (they appear in every sign-in redirect); their secrets are in Secret Manager.
 GOOGLE_CLIENT_ID=629217115736-aop8hg7sorfps05t4gp7fv83gt0h937s.apps.googleusercontent.com
 GITHUB_CLIENT_ID=Ov23ct4gfbO6JyiOGopx

@@ -2,7 +2,7 @@ name: CI
 
 on:
     push:
-        branches: [init-setup, main]
+        branches: [main]
     pull_request:
 
 permissions:
@@ -25,13 +25,13 @@ jobs:
             - run: npm run test:e2e
             - run: npm run test:auth
 
-    # Production deploy of a verified push to init-setup. Authenticates to Google Cloud through Workload Identity
+    # Production deploy of a verified push to main. Authenticates to Google Cloud through Workload Identity
     # Federation (GitHub's OIDC token, no stored key; the provider only accepts this repo on this branch), builds one
     # image, rolls both jobs and the API to its digest, then runs the database job on it. Env and secrets stay as
     # infra/setup.sh set them.
     deploy:
         needs: verify
-        if: github.event_name == 'push' && github.ref == 'refs/heads/init-setup'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         runs-on: ubuntu-latest
         permissions:
             contents: read

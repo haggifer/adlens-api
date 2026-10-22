@@ -122,7 +122,7 @@ npm run db               # after `npm run build`: dry run of the database job ag
 
 ## Gotchas
 
-- Every push to `init-setup` that passes CI deploys to production.
+- Every push to `main` that passes CI deploys to production.
 - The worker validates each published ruleset with its own schema, so a ruleset using a new `checkType` (or any new
   schema value) must be published only after the API that knows it is deployed; otherwise every analysis fails.
 - Jest can't load Better Auth's ESM build, so the e2e suite stubs it; real auth behaviour is covered by `test:auth`.
