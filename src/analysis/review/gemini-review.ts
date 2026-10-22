@@ -13,17 +13,15 @@ import { type ModelCallContext, toModelCall } from './model-call'
 import { buildReviewOutputJsonSchema, buildReviewPrompt, parseReviewOutput, PROMPT_VERSION } from './review-prompt'
 import type { VideoReview, VideoReviewRequest } from './video-reviewer'
 
-// The Gemini request a review sends and how its answer is read, without the client: GeminiVideoReviewer sends it, and
-// the lab (adlens-lab) sends the same request with its overrides on top, so both read answers the same way.
+// The Gemini request a review sends and how its answer is read, without the client: GeminiVideoReviewer sends it.
 
 // Well under the Cloud Run task timeout (15 min), so a hung call ends in a handled failure, not a killed task.
 export const GEMINI_REQUEST_TIMEOUT_MS = 10 * 60 * 1000
 
 // A ceiling on a runaway generation's cost per attempt, not a budget: a reply is billed for what it generates. The
 // largest stored reply (2026-10-19, 45 calls, ads up to 3.5 minutes) was about 5,000 tokens, thinking included, so the
-// cap leaves about three times that. The lab shows it as production's cap.
-/** @public */
-export const GEMINI_MAX_OUTPUT_TOKENS = 16384
+// cap leaves about three times that.
+const GEMINI_MAX_OUTPUT_TOKENS = 16384
 
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 

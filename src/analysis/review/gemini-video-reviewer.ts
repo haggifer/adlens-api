@@ -36,7 +36,7 @@ const toReviewError = (err: unknown, elapsedMs: number): Error => {
 }
 
 // Gemini on Vertex AI: authenticates with ADC and reads the video straight from its gs:// URI. The request and how
-// its answer is read live in gemini-review.ts, which the lab shares.
+// its answer is read live in gemini-review.ts.
 @Injectable()
 export class GeminiVideoReviewer extends VideoReviewer {
     private readonly client: GoogleGenAI

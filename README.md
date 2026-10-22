@@ -121,9 +121,7 @@ conditional update on the expected current status, so two racing callers can nev
    the job ([`EarlyWorkerWait`](src/analysis/pipeline/early-worker-wait.ts)) and runs it only when it was left to it;
    otherwise it exits 0, so two workers never run one job. Then `queued → analyzing`, select the rules, check the
    metadata rules in code, run one Gemini pass through [`VideoReviewer`](src/analysis/review/video-reviewer.ts), and
-   `analyzing → analyzed`. The Gemini request, reading its answer and the assembly need neither Nest nor the database,
-   so an evaluation tool outside this repo runs the same code through [`src/lab.ts`](src/lab.ts), a barrel listed as a
-   knip entry and left out of the build.
+   `analyzing → analyzed`.
 4. **Fail well**: a transient failure exits 1 so Cloud Run retries it, unless the call may have been billed; a
    permanent one, or the last attempt, ends the job (`MODEL_UNAVAILABLE` when Gemini failed, `ANALYSIS_FAILED`
    otherwise). The worker marks the job (`modelCallStartedAt`) before calling Gemini, and only a call Vertex refused
@@ -307,8 +305,8 @@ The maintainer publishes both; setting `isPublished` or `isActive` to `false` an
 ## Structure
 
 ```
-src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup), db.ts (database job) and lab.ts
-            (the evaluation tool's only import surface), one Nest module per feature: jobs,
+src/        main.ts (API), worker.ts (analysis worker), cleanup.ts (daily cleanup), db.ts (database job), one Nest
+            module per feature: jobs,
             analysis, rules, samples, demos, presets, quota, me, ip-quota, challenge, auth, account, contact, cleanup, mail, storage,
             live, database, db-job, config; shared helpers in common/, test helpers in testing/
 test/       e2e (Supertest) and auth-flow tests
