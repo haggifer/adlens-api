@@ -5,7 +5,6 @@
         "src/worker.ts",
         "src/cleanup.ts",
         "src/db.ts",
-        "src/lab.ts",
         "test/**/*.e2e-spec.ts",
         "test/**/*.test.mjs"
     ],

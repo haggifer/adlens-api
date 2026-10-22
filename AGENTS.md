@@ -74,8 +74,6 @@ npm run db               # after `npm run build`: dry run of the database job ag
   and their videos still sit under the anonymous user's prefix.
 - A job's upload is at `file.path`, which after linking can be under another user's prefix. Delete by that path; never
   derive it from `userId`.
-- adlens-lab imports this source only through `src/lab.ts`. Keep what it exports working for the lab; a symbol the lab
-  needs is added there, never imported by path from elsewhere in `src/`.
 - A write that changes a user's presets, or updates a job's status, analysis, error or counted preset, tells the user's
   tabs through `LivePublisher` right after it (`JobLifecycle`, `PresetsService`, `JobsService.recordCountedPreset`); a
   new writer of those does too. Only updates are announced, not jobs created, deleted or moved at sign-in. A live message only names what changed (`LiveEvent`, a job id), never its data, and a

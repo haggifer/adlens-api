@@ -1,4 +1,4 @@
-// A local dev server that finds its port taken (Next.js, the analysis lab) starts on the next free one, so a local web
+// A local dev server that finds its port taken (as Next.js does) starts on the next free one, so a local web
 // origin also allows the next few ports. Production allows exactly WEB_ORIGIN.
 const LOCAL_EXTRA_PORTS = 5
 

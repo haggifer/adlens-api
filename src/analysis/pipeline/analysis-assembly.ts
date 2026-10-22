@@ -15,8 +15,7 @@ export interface ReviewVideo {
     mimeType: string
 }
 
-// How an analysis is put together around the model's review, without the job: AnalysisPipeline runs it for a job,
-// and the lab (adlens-lab) for its own videos.
+// How an analysis is put together around the model's review, without the job: AnalysisPipeline runs it for a job.
 
 export const toReviewRequest = (
     { videoUri, mimeType }: ReviewVideo,
